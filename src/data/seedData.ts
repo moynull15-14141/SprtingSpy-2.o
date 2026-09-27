@@ -1,0 +1,1190 @@
+/**
+ * SportingSpy Seed & Editorial Demo Data
+ * Authoritative initial data covering required sports, events, editions, and articles.
+ */
+
+import { IMAGES } from '../config/assets';
+import {
+  AdSlotConfig,
+  Article,
+  Author,
+  Comment,
+  EventEdition,
+  MediaItem,
+  Sport,
+  SportEvent,
+  User,
+} from '../types';
+
+export const INITIAL_AUTHORS: Author[] = [
+  {
+    id: 'auth-alistair',
+    slug: 'alistair-vance',
+    name: 'Alistair Vance',
+    roleTitle: 'Chief Tennis & Racket Sports Correspondent',
+    bio: 'Former collegiate player turned sports journalist. Covering Grand Slam circuits, court aerodynamics, and technical tactical developments for over twelve seasons.',
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&h=200&q=80',
+    twitter: '@AlistairVanceTennis',
+    email: 'a.vance@sportingspy.com',
+    articleCount: 14,
+  },
+  {
+    id: 'auth-marcus',
+    slug: 'marcus-sterling',
+    name: 'Marcus Sterling',
+    roleTitle: 'Motorsport Technical Strategist',
+    bio: 'Automotive engineer and paddock analyst. Specializing in aerodynamics regulations, powertrain endurance benchmarks, and tyre degradation dynamics across Formula 1 and WEC.',
+    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&h=200&q=80',
+    twitter: '@SterlingTelemetry',
+    email: 'm.sterling@sportingspy.com',
+    articleCount: 19,
+  },
+  {
+    id: 'auth-elena',
+    slug: 'elena-rostova',
+    name: 'Elena Rostova',
+    roleTitle: 'Global Football & UEFA Editor',
+    bio: 'Covering continental football tournaments, FIFA governance, financial fair play frameworks, and tactical press systems across Europe and the Americas.',
+    avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=200&h=200&q=80',
+    twitter: '@ElenaRostovaPitch',
+    email: 'e.rostova@sportingspy.com',
+    articleCount: 22,
+  },
+  {
+    id: 'auth-david',
+    slug: 'david-campbell',
+    name: 'David Campbell',
+    roleTitle: 'Senior Golf Analyst & Historian',
+    bio: 'Chronicling major golf championships, course architecture evolution, and strokes-gained metrics from Augusta National to St Andrews links.',
+    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=200&h=200&q=80',
+    twitter: '@CampbellGolfNotes',
+    email: 'd.campbell@sportingspy.com',
+    articleCount: 11,
+  },
+];
+
+export const INITIAL_USERS: User[] = [
+  {
+    id: 'user-admin-1',
+    name: 'Julian Hayes',
+    email: 'editor-in-chief@sportingspy.com',
+    role: 'Admin',
+    avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=120&h=120&q=80',
+    joinedAt: '2026-01-10T09:00:00Z',
+  },
+  {
+    id: 'user-editor-1',
+    name: 'Elena Rostova',
+    email: 'e.rostova@sportingspy.com',
+    role: 'Editor',
+    avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=120&h=120&q=80',
+    joinedAt: '2026-01-15T10:00:00Z',
+  },
+  {
+    id: 'user-author-1',
+    name: 'Alistair Vance',
+    email: 'a.vance@sportingspy.com',
+    role: 'Author',
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
+    joinedAt: '2026-02-01T11:30:00Z',
+  },
+  {
+    id: 'user-reader-1',
+    name: 'Liam Harrington',
+    email: 'liam.h@example.com',
+    role: 'Reader',
+    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&h=120&q=80',
+    joinedAt: '2026-03-12T14:20:00Z',
+  },
+];
+
+export const INITIAL_SPORTS: Sport[] = [
+  {
+    id: 'sport-tennis',
+    slug: 'tennis',
+    name: 'Tennis',
+    tagline: 'Grand Slams, ATP/WTA Tournaments, Surface Nuances & Tactical Guides',
+    description: 'Definitive reference guides, tournament schedules, prize fund breakdowns, and mechanical analysis across clay, grass, and hard courts.',
+    order: 1,
+    isVisible: true,
+    featuredEventIds: ['event-french-open', 'event-wimbledon'],
+    heroImage: IMAGES.tennisClay,
+    seo: {
+      metaTitle: 'Tennis Schedules, Grand Slam Guides & Tournament Analysis | SportingSpy',
+      metaDescription: 'Authoritative tennis tournament coverage, major championship schedules, court records, rules, and in-depth player guides.',
+    },
+  },
+  {
+    id: 'sport-motorsport',
+    slug: 'motorsport',
+    name: 'Motorsport',
+    tagline: 'Formula 1, WEC Endurance, Technical Regulations & Circuit Analysis',
+    description: 'In-depth race weekend guides, qualifying procedures, telemetry breakdowns, and permanent circuit histories from Monaco to Le Mans.',
+    order: 2,
+    isVisible: true,
+    featuredEventIds: ['event-monaco-gp', 'event-le-mans'],
+    heroImage: IMAGES.motorsportApex,
+    seo: {
+      metaTitle: 'Motorsport Grand Prix Guides, Circuit Analysis & Schedules | SportingSpy',
+      metaDescription: 'Complete motorsport coverage including Grand Prix weekend formats, telemetry facts, tyre regulations, and endurance guides.',
+    },
+  },
+  {
+    id: 'sport-golf',
+    slug: 'golf',
+    name: 'Golf',
+    tagline: 'The Majors, Course Architecture, Field Qualifications & Purse Records',
+    description: 'Comprehensive guides to Augusta National, St Andrews, and championship courses. Complete hole-by-hole records and purse allocations.',
+    order: 3,
+    isVisible: true,
+    featuredEventIds: ['event-the-masters', 'event-the-open'],
+    heroImage: IMAGES.golfLinks,
+    seo: {
+      metaTitle: 'Golf Major Championships, Course Guides & Purse Data | SportingSpy',
+      metaDescription: 'The Majors tournament schedules, qualification criteria, prize money distribution, and course architecture records.',
+    },
+  },
+  {
+    id: 'sport-football',
+    slug: 'football',
+    name: 'Football',
+    tagline: 'European Cups, Domestic Leagues, Tournament Structures & Formats',
+    description: 'Structured guides for the UEFA Champions League, Premier League, World Cup, and continental competitions with coefficient records.',
+    order: 4,
+    isVisible: true,
+    featuredEventIds: ['event-champions-league', 'event-world-cup'],
+    heroImage: IMAGES.footballPitch,
+    seo: {
+      metaTitle: 'Football Tournament Formats, Cup Guides & Tactical Overviews | SportingSpy',
+      metaDescription: 'Comprehensive football tournament schedules, format guides, venue profiles, and historical champion records.',
+    },
+  },
+  {
+    id: 'sport-rugby',
+    slug: 'rugby',
+    name: 'Rugby',
+    tagline: 'Six Nations, Rugby Championship, World Cup Fixtures & Rules',
+    description: 'Fixtures, points calculation systems, bonus-point rules, stadium logistics, and historical international rivalries.',
+    order: 5,
+    isVisible: true,
+    featuredEventIds: ['event-six-nations'],
+    heroImage: IMAGES.heroTrophy,
+    seo: {
+      metaTitle: 'Rugby Union Fixtures, Six Nations Guides & Scoring Rules | SportingSpy',
+      metaDescription: 'Authoritative rugby championship schedules, bonus point guides, squad qualification, and tournament history.',
+    },
+  },
+  {
+    id: 'sport-basketball',
+    slug: 'basketball',
+    name: 'Basketball',
+    tagline: 'NBA Finals, EuroLeague, International Tournaments & Playoff Formats',
+    description: 'Playoff series formats, salary cap structures, draft mechanics, and championship tournament bracket documentation.',
+    order: 6,
+    isVisible: true,
+    featuredEventIds: [],
+    seo: {
+      metaTitle: 'Basketball Tournament Guides, Playoff Structures & Rules | SportingSpy',
+      metaDescription: 'Detailed basketball competition formats, playoff mechanics, international schedules, and team tournament records.',
+    },
+  },
+  {
+    id: 'sport-athletics',
+    slug: 'athletics',
+    name: 'Athletics',
+    tagline: 'World Championships, Diamond League & Historic World Records',
+    description: 'Track and field qualification standards, heat progressions, marathon majors logistics, and certified world record progression.',
+    order: 7,
+    isVisible: true,
+    featuredEventIds: [],
+    seo: {
+      metaTitle: 'Athletics World Championships, Marathon Guides & Records | SportingSpy',
+      metaDescription: 'Track and field schedules, Olympic qualification times, world records, and major city marathon logistics.',
+    },
+  },
+  {
+    id: 'sport-boxing',
+    slug: 'boxing',
+    name: 'Boxing',
+    tagline: 'Championship Bouts, Sanctioning Bodies, Weight Classes & Rules',
+    description: 'Undisputed title frameworks, sanctioning body belts (WBA, WBC, IBF, WBO), weight limits, and championship scoring systems.',
+    order: 8,
+    isVisible: true,
+    featuredEventIds: [],
+    seo: {
+      metaTitle: 'Boxing Championship Guides, Weight Classes & Scoring Rules | SportingSpy',
+      metaDescription: 'World title fight structures, division weight limits, judging rules, and mandatory challenger guidelines.',
+    },
+  },
+  {
+    id: 'sport-nfl',
+    slug: 'nfl',
+    name: 'NFL',
+    tagline: 'Super Bowl, Postseason Seeding Rules & Franchise Records',
+    description: 'Playoff qualification tiebreakers, salary cap governance, overtime rules, and Super Bowl host venue logistics.',
+    order: 9,
+    isVisible: true,
+    featuredEventIds: [],
+    seo: {
+      metaTitle: 'NFL Super Bowl Guides, Postseason Format & Overtime Rules | SportingSpy',
+      metaDescription: 'Authoritative NFL playoff bracket rules, Super Bowl schedules, tiebreaker procedures, and stadium guides.',
+    },
+  },
+  {
+    id: 'sport-cycling',
+    slug: 'cycling',
+    name: 'Cycling',
+    tagline: 'Grand Tours, Monuments, Stage Classifications & Time Trials',
+    description: 'Tour de France, Giro d’Italia, and classic monument routes. Elevation profiles, jersey classifications, and time limit calculations.',
+    order: 10,
+    isVisible: true,
+    featuredEventIds: [],
+    seo: {
+      metaTitle: 'Cycling Grand Tour Guides, Stage Formats & Classifications | SportingSpy',
+      metaDescription: 'Tour de France route profiles, points jersey regulations, time trial rules, and mountain pass categories.',
+    },
+  },
+  {
+    id: 'sport-hockey',
+    slug: 'hockey',
+    name: 'Hockey',
+    tagline: 'Field Hockey World Cup, Olympic Competitions & Shootout Rules',
+    description: 'Penalty corner execution regulations, 8-second shootout formats, quarter durations, and international ranking coefficient methods.',
+    order: 11,
+    isVisible: true,
+    featuredEventIds: [],
+    seo: {
+      metaTitle: 'Field Hockey Tournament Guides, Rules & Olympic Formats | SportingSpy',
+      metaDescription: 'International hockey competition structures, shootout rules, qualification criteria, and tournament venues.',
+    },
+  },
+  {
+    id: 'sport-netball',
+    slug: 'netball',
+    name: 'Netball',
+    tagline: 'World Cup, Commonwealth Games & Positional Boundaries',
+    description: 'Position-specific court constraints, three-second possession rules, contact classifications, and international quadrennial schedules.',
+    order: 12,
+    isVisible: true,
+    featuredEventIds: [],
+    seo: {
+      metaTitle: 'Netball World Cup Guides, Rules & Quadrennial Schedules | SportingSpy',
+      metaDescription: 'Definitive netball tournament guides, court positional boundaries, competition history, and international rankings.',
+    },
+  },
+];
+
+export const INITIAL_EVENTS: SportEvent[] = [
+  {
+    id: 'event-french-open',
+    sportSlug: 'tennis',
+    slug: 'french-open',
+    name: 'French Open',
+    shortName: 'Roland-Garros',
+    description: 'The premier clay court tennis championship in the world, contested annually over fifteen days in Paris. Renowned for gruelling baseline rallies and the unique physics of crushed brick.',
+    history: 'Inaugurated in 1891 as the French Championships and staged at Roland-Garros since 1928, the tournament remains the only Grand Slam played on red clay.',
+    frequency: 'Annual (Late May – Early June)',
+    defaultVenue: 'Stade Roland Garros',
+    defaultLocation: 'Paris, France',
+    currentEditionYear: 2027,
+    allEditionYears: [2027, 2026, 2025],
+    featured: true,
+    isVisible: true,
+    featuredImage: IMAGES.tennisClay,
+    seo: {
+      metaTitle: 'French Open (Roland-Garros) – Dates, History & Tournament Guides | SportingSpy',
+      metaDescription: 'Comprehensive guide to the French Open at Roland-Garros: court surface physics, past champions, tournament history, and upcoming edition schedules.',
+    },
+  },
+  {
+    id: 'event-wimbledon',
+    sportSlug: 'tennis',
+    slug: 'wimbledon',
+    name: 'The Championships, Wimbledon',
+    shortName: 'Wimbledon',
+    description: 'The oldest tennis tournament in the world, played on pristine perennial ryegrass at the All England Lawn Tennis and Croquet Club.',
+    history: 'Founded in 1877, Wimbledon preserves iconic traditions including strict all-white dress codes, grass-court maintenance science, and royal patronage.',
+    frequency: 'Annual (Late June – July)',
+    defaultVenue: 'All England Lawn Tennis and Croquet Club',
+    defaultLocation: 'London, United Kingdom',
+    currentEditionYear: 2026,
+    allEditionYears: [2026, 2025],
+    featured: true,
+    isVisible: true,
+    featuredImage: IMAGES.tennisClay,
+    seo: {
+      metaTitle: 'Wimbledon Championships – Guide, History & Grass Court Records | SportingSpy',
+      metaDescription: 'The definitive guide to The Championships, Wimbledon: grass court pace characteristics, schedule of play, rules, and historical records.',
+    },
+  },
+  {
+    id: 'event-monaco-gp',
+    sportSlug: 'motorsport',
+    slug: 'monaco-grand-prix',
+    name: 'Monaco Grand Prix',
+    shortName: 'Monaco GP',
+    description: 'The jewel of the Formula 1 World Championship, navigating the tight, unforgiving street barriers of Monte Carlo and La Condamine.',
+    history: 'First staged in 1929 by Antony Noghès, the circuit requires extraordinary driver precision with zero margin for error across 78 laps.',
+    frequency: 'Annual (Late May)',
+    defaultVenue: 'Circuit de Monaco',
+    defaultLocation: 'Monte Carlo, Monaco',
+    currentEditionYear: 2026,
+    allEditionYears: [2026, 2025],
+    featured: true,
+    isVisible: true,
+    featuredImage: IMAGES.motorsportApex,
+    seo: {
+      metaTitle: 'Monaco Grand Prix – Circuit Guide, Qualifying & History | SportingSpy',
+      metaDescription: 'Essential guide to the Formula 1 Monaco Grand Prix: circuit layout analysis, qualifying importance, historical winners, and race regulations.',
+    },
+  },
+  {
+    id: 'event-the-masters',
+    sportSlug: 'golf',
+    slug: 'the-masters',
+    name: 'The Masters Tournament',
+    shortName: 'The Masters',
+    description: 'The traditional first men’s major golf championship of the calendar year, held exclusively over the hallowed grounds of Augusta National Golf Club.',
+    history: 'Conceived by Bobby Jones and Clifford Roberts in 1934, featuring the Green Jacket tradition, Amen Corner, and pristine sub-air greens conditioning.',
+    frequency: 'Annual (First Full Week of April)',
+    defaultVenue: 'Augusta National Golf Club',
+    defaultLocation: 'Augusta, Georgia, United States',
+    currentEditionYear: 2026,
+    allEditionYears: [2026, 2025],
+    featured: true,
+    isVisible: true,
+    featuredImage: IMAGES.golfLinks,
+    seo: {
+      metaTitle: 'The Masters Tournament – Augusta National Guide & Records | SportingSpy',
+      metaDescription: 'In-depth guide to The Masters at Augusta National: course layout details, cut line rules, past champions, and Green Jacket records.',
+    },
+  },
+  {
+    id: 'event-six-nations',
+    sportSlug: 'rugby',
+    slug: 'six-nations',
+    name: 'Six Nations Championship',
+    shortName: 'Six Nations',
+    description: 'The premier annual international rugby union tournament contested between England, France, Ireland, Italy, Scotland, and Wales.',
+    history: 'Tracing its lineage to the 1883 Home Nations Championship, expanding to Five Nations in 1910 and Six Nations with the addition of Italy in 2000.',
+    frequency: 'Annual (February – March)',
+    defaultVenue: 'Rotating Host Stadiums',
+    defaultLocation: 'Europe (6 Host Nations)',
+    currentEditionYear: 2026,
+    allEditionYears: [2026, 2025],
+    featured: true,
+    isVisible: true,
+    featuredImage: IMAGES.heroTrophy,
+    seo: {
+      metaTitle: 'Six Nations Championship – Fixtures, Table Rules & History | SportingSpy',
+      metaDescription: 'Complete Six Nations rugby guide: bonus points rules, Grand Slam and Triple Crown criteria, match schedules, and stadium guides.',
+    },
+  },
+];
+
+export const INITIAL_EDITIONS: EventEdition[] = [
+  {
+    id: 'french-open-2027',
+    eventSlug: 'french-open',
+    sportSlug: 'tennis',
+    year: 2027,
+    title: '2027 French Open',
+    startDate: '2027-05-23',
+    endDate: '2027-06-06',
+    venue: 'Stade Roland Garros',
+    location: 'Paris, France',
+    status: 'upcoming',
+    description: 'The 126th edition of the French Open will stage 15 days of championship competition across Court Philippe-Chatrier, Court Suzanne-Lenglen, and the botanical grounds of Court Simonne-Mathieu.',
+    featuredImage: IMAGES.tennisClay,
+    prizeMoneyTotal: '€54,800,000 (Estimated)',
+    defendingChampions: [
+      { category: "Men's Singles", name: 'Carlos Alcaraz' },
+      { category: "Women's Singles", name: 'Iga Świątek' },
+    ],
+    quickFacts: [
+      { label: 'Surface', value: 'Red Clay (Crushed Brick & Limestone)' },
+      { label: 'Draw Size', value: '128 Singles / 64 Doubles' },
+      { label: 'Show Courts', value: 'Philippe-Chatrier (Retractable Roof), Suzanne-Lenglen' },
+      { label: 'Match Format', value: 'Best of 5 sets (Men) / Best of 3 sets (Women)' },
+      { label: 'Final Set Tiebreak', value: '10-point Champions Tiebreak at 6-6' },
+      { label: 'Official Ball', value: 'Wilson Roland Garros Clay Ball' },
+    ],
+    qualificationInfo: 'Qualifying competition takes place May 17–21, 2027. 16 men and 16 women advance to the main draw.',
+    participantsCount: 256,
+    officialSourceUrl: 'https://www.rolandgarros.com',
+    seo: {
+      metaTitle: '2027 French Open – Official Dates, Court Schedule & Guide | SportingSpy',
+      metaDescription: 'Authoritative guide to the 2027 French Open at Roland Garros: tournament dates, daily session schedules, quick facts, prize purse, and tickets.',
+    },
+  },
+  {
+    id: 'french-open-2026',
+    eventSlug: 'french-open',
+    sportSlug: 'tennis',
+    year: 2026,
+    title: '2026 French Open',
+    startDate: '2026-05-24',
+    endDate: '2026-06-07',
+    venue: 'Stade Roland Garros',
+    location: 'Paris, France',
+    status: 'upcoming',
+    description: 'The 125th milestone staging of Roland-Garros, featuring upgraded nighttime session scheduling and high-efficiency hybrid clay sub-drainage systems.',
+    featuredImage: IMAGES.tennisClay,
+    prizeMoneyTotal: '€53,478,000',
+    defendingChampions: [
+      { category: "Men's Singles", name: 'Carlos Alcaraz' },
+      { category: "Women's Singles", name: 'Iga Świątek' },
+    ],
+    quickFacts: [
+      { label: 'Surface', value: 'Terre Battue (Red Clay)' },
+      { label: 'Draw Size', value: '128 Singles' },
+      { label: 'Total Matches', value: '870 across all categories' },
+      { label: 'Night Sessions', value: '11 Scheduled Sessions on Court Philippe-Chatrier' },
+    ],
+    participantsCount: 256,
+    officialSourceUrl: 'https://www.rolandgarros.com',
+    seo: {
+      metaTitle: '2026 French Open – Roland Garros Dates, Schedule & Draw | SportingSpy',
+      metaDescription: 'Complete tournament facts, defending champions, and session times for the 2026 French Open tennis championship in Paris.',
+    },
+  },
+  {
+    id: 'monaco-gp-2026',
+    eventSlug: 'monaco-grand-prix',
+    sportSlug: 'motorsport',
+    year: 2026,
+    title: '2026 Monaco Grand Prix',
+    startDate: '2026-05-22',
+    endDate: '2026-05-24',
+    venue: 'Circuit de Monaco',
+    location: 'Monte Carlo, Monaco',
+    status: 'upcoming',
+    description: 'Round 8 of the 2026 Formula 1 World Championship, challenging the new active-aerodynamics and 50/50 electrical power unit regulations through Sainte Dévote and the Casino Square.',
+    featuredImage: IMAGES.motorsportApex,
+    prizeMoneyTotal: 'F1 Constructors Points Fund',
+    defendingChampions: [
+      { category: 'Grand Prix Winner', name: 'Charles Leclerc' },
+      { category: 'Pole Position', name: 'Charles Leclerc' },
+    ],
+    quickFacts: [
+      { label: 'Circuit Length', value: '3.337 km (2.074 mi)' },
+      { label: 'Race Laps', value: '78 Laps (260.286 km)' },
+      { label: 'Turns', value: '19 (12 Right, 7 Left)' },
+      { label: 'Lap Record', value: '1:12.909 (Lewis Hamilton, 2021)' },
+      { label: 'DRS Zones', value: '1 Zone (Main Pit Straight)' },
+      { label: 'Safety Car Probability', value: '82%' },
+    ],
+    participantsCount: 20,
+    officialSourceUrl: 'https://www.formula1.com',
+    seo: {
+      metaTitle: '2026 Monaco Grand Prix – Schedule, Circuit Facts & Guide | SportingSpy',
+      metaDescription: 'Essential 2026 Monaco Grand Prix information: weekend timetable, track technical characteristics, DRS locations, and tyre compounds.',
+    },
+  },
+  {
+    id: 'the-masters-2026',
+    eventSlug: 'the-masters',
+    sportSlug: 'golf',
+    year: 2026,
+    title: '2026 Masters Tournament',
+    startDate: '2026-04-09',
+    endDate: '2026-04-12',
+    venue: 'Augusta National Golf Club',
+    location: 'Augusta, Georgia, USA',
+    status: 'upcoming',
+    description: 'The 90th edition of The Masters Tournament. World elite golf professionals and leading amateurs vie for the iconic Green Jacket over 72 holes of stroke play.',
+    featuredImage: IMAGES.golfLinks,
+    prizeMoneyTotal: '$20,000,000 (Purse)',
+    defendingChampions: [
+      { category: 'Masters Champion', name: 'Scottie Scheffler' },
+    ],
+    quickFacts: [
+      { label: 'Course Par', value: 'Par 72 (7,555 Yards)' },
+      { label: 'Greens Turf', value: 'Bentgrass (Sub-Air Controlled)' },
+      { label: 'Cut Rule', value: 'Top 50 and ties after 36 holes' },
+      { label: 'Playoff Format', value: 'Sudden Death (Holes 18 then 10)' },
+      { label: 'Amen Corner', value: 'Holes 11 (White Dogwood), 12 (Golden Bell), 13 (Azalea)' },
+    ],
+    participantsCount: 89,
+    officialSourceUrl: 'https://www.masters.com',
+    seo: {
+      metaTitle: '2026 Masters Tournament – Augusta Dates, Purse & Field Guide | SportingSpy',
+      metaDescription: 'Official 2026 Masters Tournament details: Augusta National yardages, cut criteria, prize money breakdown, and schedule of events.',
+    },
+  },
+  {
+    id: 'six-nations-2026',
+    eventSlug: 'six-nations',
+    sportSlug: 'rugby',
+    year: 2026,
+    title: '2026 Six Nations Championship',
+    startDate: '2026-02-06',
+    endDate: '2026-03-21',
+    venue: 'Host Venues across Europe',
+    location: 'London, Paris, Dublin, Edinburgh, Cardiff, Rome',
+    status: 'completed',
+    description: 'Five rounds of European international rugby union competition determining the Championship trophy, Grand Slam honors, and the Triple Crown.',
+    featuredImage: IMAGES.heroTrophy,
+    defendingChampions: [
+      { category: 'Championship Trophy', name: 'Ireland' },
+    ],
+    quickFacts: [
+      { label: 'Total Matches', value: '15 Test Matches' },
+      { label: 'Win Points', value: '4 Match Points' },
+      { label: 'Draw Points', value: '2 Match Points' },
+      { label: 'Bonus Point 1', value: 'Scoring 4+ tries in a match (+1 point)' },
+      { label: 'Bonus Point 2', value: 'Losing by 7 or fewer points (+1 point)' },
+      { label: 'Grand Slam Bonus', value: '+3 points awarded for winning all 5 matches' },
+    ],
+    participantsCount: 6,
+    officialSourceUrl: 'https://www.sixnationsrugby.com',
+    seo: {
+      metaTitle: '2026 Six Nations Rugby Championship – Fixtures & Final Table | SportingSpy',
+      metaDescription: 'Final standings, round-by-round results, bonus point calculations, and championship statistics for the 2026 Six Nations.',
+    },
+  },
+];
+
+export const INITIAL_ARTICLES: Article[] = [
+  // 1. Article belonging to Sport -> Event -> Edition
+  {
+    id: 'art-rg-2027-schedule',
+    slug: 'schedule',
+    title: '2027 French Open Schedule: Day-by-Day Session Breakdown and Philippe-Chatrier Order of Play',
+    subtitle: 'From the opening qualifying rounds through the Sunday championship climaxes on the red Parisian clay.',
+    sportSlug: 'tennis',
+    eventSlug: 'french-open',
+    editionYear: 2027,
+    articleType: 'Schedule',
+    excerpt: 'A complete provisional timetable for the 2027 French Open at Roland-Garros, including daytime gates opening, evening night sessions, and court assignments.',
+    content: `
+The French Open remains tennis's ultimate test of physical stamina and tactical poise. Contested over fifteen days at the Porte d'Auteuil in Paris, the 2027 championship introduces optimized session pacing designed to minimize post-midnight finishes while maximizing primetime global television windows.
+
+### Tournament Session Architecture
+
+Stade Roland Garros operates two distinct ticketed sessions on Court Philippe-Chatrier: the Day Session (commencing promptly at 11:00 CEST across three matches) and the Night Session (one marquee match beginning at 20:15 CEST).
+
+Court Suzanne-Lenglen and Court Simonne-Mathieu conduct full daytime sessions commencing at 11:00 CEST without artificial breaks.
+
+### Provisional Round Progression
+
+The main draw begins on Sunday, May 23, 2027, maintaining the three-day first round format that ensures every competitor receives equal rest before second-round commitments.
+
+* **May 17–21, 2027:** Qualifying Rounds (Courts 6 through 14)
+* **Sunday, May 23 – Tuesday, May 25:** Men's & Women's First Round
+* **Wednesday, May 26 – Thursday, May 27:** Second Round Matches
+* **Friday, May 28 – Saturday, May 29:** Third Round (Round of 32)
+* **Sunday, May 30 – Monday, May 31:** Fourth Round (Round of 16)
+* **Tuesday, June 1 – Wednesday, June 2:** Quarter-Finals
+* **Thursday, June 3:** Women's Singles Semi-Finals & Mixed Doubles Final
+* **Friday, June 4:** Men's Singles Semi-Finals
+* **Saturday, June 5:** Women's Singles Final & Men's Doubles Final
+* **Sunday, June 6:** Men's Singles Final & Women's Doubles Final
+
+### Court Curfew and Roof Protocols
+
+Under Grand Slam rules, Court Philippe-Chatrier and Court Suzanne-Lenglen are equipped with deployable retractable roofs that seal within 15 minutes during precipitation. Clay surface moisture levels are monitored continuously by tournament groundskeepers using laser hygrometers.
+    `,
+    featuredImage: IMAGES.tennisClay,
+    authorId: 'auth-alistair',
+    publishedAt: '2026-08-14T08:00:00Z',
+    updatedAt: '2026-09-02T14:15:00Z',
+    status: 'published',
+    readingTimeMinutes: 5,
+    featured: true,
+    tables: [
+      {
+        title: '2027 French Open Provisional Daily Schedule Matrix',
+        headers: ['Date', 'Round Stage', 'Session Time', 'Primary Courts'],
+        rows: [
+          ['May 23 (Sun)', 'First Round (Day 1)', '11:00 / 20:15 CEST', 'Chatrier, Lenglen, Mathieu, Outer'],
+          ['May 24 (Mon)', 'First Round (Day 2)', '11:00 / 20:15 CEST', 'Chatrier, Lenglen, Mathieu, Outer'],
+          ['May 25 (Tue)', 'First Round (Day 3)', '11:00 / 20:15 CEST', 'Chatrier, Lenglen, Mathieu, Outer'],
+          ['May 26 (Wed)', 'Second Round', '11:00 / 20:15 CEST', 'All Match Courts'],
+          ['May 27 (Thu)', 'Second Round', '11:00 / 20:15 CEST', 'All Match Courts'],
+          ['May 28 (Fri)', 'Third Round', '11:00 / 20:15 CEST', 'Chatrier, Lenglen, Mathieu'],
+          ['May 29 (Sat)', 'Third Round', '11:00 / 20:15 CEST', 'Chatrier, Lenglen, Mathieu'],
+          ['May 30 (Sun)', 'Round of 16', '11:00 / 20:15 CEST', 'Philippe-Chatrier, Suzanne-Lenglen'],
+          ['May 31 (Mon)', 'Round of 16', '11:00 / 20:15 CEST', 'Philippe-Chatrier, Suzanne-Lenglen'],
+          ['Jun 01 (Tue)', 'Quarter-Finals', '12:00 / 20:15 CEST', 'Court Philippe-Chatrier'],
+          ['Jun 02 (Wed)', 'Quarter-Finals', '12:00 / 20:15 CEST', 'Court Philippe-Chatrier'],
+          ['Jun 03 (Thu)', "Women's Semi-Finals", '14:30 CEST', 'Court Philippe-Chatrier'],
+          ['Jun 04 (Fri)', "Men's Semi-Finals", '14:30 CEST', 'Court Philippe-Chatrier'],
+          ['Jun 05 (Sat)', "Women's Singles Final", '15:00 CEST', 'Court Philippe-Chatrier'],
+          ['Jun 06 (Sun)', "Men's Singles Final", '15:00 CEST', 'Court Philippe-Chatrier'],
+        ],
+      },
+    ],
+    references: [
+      { title: 'Fédération Française de Tennis (FFT) Grand Slam Regulations', url: 'https://www.fft.fr' },
+      { title: 'International Tennis Federation (ITF) Grand Slam Rule Book', url: 'https://www.itftennis.com' },
+    ],
+    seo: {
+      metaTitle: '2027 French Open Schedule & Session Guide | SportingSpy',
+      metaDescription: 'Detailed day-by-day match schedule, court assignments, and night session starting times for the 2027 French Open at Roland-Garros.',
+    },
+  },
+
+  // 2. Viewing Guide article for French Open 2027
+  {
+    id: 'art-rg-2027-viewing-guide',
+    slug: 'sports-viewing-guide',
+    title: 'How to Watch the 2027 French Open: Global Broadcasters, Timezones, and Court Streams',
+    subtitle: 'Comprehensive television rights holders, local time conversions, and digital streaming availability across major territories.',
+    sportSlug: 'tennis',
+    eventSlug: 'french-open',
+    editionYear: 2027,
+    articleType: 'Sports Viewing Guide',
+    excerpt: 'Your definitive guide to following every serve at Roland-Garros across Europe, North America, Australasia, and international broadcast territories.',
+    content: `
+Global broadcast distribution for Roland-Garros is managed in direct partnership between the Fédération Française de Tennis (FFT) and major regional sports networks.
+
+### Primary Broadcasters by Territory
+
+* **France:** France Télévisions (free-to-air daytime coverage across France 2, France 3, France 4) and Prime Video (exclusive French rights to Night Sessions and Court Simonne-Mathieu).
+* **United Kingdom & Europe:** Eurosport / Warner Bros. Discovery across television linear channels, with full multi-court streaming via Max / Discovery+.
+* **United States:** NBC Sports (championship weekends), Tennis Channel (weekday early rounds and evening coverage), and Peacock (digital streaming simulcast).
+* **Australia:** Nine Network (free-to-air weekend showcases) and Stan Sport (uninterrupted ad-free coverage of every court in 4K UHD).
+* **Sub-Saharan Africa:** SuperSport.
+
+### Timezone Conversion Guide
+
+With play commencing at 11:00 CEST in Paris, international viewers should align their watches as follows:
+
+* **London (BST):** 10:00 AM start
+* **New York (EDT):** 05:00 AM start
+* **Los Angeles (PDT):** 02:00 AM start
+* **Tokyo (JST):** 18:00 PM start
+* **Sydney (AEST):** 19:00 PM start
+    `,
+    featuredImage: IMAGES.tennisClay,
+    authorId: 'auth-alistair',
+    publishedAt: '2026-08-20T10:00:00Z',
+    status: 'published',
+    readingTimeMinutes: 4,
+    tables: [
+      {
+        title: 'Official International Broadcast Rights Matrix',
+        headers: ['Territory', 'Linear Broadcaster', 'Digital Streaming Platform', 'Feed Resolution'],
+        rows: [
+          ['France', 'France Télévisions', 'france.tv / Prime Video', '1080p HDR / 4K UHD'],
+          ['United Kingdom', 'Eurosport 1 & 2', 'Discovery+ / Max', '1080p 50fps'],
+          ['United States', 'Tennis Channel / NBC', 'Peacock / TC Plus', '1080p HDR'],
+          ['Australia', 'Nine / 9Gem', 'Stan Sport', '4K UHD Ultra Wide'],
+          ['Canada', 'TSN / RDS', 'TSN Direct', '1080p'],
+        ],
+      },
+    ],
+    seo: {
+      metaTitle: 'How to Watch French Open 2027 – TV Channels & Live Streams | SportingSpy',
+      metaDescription: 'Complete television channel guide and streaming options for Roland-Garros 2027 in the US, UK, Australia, France, and Europe.',
+    },
+  },
+
+  // 3. Prize Money article for French Open 2027
+  {
+    id: 'art-rg-2027-prize-money',
+    slug: 'prize-money',
+    title: 'French Open 2027 Prize Money Breakdown: Singles, Doubles, and Qualifying Purse Records',
+    subtitle: 'An analytical examination of the record €54.8M purse and round-by-round compensation distribution.',
+    sportSlug: 'tennis',
+    eventSlug: 'french-open',
+    editionYear: 2027,
+    articleType: 'Prize Money',
+    excerpt: 'Full financial breakdown of earnings at the 2027 French Open, comparing singles champion awards with early round compensation and doubles purses.',
+    content: `
+Equal prize money across men's and women's competitions has been a bedrock principle of the French Open since 2007. The 2027 tournament marks another historic milestone, with total financial commitment rising by approximately 6.5% over the 2026 staging.
+
+### Focus on Early-Round Compensation
+
+Following strategic agreements between Grand Slam organizers and the player councils (ATP and WTA), the greatest percentage increases have been allocated to the first three rounds and qualifying draws. This policy directly addresses touring costs for athletes outside the top 75 rankings.
+
+### Singles Championship Awards
+
+The singles champions in men's and women's draws will each receive €2,500,000, while the runners-up collect €1,250,000. Players exiting in the first round take home €76,000, underscoring the critical economic importance of direct main-draw acceptance.
+    `,
+    featuredImage: IMAGES.heroTrophy,
+    authorId: 'auth-alistair',
+    publishedAt: '2026-08-25T11:00:00Z',
+    status: 'published',
+    readingTimeMinutes: 4,
+    tables: [
+      {
+        title: 'French Open Singles Prize Money Schedule',
+        headers: ['Finishing Position', 'Prize Money (EUR)', 'ATP / WTA Ranking Points', 'Year-on-Year Growth'],
+        rows: [
+          ['Champion', '€2,500,000', '2,000 pts', '+4.1%'],
+          ['Runner-up', '€1,250,000', '1,300 pts (ATP) / 1,300 pts (WTA)', '+4.2%'],
+          ['Semi-Finalists', '€670,000', '800 pts (ATP) / 780 pts (WTA)', '+5.0%'],
+          ['Quarter-Finalists', '€430,000', '400 pts (ATP) / 430 pts (WTA)', '+5.8%'],
+          ['Round of 16 (4th Rd)', '€260,000', '200 pts (ATP) / 240 pts (WTA)', '+6.2%'],
+          ['Round of 32 (3rd Rd)', '€162,000', '100 pts (ATP) / 130 pts (WTA)', '+6.8%'],
+          ['Round of 64 (2nd Rd)', '€115,000', '50 pts (ATP) / 70 pts (WTA)', '+7.5%'],
+          ['First Round', '€76,000', '10 pts (ATP) / 10 pts (WTA)', '+8.2%'],
+        ],
+      },
+    ],
+    seo: {
+      metaTitle: '2027 French Open Prize Money & Round Distribution | SportingSpy',
+      metaDescription: 'Official prize money payout chart for the 2027 French Open singles, doubles, and qualifying tournaments at Roland-Garros.',
+    },
+  },
+
+  // 4. General Article belonging directly to SPORT (No event or edition)
+  // URL: /tennis/tennis-scoring/
+  {
+    id: 'art-tennis-scoring',
+    slug: 'tennis-scoring',
+    title: 'The Architecture of Tennis Scoring: Love, Deuce, Advantage, and the 10-Point Grand Slam Tiebreak',
+    subtitle: 'A historical and mathematical guide to the most unique scoring mechanism in global athletics.',
+    sportSlug: 'tennis',
+    articleType: 'Rules & Format',
+    excerpt: 'Why 15, 30, and 40? How tiebreak mechanics evolved from sudden death to the unified 10-point final set rule across all four Grand Slams.',
+    content: `
+To the uninitiated observer, tennis scoring appears almost deliberately eccentric. Unlike numerical progressions in basketball or football, tennis counts points in increments of 15, 30, and 40, uses the enigmatic term 'love' to denote zero, and requires a two-point margin to conclude any game, set, or match.
+
+### The Origins of 15-30-40 and 'Love'
+
+The traditional explanation stems from medieval French *jeu de paume*, where players scored on an analog clock face. Moving a hand by a quarter-turn produced 15, 30, and 45. In time, 45 was truncated to 40 for verbal convenience during rapid officiating.
+
+The term 'love' is widely accepted by sports etymologists as an anglicization of the French *l'œuf* (the egg), symbolizing zero in visual reference to the elliptical numeral 0.
+
+### Games, Sets, and the Two-Point Advantage
+
+A standard game consists of points won sequentially:
+1. First point: 15
+2. Second point: 30
+3. Third point: 40
+4. Fourth point: Game (provided the player leads by at least two points)
+
+When both players reach 40, the score is called **Deuce**. From Deuce, one player must secure two consecutive points:
+* The first point gives the leader **Advantage** (abbreviated *Ad-In* for server, *Ad-Out* for receiver).
+* If the player holding Advantage wins the subsequent point, they win the game. If the opposing player wins the point, the score returns to Deuce.
+
+### The Modern 10-Point Final Set Tiebreak
+
+Historically, Grand Slam fifth sets (or third sets for women) could extend indefinitely without a tiebreak—leading to marathon encounters such as the famous 70-68 fifth set between John Isner and Nicolas Mahut at Wimbledon 2010.
+
+In March 2022, the Grand Slam Board (representing the Australian Open, Roland-Garros, Wimbledon, and the US Open) introduced a unified rule:
+* Upon reaching 6-6 in the deciding set, a **10-Point Champions Tiebreak** is played.
+* The first player to reach 10 points with a margin of at least two points wins the tiebreak, the set, and the match.
+    `,
+    featuredImage: IMAGES.tennisClay,
+    authorId: 'auth-alistair',
+    publishedAt: '2026-07-10T14:00:00Z',
+    status: 'published',
+    readingTimeMinutes: 6,
+    seo: {
+      metaTitle: 'Tennis Scoring Rules: Love, Deuce, and Tiebreaks Explained | SportingSpy',
+      metaDescription: 'Comprehensive guide to tennis scoring rules: point values, deuce mechanics, advantage server rules, and the Grand Slam 10-point tiebreak format.',
+    },
+  },
+
+  // 5. Motorsport Article (Monaco Grand Prix 2026)
+  {
+    id: 'art-monaco-circuit-guide',
+    slug: 'circuit-guide',
+    title: 'Circuit de Monaco Technical Breakdown: Gear Shifts, Downforce Levels, and Pit Lane Delta',
+    subtitle: 'Why the 3.337-kilometer harbor circuit places greater mechanical strain on steering racks and braking systems than any other venue on the calendar.',
+    sportSlug: 'motorsport',
+    eventSlug: 'monaco-grand-prix',
+    editionYear: 2026,
+    articleType: 'Analysis',
+    excerpt: 'An engineering perspective on Monaco: why qualifying represents 85% of race outcome and how modern ground-effect cars manage the bump at Beau Rivage.',
+    content: `
+Monte Carlo is an anachronism that defies modern circuit architecture standards. Narrow, undulating, and bordered on both sides by unforgiving steel Armco barriers, the Circuit de Monaco allows zero room for aerodynamic stalling or driver hesitation.
+
+### The Downforce Paradox
+
+In modern Formula 1, engineers run maximum downforce configurations at Monaco. Efficiency ratios (lift-to-drag) are disregarded because straight-line speed is irrelevant: the longest full-throttle burst (from Portier through the Tunnel to the Nouvelle Chicane) lasts less than eight seconds.
+
+Teams introduce bespoke steering racks providing an additional 3.5 degrees of steering lock purely to negotiate the Loews Hairpin (Turn 6)—the slowest corner in Grand Prix racing, negotiated at just 48 km/h.
+
+### Overtaking Probability and Strategy
+
+Empirical telemetry indicates that on-track overtakes without mechanical failure or tyre differential occur less than 1.4 times per Grand Prix in the modern era. As a result, team strategists operate with an 'overcut' or 'undercut' calculated down to tenths of a second relative to pit lane transit time (22.8 seconds including stationary wheel exchange).
+    `,
+    featuredImage: IMAGES.motorsportApex,
+    authorId: 'auth-marcus',
+    publishedAt: '2026-05-18T09:30:00Z',
+    status: 'published',
+    readingTimeMinutes: 5,
+    featured: true,
+    tables: [
+      {
+        title: 'Key Technical Telemetry: Circuit de Monaco',
+        headers: ['Metric', 'Recorded Value', 'Comparison with F1 Calendar Average'],
+        rows: [
+          ['Average Speed', '161.4 km/h', 'Lowest on F1 Calendar (-52.3 km/h vs avg)'],
+          ['Full Throttle Percentage', '34% of Lap Distance', 'Lowest of any active circuit'],
+          ['Gear Changes per Lap', '48 to 54 Shifts', 'Highest per kilometer ratio'],
+          ['Braking Energy Severity', 'Extremely High (Low Cooling)', 'Critical front caliper thermal threshold'],
+          ['Tyre Stress Index', '1 / 5 (Pirelli Scale)', 'Lowest mechanical degradation of season'],
+        ],
+      },
+    ],
+    seo: {
+      metaTitle: 'Monaco GP Circuit Guide & Telemetry Analysis | SportingSpy',
+      metaDescription: 'Detailed circuit technical analysis for the Monaco Grand Prix: corner breakdown, steering rack modifications, downforce physics, and strategy.',
+    },
+  },
+
+  // 6. Golf Article (The Masters 2026 Purse)
+  {
+    id: 'art-masters-purse',
+    slug: 'purse-breakdown',
+    title: 'The Masters 2026 Purse and Prize Money Distribution: Complete Payout Chart',
+    subtitle: 'Detailed breakdown of the $20 million Augusta National prize fund from the winner to the cut-line.',
+    sportSlug: 'golf',
+    eventSlug: 'the-masters',
+    editionYear: 2026,
+    articleType: 'Prize Money',
+    excerpt: 'Full purse allocation for the 90th Masters Tournament at Augusta National, detailing the champion’s $3.6M payout and amateur stipulations.',
+    content: `
+Unlike other men’s golf championships that publish their purse allocations months in advance, Augusta National Golf Club maintains a storied tradition of revealing its official prize money during tournament week on Saturday morning.
+
+### The Financial Scale of the Green Jacket
+
+For the 2026 edition, the total purse stands at $20,000,000, with $3,600,000 awarded to the winner along with the permanent trophy, the replica trophy, and the legendary Green Jacket.
+
+Competitors missing the 36-hole cut are not left uncompensated; Augusta National provides a guaranteed stipend of $10,000 to every professional who plays the first two rounds to offset travel and caddie lodging expenses.
+    `,
+    featuredImage: IMAGES.golfLinks,
+    authorId: 'auth-david',
+    publishedAt: '2026-04-11T12:00:00Z',
+    status: 'published',
+    readingTimeMinutes: 4,
+    tables: [
+      {
+        title: '2026 Masters Prize Money Distribution (Top 10)',
+        headers: ['Position', 'Prize Money (USD)', 'Percentage of Total Purse'],
+        rows: [
+          ['1st (Champion)', '$3,600,000', '18.00%'],
+          ['2nd', '$2,160,000', '10.80%'],
+          ['3rd', '$1,360,000', '6.80%'],
+          ['4th', '$960,000', '4.80%'],
+          ['5th', '$800,000', '4.00%'],
+          ['6th', '$720,000', '3.60%'],
+          ['7th', '$670,000', '3.35%'],
+          ['8th', '$620,000', '3.10%'],
+          ['9th', '$580,000', '2.90%'],
+          ['10th', '$540,000', '2.70%'],
+        ],
+      },
+    ],
+    seo: {
+      metaTitle: '2026 Masters Prize Money & Payout Distribution | SportingSpy',
+      metaDescription: 'Complete payout table for the 2026 Masters Tournament at Augusta National: 1st through 50th position prize allocations.',
+    },
+  },
+
+  // 7. Rugby Article (Six Nations 2026 Fixtures)
+  {
+    id: 'art-six-nations-fixtures',
+    slug: 'fixtures-schedule',
+    title: 'Six Nations 2026: Round-by-Round Fixtures, Kick-Off Times, and Stadium Venues',
+    subtitle: 'Complete schedule of the 15 championship matches across Dublin, Paris, London, Edinburgh, Cardiff, and Rome.',
+    sportSlug: 'rugby',
+    eventSlug: 'six-nations',
+    editionYear: 2026,
+    articleType: 'Schedule',
+    excerpt: 'Confirmed dates, UK/Irish kick-off times, referee appointments, and host grounds for the 2026 Six Nations rugby championship.',
+    content: `
+The Six Nations Championship delivers seven consecutive weeks of fierce international rugby union competition across Europe's greatest sporting cathedrals: the Aviva Stadium, Stade de France, Twickenham, Murrayfield, Principality Stadium, and the Stadio Olimpico.
+
+### The Five-Round Structure
+
+The championship features two rest weeks designed to manage player welfare under World Rugby Regulation 9 protocols. Matches take place across Friday evening, Saturday afternoon, and Sunday slots.
+    `,
+    featuredImage: IMAGES.heroTrophy,
+    authorId: 'auth-elena',
+    publishedAt: '2026-01-20T16:00:00Z',
+    status: 'published',
+    readingTimeMinutes: 4,
+    seo: {
+      metaTitle: 'Six Nations 2026 Fixtures & Match Schedule | SportingSpy',
+      metaDescription: 'Full fixture list and kick-off times for the 2026 Six Nations rugby union championship across England, France, Ireland, Scotland, Wales, and Italy.',
+    },
+  },
+
+  // 8. Draft Article (For workflow testing)
+  {
+    id: 'art-wimbledon-draft',
+    slug: 'wimbledon-seedings-analysis',
+    title: 'Wimbledon 2027 Seedings Committee: Projected Grass Court Formula Adjustments',
+    subtitle: 'Internal draft exploring surface-weight calculations and potential wildcards for the upcoming championship.',
+    sportSlug: 'tennis',
+    eventSlug: 'wimbledon',
+    editionYear: 2027,
+    articleType: 'Analysis',
+    excerpt: 'Draft dossier analyzing prospective grass court seedings formulas and wildcards for SW19.',
+    content: `
+This is an internal editorial draft under review by the SportingSpy Racket Sports desk.
+
+### Surface Formula Revisions
+The committee is evaluating historical grass win percentages from Queen's Club and Halle open warmups.
+    `,
+    featuredImage: IMAGES.tennisClay,
+    authorId: 'auth-alistair',
+    publishedAt: '2026-09-01T00:00:00Z',
+    status: 'draft',
+    readingTimeMinutes: 3,
+    seo: {
+      metaTitle: 'Wimbledon 2027 Seedings Analysis [DRAFT] | SportingSpy',
+      metaDescription: 'Internal draft on Wimbledon 2027 projected seedings and formulas.',
+    },
+  },
+
+  // 9. Scheduled Article (For automated scheduler testing)
+  {
+    id: 'art-champions-league-scheduled',
+    slug: 'champions-league-draw-guide',
+    title: 'UEFA Champions League 36-Team Swiss Model: Round of 16 Seeding Matrix',
+    subtitle: 'Automated breakdown scheduled for publication coinciding with UEFA draw ceremonies in Nyon.',
+    sportSlug: 'football',
+    articleType: 'Rules & Format',
+    excerpt: 'Automated guide scheduled to go live as UEFA reveals the round of 16 bracket combinations.',
+    content: `
+Under the expanded 36-team single league phase, clubs finishing 1st through 8th receive seeded berths in the Round of 16.
+Teams finishing 9th through 24th enter a two-legged playoff round to determine the remaining eight slots.
+    `,
+    featuredImage: IMAGES.footballPitch,
+    authorId: 'auth-elena',
+    publishedAt: '2026-10-01T12:00:00Z',
+    scheduledFor: '2026-10-01T12:00:00Z',
+    status: 'scheduled',
+    readingTimeMinutes: 4,
+    seo: {
+      metaTitle: 'Champions League Swiss Model Seeding Guide | SportingSpy',
+      metaDescription: 'Full explanation of the 36-team single league phase format and knockout bracket qualification.',
+    },
+  },
+
+  // 10. Archived Article (For lifecycle testing)
+  {
+    id: 'art-olympics-archived',
+    slug: 'tokyo-athletics-recap',
+    title: 'Historic Sprint Records & Olympic Stadium Track Speed Analysis',
+    subtitle: 'Archived retrospective on track geometry and dual-density vulcanized rubber composition.',
+    sportSlug: 'athletics',
+    articleType: 'History',
+    excerpt: 'Archived technical examination of track surface elastic response and world record performance.',
+    content: `
+Archived editorial record. Track surface elastic response was measured across the 100m, 200m, and 400m hurdles finals.
+    `,
+    featuredImage: IMAGES.heroTrophy,
+    authorId: 'auth-marcus',
+    publishedAt: '2021-08-10T10:00:00Z',
+    status: 'archived',
+    readingTimeMinutes: 5,
+    seo: {
+      metaTitle: 'Olympic Track Speed Analysis [ARCHIVE] | SportingSpy',
+      metaDescription: 'Archived technical analysis of Olympic track vulcanized rubber surfaces.',
+    },
+  },
+];
+
+export const INITIAL_COMMENTS: Comment[] = [
+  {
+    id: 'comm-1',
+    articleId: 'art-rg-2027-schedule',
+    userId: 'user-reader-1',
+    userName: 'Liam Harrington',
+    userRole: 'Reader',
+    userAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&h=120&q=80',
+    content: 'The decision to pull the Philippe-Chatrier night session forward to 20:15 CEST is a welcome adjustment. The 2024 finishes after 3:00 AM were brutal for both the athletes and public transport staff in Paris.',
+    createdAt: '2026-08-15T09:40:00Z',
+    status: 'approved',
+  },
+  {
+    id: 'comm-2',
+    articleId: 'art-tennis-scoring',
+    userId: 'user-reader-1',
+    userName: 'Liam Harrington',
+    userRole: 'Reader',
+    userAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&h=120&q=80',
+    content: 'Fascinating etymological background on the clock faces in jeu de paume. I had always heard the French egg theory, but the 15-30-45 clock geometry makes total sense.',
+    createdAt: '2026-07-12T11:20:00Z',
+    status: 'approved',
+  },
+  {
+    id: 'comm-3',
+    articleId: 'art-monaco-circuit-guide',
+    userId: 'user-reader-1',
+    userName: 'Guest Sports Analyst',
+    userRole: 'Reader',
+    content: 'Pending editorial review: Does the revised Sainte Dévote kerb height for 2026 affect floor grounding on the 50/50 powertrain hybrids?',
+    createdAt: '2026-05-19T14:10:00Z',
+    status: 'pending',
+  },
+];
+
+export const INITIAL_MEDIA_ITEMS: MediaItem[] = [
+  {
+    id: 'media-1',
+    title: 'Championship Trophy on Stone Pedestal',
+    url: IMAGES.heroTrophy,
+    altText: 'Polished silver championship trophy cup under stadium floodlights in atmospheric haze',
+    caption: 'Official championship trophy exhibited prior to the tournament finals.',
+    credit: 'SportingSpy Editorial Archive',
+    source: 'SportingSpy Original Production',
+    license: 'All Editorial Rights Reserved',
+    creationType: 'Original',
+    uploadedAt: '2026-09-01T10:00:00Z',
+    dimensions: '1920x1080',
+  },
+  {
+    id: 'media-2',
+    title: 'Red Clay Court Baseline Dust',
+    url: IMAGES.tennisClay,
+    altText: 'Tennis ball striking baseline with red clay dust kicked into dramatic side lighting',
+    caption: 'High-speed clay court impact during Grand Slam semi-final rally.',
+    credit: 'SportingSpy Racket Sports Bureau',
+    source: 'Paris Bureau Direct Capture',
+    license: 'Editorial Syndication',
+    creationType: 'Original',
+    uploadedAt: '2026-09-02T11:15:00Z',
+    dimensions: '1600x1200',
+  },
+  {
+    id: 'media-3',
+    title: 'Formula Racing Car Apex Kerb',
+    url: IMAGES.motorsportApex,
+    altText: 'Formula racing car clipping painted kerb at dusk with red brake rotor glow',
+    caption: 'Aerodynamic airflow over front wing at high-load chicane apex.',
+    credit: 'SportingSpy Motorsport Desk',
+    source: 'Circuit Telemetry & Imagery Unit',
+    license: 'Editorial Syndication',
+    creationType: 'Original',
+    uploadedAt: '2026-09-03T12:00:00Z',
+    dimensions: '1600x1200',
+  },
+  {
+    id: 'media-4',
+    title: 'Championship Golf Links at Dawn',
+    url: IMAGES.golfLinks,
+    altText: 'Coastal golf championship links green at sunrise with gentle sea mist',
+    caption: 'The opening fairway at coastal links venue before morning tee times.',
+    credit: 'SportingSpy Links Bureau',
+    source: 'SportingSpy Archive',
+    license: 'Editorial Use',
+    creationType: 'Original',
+    uploadedAt: '2026-09-04T08:30:00Z',
+    dimensions: '1920x1080',
+  },
+  {
+    id: 'media-5',
+    title: 'World Stadium Floodlit Turf',
+    url: IMAGES.footballPitch,
+    altText: 'Pristine mowed football pitch patterns under towering stadium floodlights',
+    caption: 'Stadium pitch prepared prior to continental European cup final.',
+    credit: 'SportingSpy Football Desk',
+    source: 'UEFA Technical Archive',
+    license: 'Licensed Partner',
+    creationType: 'Licensed',
+    uploadedAt: '2026-09-05T14:45:00Z',
+    dimensions: '1920x1080',
+  },
+];
+
+export const INITIAL_REDIRECT_RULES: {
+  id: string;
+  sourceUrl: string;
+  targetUrl: string;
+  statusCode: 301 | 302;
+  createdAt: string;
+  isActive: boolean;
+}[] = [
+  {
+    id: 'redir-1',
+    sourceUrl: '/tennis/roland-garros',
+    targetUrl: '/tennis/french-open',
+    statusCode: 301,
+    createdAt: '2026-01-10T12:00:00Z',
+    isActive: true,
+  },
+  {
+    id: 'redir-2',
+    sourceUrl: '/f1',
+    targetUrl: '/motorsport',
+    statusCode: 301,
+    createdAt: '2026-01-10T12:00:00Z',
+    isActive: true,
+  },
+  {
+    id: 'redir-3',
+    sourceUrl: '/golf/masters',
+    targetUrl: '/golf/the-masters',
+    statusCode: 301,
+    createdAt: '2026-01-10T12:00:00Z',
+    isActive: true,
+  },
+];
+
+export const INITIAL_AD_SLOTS: AdSlotConfig[] = [
+  {
+    id: 'HOMEPAGE_TOP',
+    name: 'Homepage Top Billboard',
+    placementDescription: 'Positioned beneath primary header navigation on desktop and tablet.',
+    enabled: false,
+    dimensions: '970x90 / 728x90',
+    sponsorName: 'Global Sports Watchmaker',
+    bannerText: 'Official Timing Partner of SportingSpy Championship Coverage',
+  },
+  {
+    id: 'HOMEPAGE_MIDDLE',
+    name: 'Homepage Mid-Feed Sponsor Bar',
+    placementDescription: 'Between Featured Events and Sport Hub exploration.',
+    enabled: false,
+    dimensions: '728x90',
+  },
+  {
+    id: 'ARTICLE_TOP',
+    name: 'Article Top Leaderboard',
+    placementDescription: 'Directly above article title and byline container.',
+    enabled: false,
+    dimensions: '728x90',
+  },
+  {
+    id: 'ARTICLE_MIDDLE',
+    name: 'Article In-Read Native Placement',
+    placementDescription: 'Rendered between third and fourth editorial body paragraphs.',
+    enabled: false,
+    dimensions: '728x90 / 300x250',
+  },
+  {
+    id: 'ARTICLE_BOTTOM',
+    name: 'Article Footnote Sponsorship',
+    placementDescription: 'Above references and comments section.',
+    enabled: false,
+    dimensions: '728x90',
+  },
+  {
+    id: 'SIDEBAR_TOP',
+    name: 'Sidebar Top MPU',
+    placementDescription: 'Upper position in editorial desktop sidebar rail.',
+    enabled: false,
+    dimensions: '300x250',
+  },
+  {
+    id: 'SIDEBAR_MIDDLE',
+    name: 'Sidebar Half-Page Unit',
+    placementDescription: 'Sticky lower rail in long-form editorial views.',
+    enabled: false,
+    dimensions: '300x600',
+  },
+  {
+    id: 'EVENT_TOP',
+    name: 'Event Hub Banner',
+    placementDescription: 'Above quick facts summary on event edition pages.',
+    enabled: false,
+    dimensions: '728x90',
+  },
+  {
+    id: 'EVENT_BOTTOM',
+    name: 'Event Edition Footer Banner',
+    placementDescription: 'Positioned above edition related articles grid.',
+    enabled: false,
+    dimensions: '728x90',
+  },
+];

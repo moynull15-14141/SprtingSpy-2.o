@@ -1,0 +1,26 @@
+import type { Request, Response, NextFunction } from 'express';
+
+// Public JSON is never a Prisma nested-write instruction. These are the
+// existing editor fields, not relation names or immutable primary keys.
+const fields: Record<string, string[]> = {
+  articles: ['slug', 'title', 'subtitle', 'sportSlug', 'eventSlug', 'editionYear', 'articleType', 'excerpt', 'content', 'featuredImage', 'authorId', 'publishedAt', 'updatedAt', 'scheduledFor', 'status', 'readingTimeMinutes', 'featured', 'tables', 'references', 'seo'],
+  sports: ['slug', 'name', 'tagline', 'description', 'order', 'isVisible', 'featuredEventIds', 'colorTheme', 'heroImage', 'seo'],
+  events: ['sportSlug', 'slug', 'name', 'shortName', 'description', 'history', 'frequency', 'defaultVenue', 'defaultLocation', 'currentEditionYear', 'allEditionYears', 'featured', 'isVisible', 'featuredImage', 'seo'],
+  editions: ['eventSlug', 'sportSlug', 'year', 'title', 'startDate', 'endDate', 'venue', 'location', 'status', 'quickFacts', 'prizeMoneyTotal', 'defendingChampions', 'qualificationInfo', 'participantsCount', 'officialSourceUrl', 'description', 'featuredImage', 'seo'],
+  authors: ['slug', 'name', 'roleTitle', 'bio', 'avatar', 'twitter', 'email', 'articleCount', 'userId'],
+  comments: ['status'],
+  redirects: ['sourceUrl', 'targetUrl', 'statusCode', 'isActive'],
+  media: ['title', 'url', 'altText', 'caption', 'credit', 'source', 'license', 'creationType', 'fileSize', 'dimensions'],
+  ads: ['name', 'placementDescription', 'enabled', 'sponsorName', 'bannerText', 'linkUrl', 'dimensions'],
+};
+
+export function rejectNestedCmsWrites(req: Request, res: Response, next: NextFunction) {
+  if (req.method !== 'PUT') return next();
+  const match = req.path.match(/^\/api\/([^/]+)\/[^/]+\/?$/i);
+  const allowed = match && fields[match[1].toLowerCase()];
+  if (!allowed) return next();
+  if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body) || Object.keys(req.body).some(key => !allowed.includes(key))) {
+    return res.status(400).json({ error: 'Unsupported update field.' });
+  }
+  next();
+}

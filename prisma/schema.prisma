@@ -1,0 +1,351 @@
+// SportingSpy PostgreSQL Schema — PHASE 2
+// ==========================================
+// Modeled directly from the actual runtime shapes in data/db.json and the
+// TypeScript domain types in src/types/index.ts — not from generic CMS
+// assumptions. See PROJECT_BRAIN.md "Phase 2" for the migration writeup.
+//
+// Design notes:
+// - Every model keeps its existing string `id` scheme (e.g. "sport-tennis",
+//   "art-rg-2027-schedule") as the Prisma @id, so existing IDs migrate
+//   unchanged and the API can keep returning the same id values.
+// - Relationships use the SAME natural keys the current JSON code already
+//   uses to join records (sportSlug, eventSlug, year) rather than inventing
+//   surrogate foreign keys the app doesn't have today — this preserves the
+//   actual current behavior/business rules exactly while still getting real
+//   Postgres foreign-key + unique-constraint enforcement.
+// - Nested structures that the app only ever reads/writes as a whole blob
+//   (SEO metadata, quick facts, defending champions, structured tables,
+//   references, featured/edition-year arrays) are stored as native Postgres
+//   array or Json columns rather than being split into extra tables the
+//   application never queries relationally — avoids unnecessary models.
+// - MediaItem, AdSlotConfig, RedirectRule, AuditLog remain standalone,
+//   matching their current disconnected/denormalized behavior in server.ts.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../server/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ── Enums (mirrors the TypeScript unions in src/types/index.ts) ──
+
+enum Role {
+  Admin
+  Editor
+  Author
+  Reader
+}
+
+enum UserStatus {
+  active
+  inactive
+}
+
+enum ArticleStatus {
+  draft
+  preview
+  scheduled
+  published
+  archived
+}
+
+enum EditionStatus {
+  upcoming
+  ongoing
+  completed
+}
+
+enum CommentStatus {
+  pending
+  approved
+  rejected
+}
+
+// ArticleType and MediaCreationType are deliberately plain, app-validated
+// String columns rather than Prisma enums. Both TS unions contain values
+// with spaces/ampersands ("Rules & Format", "Sports Viewing Guide") that
+// cannot be Prisma enum identifiers without an @map translation layer on
+// every single read/write call site across server.ts. That translation
+// buys no real integrity benefit here (these fields were never DB-enforced
+// in the JSON version either — server.ts already validates/defaults them at
+// the application layer), so a String column preserves the exact existing
+// values and behavior with zero added translation risk.
+
+enum AuditEntityType {
+  Sport
+  Event
+  Edition
+  Article
+  Comment
+  Setting
+  User
+  Author
+  Redirect
+}
+
+// ── Core domain hierarchy: Sport -> Event -> Edition -> Article ──
+
+model Sport {
+  id               String   @id
+  slug             String   @unique
+  name             String
+  tagline          String
+  description      String
+  order            Int
+  isVisible        Boolean  @default(true)
+  featuredEventIds String[] @default([])
+  colorTheme       String?
+  heroImage        String?
+  seo              Json
+
+  events   SportEvent[]
+  articles Article[]
+
+  @@index([isVisible])
+}
+
+model SportEvent {
+  id                 String  @id
+  sportSlug          String
+  slug               String
+  name               String
+  shortName          String
+  description        String
+  history            String?
+  frequency          String
+  defaultVenue       String
+  defaultLocation    String
+  currentEditionYear Int
+  allEditionYears    Int[]   @default([])
+  featured           Boolean @default(false)
+  isVisible          Boolean @default(true)
+  featuredImage      String?
+  seo                Json
+
+  sport    Sport          @relation(fields: [sportSlug], references: [slug])
+  editions EventEdition[]
+
+  // Matches the exact uniqueness the app already enforces in POST /api/events
+  // ("Event '<slug>' already exists under sport '<sportSlug>'").
+  @@unique([sportSlug, slug])
+  @@index([sportSlug])
+}
+
+model EventEdition {
+  id                 String        @id
+  eventSlug          String
+  sportSlug          String
+  year               Int
+  title              String
+  startDate          String
+  endDate            String
+  venue              String
+  location           String
+  status             EditionStatus @default(upcoming)
+  quickFacts         Json          @default("[]")
+  prizeMoneyTotal    String?
+  defendingChampions Json?
+  qualificationInfo  String?
+  participantsCount  Int?
+  officialSourceUrl  String?
+  description        String
+  featuredImage      String
+  seo                Json
+
+  event    SportEvent @relation(fields: [sportSlug, eventSlug], references: [sportSlug, slug])
+  articles Article[]
+
+  // Matches POST /api/editions's exact collision check.
+  @@unique([sportSlug, eventSlug, year])
+  @@index([sportSlug, eventSlug])
+}
+
+model Article {
+  id                 String        @id
+  slug               String
+  title              String
+  subtitle           String?
+  sportSlug          String
+  eventSlug          String?
+  editionYear        Int?
+  articleType        String        @default("Event Guide")
+  excerpt            String
+  content            String
+  featuredImage      String
+  authorId           String
+  publishedAt        DateTime
+  updatedAt          DateTime?
+  scheduledFor       DateTime?
+  status             ArticleStatus @default(draft)
+  readingTimeMinutes Int
+  featured           Boolean       @default(false)
+  tables             Json?
+  references         Json?
+  seo                Json
+
+  sport    Sport         @relation(fields: [sportSlug], references: [slug])
+  author   Author        @relation(fields: [authorId], references: [id])
+  edition  EventEdition? @relation(fields: [sportSlug, eventSlug, editionYear], references: [sportSlug, eventSlug, year])
+  comments Comment[]
+
+  // NOTE: true slug-collision scoping (sportSlug+eventSlug+editionYear+slug,
+  // with JS `undefined === undefined` semantics for general articles) is
+  // enforced in application code (server.ts), not by a DB unique constraint
+  // here — Postgres treats NULL columns as distinct in unique constraints,
+  // which would NOT match the app's existing JS equality behavior for
+  // general (no event/edition) articles. See server.ts's article creation
+  // handler for the actual collision check, preserved as-is.
+  @@index([sportSlug])
+  @@index([status])
+  @@index([status, scheduledFor])
+  @@index([slug])
+  @@index([authorId])
+}
+
+// ── Authors & Staff Identity (Phase 1 relationship preserved) ──
+
+model Author {
+  id           String  @id
+  slug         String  @unique
+  name         String
+  roleTitle    String
+  bio          String
+  avatar       String
+  twitter      String?
+  email        String?
+  articleCount Int?    @default(0)
+
+  // Phase 1: links a public byline to the staff account permitted to edit
+  // its articles. Nullable — many Author profiles have no staff login
+  // (freelance/legacy credits). No onDelete cascade: deleting a User must
+  // not delete their Author profile/byline (matches current app behavior,
+  // which never deletes Authors when a User is deleted).
+  userId String? @unique
+  user   User?   @relation(fields: [userId], references: [id])
+
+  articles Article[]
+}
+
+model User {
+  id           String     @id
+  name         String
+  email        String     @unique
+  role         Role
+  avatar       String
+  joinedAt     DateTime
+  updatedAt    DateTime?
+  status       UserStatus @default(active)
+  // Server-only. Never selected into any API response — see
+  // server/db/users.ts's sanitizeUser() projection.
+  passwordHash String
+
+  authorProfile Author?
+  sessions      Session[]
+
+  @@index([email])
+  @@index([role, status])
+}
+
+// Phase 1: opaque-token sessions. Deleting the user cascades to their
+// sessions, matching the existing manual `db.sessions = db.sessions.filter(...)`
+// behavior on user deletion in server.ts exactly.
+model Session {
+  id        String   @id
+  userId    String
+  createdAt DateTime
+  expiresAt DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// ── Comments (denormalized author fields preserved exactly as the JSON
+// version stores them — no live join to User, so a comment keeps showing
+// its author's name/avatar/role even if that User is later deleted, exactly
+// matching current behavior) ──
+
+model Comment {
+  id         String        @id
+  articleId  String
+  userId     String
+  userName   String
+  userAvatar String?
+  userRole   Role?
+  content    String
+  createdAt  DateTime
+  status     CommentStatus @default(pending)
+
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@index([articleId])
+  @@index([status])
+}
+
+// ── Standalone collections (no relations in the current app — preserved
+// disconnected, matching existing behavior exactly) ──
+
+model MediaItem {
+  id           String            @id
+  title        String
+  url          String
+  altText      String
+  caption      String?
+  credit       String?
+  source       String?
+  license      String?
+  creationType String  @default("Original")
+  uploadedAt   DateTime
+  fileSize     String?
+  dimensions   String?
+}
+
+model AdSlotConfig {
+  id                   String  @id
+  name                 String
+  placementDescription String
+  enabled              Boolean @default(false)
+  sponsorName          String?
+  bannerText           String?
+  linkUrl              String?
+  dimensions           String
+}
+
+model RedirectRule {
+  id         String   @id
+  sourceUrl  String
+  targetUrl  String
+  statusCode Int
+  createdAt  DateTime
+  isActive   Boolean  @default(true)
+
+  // No uniqueness constraint on sourceUrl — matches the current app's
+  // documented gap exactly (duplicate/conflicting rules are possible today;
+  // not introduced or fixed by this migration).
+  @@index([sourceUrl])
+  @@index([isActive])
+}
+
+model AuditLog {
+  id         String          @id
+  // Free-text-ish actor identity, intentionally NOT a foreign key: real
+  // audit rows already reference values that are not valid User ids
+  // (e.g. "system-scheduler" for the publish daemon, "unknown" for failed
+  // logins against a non-existent email) — a FK constraint here would break
+  // existing, correct application behavior.
+  userId     String
+  userName   String
+  action     String
+  entityType AuditEntityType
+  entityId   String
+  timestamp  DateTime
+  details    String
+
+  @@index([timestamp])
+  @@index([userId])
+  @@index([entityType, entityId])
+}

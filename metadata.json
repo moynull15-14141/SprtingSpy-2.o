@@ -1,0 +1,6 @@
+{
+  "name": "SportingSpy",
+  "description": "Premium multi-sport information and editorial platform covering global events, editions, schedules, results, records, and in-depth guides.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,20 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+/server/generated/prisma
+
+# Phase 2.1: local PostgreSQL dumps (see DATABASE_OPERATIONS.md) can contain
+# real user data (password hashes, emails) and must never be committed.
+/backups/
+
+# Database dumps / local credential files
+*.dump
+*.sql.gz
+*.pem
+*.key

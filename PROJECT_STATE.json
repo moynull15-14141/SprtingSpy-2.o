@@ -1,0 +1,467 @@
+{
+  "meta": {
+    "generatedAt": "2026-09-26",
+    "lastUpdatedPhase": "Phase 1 - Authentication & Staff Identity",
+    "method": "manual source inspection + Phase 0.1 and Phase 1: live tested implementations (23/23 Phase 1 tests passing)",
+    "trustNote": "This file supersedes DEVELOPER_HANDOFF.md and README.md claims wherever they conflict. See PROJECT_BRAIN.md Section 26, 'Phase 0.1 Security Hardening', and 'Phase 1 - Authentication & Staff Identity'.",
+    "nodeModulesInstalled": true,
+    "dataDbJsonExists": true,
+    "dataDbJsonSizeBytes": 63870
+  },
+  "project": {
+    "name": "SportingSpy",
+    "domain": "sportingspy.com",
+    "origin": "Google AI Studio export",
+    "type": "single Vite+React SPA with a thin Express backend",
+    "isMonorepo": false,
+    "hasBackendApp": true,
+    "hasAdminApp": false,
+    "adminIsRouteWithinSpa": true
+  },
+  "architecture": {
+    "frontendFramework": "React 19",
+    "backendFramework": "Express 4",
+    "language": "TypeScript",
+    "buildTool": "Vite 8",
+    "cssFramework": "Tailwind CSS v4",
+    "router": "hand-rolled string-path matcher (no react-router)",
+    "stateManagement": "single React Context (AppContext.tsx), no Redux/Zustand/Query",
+    "renderingMode": "client-side rendering only (no SSR/SSG)",
+    "serverRuntime": "tsx (runs server.ts directly, dev and 'prod start' use identical command)"
+  },
+  "apps": {
+    "web": {
+      "path": "src/",
+      "entry": "src/main.tsx",
+      "description": "Public site + admin console, single SPA"
+    },
+    "server": {
+      "path": "server.ts",
+      "description": "Express server: JSON-file persistence, REST API, RBAC middleware (header-based, unverified), redirect engine, dynamic sitemap/robots, scheduled article publisher"
+    }
+  },
+  "packages": null,
+  "database": {
+    "type": "flat JSON file",
+    "engine": "none (no SQL/NoSQL server)",
+    "orm": "none",
+    "file": "data/db.json",
+    "migrations": false,
+    "seedSource": "src/data/seedData.ts",
+    "seedBehaviorOnMissingFile": "auto-created from seed data on first server start",
+    "reseedOnExistingFile": false,
+    "resetMechanism": "manual deletion of data/db.json",
+    "concurrencyControl": false,
+    "transactionSupport": false,
+    "connectionConfig": "none (direct fs.readFileSync/writeFileSync)",
+    "environmentVariableForDb": null
+  },
+  "models": {
+    "Sport": {
+      "status": "implemented",
+      "pk": "id",
+      "uniqueConstraints": ["slug (app-level check)"],
+      "fk": [],
+      "cascadeOnDelete": "blocked if events or articles reference it (orphan guard present)",
+      "timestamps": false,
+      "softDelete": false
+    },
+    "SportEvent": {
+      "status": "implemented",
+      "pk": "id",
+      "uniqueConstraints": ["(sportSlug, slug) app-level check"],
+      "fk": ["sportSlug -> Sport.slug (not validated on write)"],
+      "cascadeOnDelete": "blocked if editions or articles reference it (orphan guard present)",
+      "timestamps": false,
+      "softDelete": false
+    },
+    "EventEdition": {
+      "status": "implemented",
+      "pk": "id",
+      "uniqueConstraints": ["(sportSlug, eventSlug, year) app-level check"],
+      "fk": ["eventSlug/sportSlug (not validated on write)"],
+      "cascadeOnDelete": "NOT GUARDED - deleting can orphan articles referencing editionYear",
+      "timestamps": false,
+      "softDelete": false,
+      "bug": "missing orphan-article guard unlike Sport/Event deletes"
+    },
+    "Article": {
+      "status": "implemented",
+      "pk": "id",
+      "uniqueConstraints": ["slug unique within (sportSlug, eventSlug, editionYear) scope"],
+      "fk": ["authorId -> Author.id (not validated)", "sportSlug/eventSlug (not validated)"],
+      "contentFormat": "plain string, entered via raw textarea; rendering path (ArticlePage.tsx) NOT VERIFIED for XSS safety",
+      "statuses": ["draft", "preview", "scheduled", "published", "archived"],
+      "scheduledPublishing": "real, automated via 30s server interval + on-read trigger",
+      "cascadeOnDelete": "hard delete, no restore/undo",
+      "timestamps": true,
+      "softDelete": false,
+      "knownBug": "hardcoded 'auth-alistair' ownership bypass in PUT /api/articles/:id"
+    },
+    "Author": {
+      "status": "implemented (create/update only, no delete endpoint)",
+      "pk": "id",
+      "uniqueConstraints": "slug NOT enforced on API create (gap)",
+      "articleCountField": "set to 0 on create, never incremented server-side"
+    },
+    "User": {
+      "status": "partial",
+      "pk": "id",
+      "hasPasswordField": false,
+      "hasSessionMechanism": false,
+      "creationViaAdminUI": "MOCK - local React state only, no server persistence, no POST /api/users route exists",
+      "roleChangeAPI": "real (PUT /api/users/:id/role, Admin only)"
+    },
+    "Comment": {
+      "status": "implemented",
+      "pk": "id",
+      "fk": ["articleId -> Article.id (not validated)", "userId denormalized, not a live FK"],
+      "moderation": "real (Admin/Editor)",
+      "autoApproveForStaff": true,
+      "rateLimiting": false,
+      "spamControl": false,
+      "authorEditOwnComment": false
+    },
+    "MediaItem": {
+      "status": "foundation only",
+      "pk": "id",
+      "uploadMechanism": "URL text entry, not a real file upload",
+      "processingPipeline": false,
+      "fkToArticle": false,
+      "usageTracking": false
+    },
+    "AdSlotConfig": {
+      "status": "implemented (fixed slot set)",
+      "pk": "id",
+      "closedEnum": true,
+      "defaultEnabled": false,
+      "realAdNetwork": false
+    },
+    "AuditLog": {
+      "status": "implemented",
+      "pk": "id",
+      "appendOnly": true,
+      "deleteEndpoint": false,
+      "capturesIpUserAgent": false,
+      "identitySource": "same spoofable header-derived identity as RBAC"
+    },
+    "RedirectRule": {
+      "status": "implemented",
+      "pk": "id",
+      "uniqueConstraints": "none on sourceUrl",
+      "serverEnforcement": "real 301/302 via Express middleware with loop/chain detection (max 5 hops)"
+    },
+    "StaticPage": { "status": "not_implemented", "note": "hardcoded JSX in src/pages/StaticPages.tsx, not database-backed" },
+    "Permission": { "status": "not_implemented", "note": "hardcoded role arrays inline in server.ts, not a data model" },
+    "Settings": { "status": "not_implemented", "note": "BRANDING config is a static TS file, not a database model or admin-editable" },
+    "SeoMetadata": { "status": "implemented_as_embedded_object", "note": "embedded on Sport/SportEvent/EventEdition/Article, not a standalone table" }
+  },
+  "relationships": {
+    "enforcementMechanism": "string slug/ID matching in application code, no real foreign keys",
+    "hierarchy": "Sport -> SportEvent -> EventEdition -> Article, plus Sport -> Article (general guides, no event)",
+    "orphanGuardsPresent": ["Sport delete", "SportEvent delete"],
+    "orphanGuardsMissing": ["EventEdition delete"],
+    "unvalidatedReferences": ["Article.authorId", "SportEvent.sportSlug", "EventEdition.eventSlug/sportSlug", "Comment.articleId"]
+  },
+  "routes": {
+    "public": [
+      {"path": "/", "component": "HomePage", "status": "implemented"},
+      {"path": "/sports", "component": "SportsDirectoryPage", "status": "implemented"},
+      {"path": "/events", "component": "EventsDirectoryPage", "status": "implemented"},
+      {"path": "/latest", "component": "LatestArticlesPage", "status": "implemented"},
+      {"path": "/search", "component": "SearchPage", "status": "implemented (client-side filter)"},
+      {"path": "/{sport}", "component": "SportPage", "status": "implemented"},
+      {"path": "/{sport}/{event}", "component": "EventPage", "status": "implemented"},
+      {"path": "/{sport}/{event}/{year}", "component": "EventEditionPage", "status": "implemented"},
+      {"path": "/{sport}/{event}/{year}/{article}", "component": "ArticlePage", "status": "implemented"},
+      {"path": "/{sport}/{article}", "component": "ArticlePage", "status": "implemented (general article, no event)"},
+      {"path": "/author/{slug}", "component": "AuthorPage", "status": "implemented"},
+      {"path": "/about|/contact|/privacy|/terms|/dmca", "component": "StaticPages", "status": "implemented (hardcoded content)"},
+      {"path": "*", "component": "inline 404 block", "status": "implemented, minimal, no SeoHead on 404"}
+    ],
+    "admin": {
+      "basePath": "/admin",
+      "guardedAtRouteLevel": false,
+      "guardedAtApiLevel": true,
+      "guardMechanism": "server-env-configured development identity (Phase 0.1); client-supplied role headers no longer trusted",
+      "tabs": [
+        {"tab": "dashboard", "component": "AdminDashboard", "verified": "partial"},
+        {"tab": "articles", "component": "AdminArticles", "crud": "full", "verified": true},
+        {"tab": "sports", "component": "AdminSports", "crud": "full (Admin only)", "verified": "api-level"},
+        {"tab": "events", "component": "AdminEvents", "crud": "full (events + editions)", "verified": "api-level"},
+        {"tab": "authors", "component": "AdminAuthors", "crud": "create/update only, no delete route", "verified": true},
+        {"tab": "users", "component": "AdminUsers", "crud": "role-change real, user creation MOCK (not persisted)", "verified": true},
+        {"tab": "comments", "component": "AdminComments", "crud": "moderate/delete", "verified": "api-level"},
+        {"tab": "media", "component": "AdminMedia", "crud": "create/update/delete metadata only, no real upload", "verified": true},
+        {"tab": "ads", "component": "AdminAds", "crud": "update only, fixed slot set", "verified": true},
+        {"tab": "seo", "component": "AdminSeoAudit", "crud": "read-only, PARTIALLY HARDCODED metrics", "verified": true},
+        {"tab": "redirects", "component": "AdminRedirects", "crud": "full + Nginx config text export", "verified": true},
+        {"tab": "audit", "component": "AdminAuditLogs", "crud": "read-only", "verified": "partial"}
+      ]
+    }
+  },
+  "navigation": {
+    "desktopZones": ["brand wordmark (text only, from BRANDING config)", "nav links", "theme toggle + user/role menu"],
+    "sportsMenu": {"dynamic": true, "source": "AppContext.sports filtered by isVisible", "autoUpdatesOnNewSport": true},
+    "staticNavLinks": ["Events", "Latest", "Search", "Editorial CMS"],
+    "mobileMenuBug": "shows sports.slice(0,8) without isVisible filter, inconsistent with desktop",
+    "adminLinkVisibleToAllRoles": true
+  },
+  "authRbac": {
+    "authenticationImplemented": true,
+    "authenticationType": "real email+password login with server-side sessions (Phase 1)",
+    "productionAuthImplemented": "partial - real login/sessions exist; no password reset, MFA, email verification, or CSRF token yet",
+    "hasPasswordField": true,
+    "passwordHashing": "Node crypto.scrypt, per-user random salt, timing-safe verification (server/password.ts)",
+    "hasSessionCookieOrJwt": true,
+    "sessionType": "opaque random token cookie (HttpOnly, SameSite=Lax, Secure in production) resolved against a `sessions` collection in data/db.json - no signing secret needed since the cookie carries no data",
+    "phase01Applied": true,
+    "phase1Applied": true,
+    "identitySource": "server/auth.ts: session cookie -> data/db.json sessions -> users. DEV_LOGIN_BYPASS (disabled by default, env-gated) is the only non-session path and never overrides a real session.",
+    "clientSuppliedRoleHeadersTrusted": false,
+    "clientSuppliedRoleHeadersRead": false,
+    "roleSwitchingIsUiPreviewOnly": "REMOVED in Phase 1 - real login/logout UI replaces the fake role switcher entirely",
+    "serverEnforcement": "requireAuth()/requireRole() in server/auth.ts derive AuthContext from the resolved session's user record; x-user-id/x-user-role are never read for authorization",
+    "productionStartupGuard": "AUTH_MODE=production now boots successfully (real auth exists); refused only if DEV_LOGIN_BYPASS=true is also set",
+    "severityNoteHistorical": "FIXED IN PHASE 0.1: any HTTP client could previously set x-user-role: Admin and pass all permission checks. FIXED IN PHASE 1: the Phase 0.1 placeholder identity (env-var configured, not real login) is replaced by real per-user authentication.",
+    "verifiedByLiveTest": true,
+    "lastActiveAdminProtection": "role change, deactivation, and deletion of the sole active Admin are all blocked with 400 (isLastActiveAdmin() in server.ts)",
+    "roles": {
+      "Admin": "full access to all mutation endpoints",
+      "Editor": "articles/events/editions create+update, comments moderate+delete, authors create+update, media create+update; no deletes on sports/events/editions",
+      "Author": "articles create + update own only, enforced via real Author.userId<->User.id linkage (Phase 1 fix; hardcoded 'auth-alistair' bypass removed in Phase 0.1, underlying ID-namespace bug fixed in Phase 1)",
+      "Reader": "comments create only (auto-pending); requires a real authenticated session since there is no public visitor account system yet (staff-only auth, documented distinction in server.ts)"
+    }
+  },
+  "comments": {
+    "status": "partial",
+    "moderationQueue": true,
+    "autoApproveStaff": true,
+    "rateLimiting": false,
+    "spamControl": false,
+    "authorCanEditOwnComment": false,
+    "requiresRealSession": "Phase 1: comment posting requires a real authenticated staff session; no public visitor accounts exist yet"
+  },
+  "search": {
+    "type": "client-side substring filter",
+    "serverEndpoint": false,
+    "fullTextSearchEngine": false,
+    "pagination": false,
+    "fuzzyMatching": false,
+    "autocomplete": false,
+    "searchableEntities": ["Sport", "SportEvent", "EventEdition", "Article (title/subtitle/excerpt/content)"]
+  },
+  "media": {
+    "uploadImplemented": false,
+    "storageBackend": "none - raw URL string entry",
+    "imageProcessing": false,
+    "responsiveImages": false,
+    "cdn": false,
+    "metadataFields": ["title", "altText", "caption", "credit", "source", "license", "creationType"],
+    "creationTypeIsManualTag": true,
+    "usageTrackingToArticles": false,
+    "duplicateDetection": false
+  },
+  "seo": {
+    "dynamicTitleMetaDescCanonical": true,
+    "dynamicOgTags": true,
+    "dynamicTwitterTags": false,
+    "jsonLdMechanismExists": true,
+    "jsonLdPayloadCompletenessVerified": false,
+    "renderingTiming": "client-side post-mount (CSR only, no SSR)",
+    "seoAuditDeskRealMetrics": ["meta description length", "title length"],
+    "seoAuditDeskFakeMetrics": ["Schema Entity Compliance (hardcoded 100%)", "Canonical URL Resolution (hardcoded 'Unified')"]
+  },
+  "sitemapRobots": {
+    "staticFilesExist": true,
+    "staticFilesPath": "public/sitemap.xml, public/robots.txt",
+    "dynamicGenerationExists": true,
+    "dynamicRoutes": ["/sitemap.xml", "/robots.txt"],
+    "dynamicSourceOfTruth": "data/db.json, live at request time",
+    "publishedArticlesOnlyInSitemap": true,
+    "hardcodedProductionDomain": "https://sportingspy.com",
+    "duplicateSourceRisk": "static public/ files vs dynamic server.ts routes may collide depending on static-serving precedence in production, not verified"
+  },
+  "redirects": {
+    "model": "RedirectRule",
+    "adminCrud": true,
+    "serverEnforcement": "real, runs before Vite/SPA middleware",
+    "statusCodesSupported": [301, 302],
+    "loopPrevention": true,
+    "chainDetectionMaxHops": 5,
+    "clientSideDuplicateCheck": true,
+    "nginxConfigExport": "text generator only, not wired to deployment automation",
+    "destinationSchemeValidation": "added Phase 0.1: sourceUrl must be a relative site path, targetUrl must be http(s) or relative - javascript:/data: schemes rejected"
+  },
+  "ads": {
+    "defaultState": "OFF",
+    "slotsFixed": true,
+    "slotCount": 9,
+    "realAdNetwork": false,
+    "clsSafe": true,
+    "directSponsorshipOnly": true
+  },
+  "auditLogging": {
+    "implemented": true,
+    "appendOnly": true,
+    "deleteEndpoint": false,
+    "capturesIpUserAgent": false,
+    "loggedActions": [
+      "Created/Updated/Deleted Article",
+      "Created/Updated/Deleted Sport",
+      "Created/Updated/Deleted Permanent Event",
+      "Created/Updated/Deleted Event Edition",
+      "Submitted/Moderated/Deleted Comment",
+      "Created/Updated/Deleted Redirect Rule",
+      "Created/Updated Author Profile",
+      "Changed User Role",
+      "Uploaded/Updated/Deleted Media Asset",
+      "Configured Ad Slot",
+      "System Boot & Database Seed Initialized",
+      "Auto-Published Scheduled Article"
+    ]
+  },
+  "security": {
+    "authentication": true,
+    "authenticationNote": "Phase 1: real email+password login with server-side sessions. Not a complete production auth system - no password reset, MFA, or email verification yet.",
+    "authorization": "session-derived AuthContext (server/auth.ts); client-supplied role headers no longer trusted or read (Phase 0.1), placeholder dev identity replaced by real per-user sessions (Phase 1)",
+    "inputValidation": "centralized in server/validation.ts: presence, length caps, slug format, safe-URL-scheme checks (Phase 0.1) plus email format and password strength (Phase 1), applied to article/sport/event/edition/author/comment/media/ad/redirect/user mutation endpoints",
+    "xssRiskVerified": true,
+    "xssRiskFinding": "ArticlePage/comments/author bios render as plain React JSX text (auto-escaped, safe). The only dangerouslySetInnerHTML sites (SeoHead.tsx, Breadcrumbs.tsx JSON-LD) had a real script-tag-breakout gap, fixed by escaping '<' to \\u003c before injection.",
+    "xssFixVerified": "confirmed via standalone test: breakout payload neutralized and JSON round-trips losslessly",
+    "csrfProtection": "partial - SameSite=Lax cookie only, no CSRF token (Phase 2 follow-up)",
+    "sqlInjectionApplicable": false,
+    "fileUploadSecurityApplicable": false,
+    "rateLimiting": "login endpoint only (server/rateLimit.ts): 8 attempts per (IP,email) per 15 min, in-memory, resets on restart, does not scale across instances (Phase 2 follow-up)",
+    "passwordHandling": "Node crypto.scrypt with per-user random salt, timing-safe comparison, timing-camouflage on unknown-email login attempts (server/password.ts)",
+    "sessionManagement": "opaque random session id in HttpOnly cookie, resolved against data/db.json sessions collection; 7-day expiry; deactivation/deletion of a user immediately invalidates their sessions",
+    "corsConfigured": false,
+    "securityHeaders": false,
+    "adminRouteGuardedAtPageLevel": false,
+    "draftPreviewQueryBypassRemoved": "the old ?preview=true query param that let any anonymous client view unpublished articles was removed in Phase 0.1; preview visibility is now decided solely by AuthContext.role",
+    "productionAuthStartupGuard": "AUTH_MODE=production now boots successfully (Phase 1: real auth exists); refused only if DEV_LOGIN_BYPASS=true is also set",
+    "lastActiveAdminProtection": true,
+    "eventEditionOrphanGuard": "added Phase 1: DELETE /api/editions/:id blocked with 400 if dependent articles exist, mirroring the existing Sport/Event guards"
+  },
+  "environment": {
+    "variables": [
+      {"name": "GEMINI_API_KEY", "requiredLocally": false, "requiredProduction": false, "secret": true, "consumedInCode": false},
+      {"name": "APP_URL", "requiredLocally": false, "requiredProduction": false, "secret": false, "consumedInCode": false},
+      {"name": "PORT", "requiredLocally": false, "requiredProduction": true, "secret": false, "consumedInCode": true},
+      {"name": "NODE_ENV", "requiredLocally": false, "requiredProduction": true, "secret": false, "consumedInCode": true},
+      {"name": "DISABLE_HMR", "requiredLocally": false, "requiredProduction": false, "secret": false, "consumedInCode": true},
+      {"name": "AUTH_MODE", "requiredLocally": false, "requiredProduction": false, "secret": false, "consumedInCode": true, "addedInPhase": "0.1, semantics updated in 1"},
+      {"name": "DEV_LOGIN_BYPASS", "requiredLocally": false, "requiredProduction": false, "secret": false, "consumedInCode": true, "addedInPhase": 1, "note": "disabled by default; replaces Phase 0.1's DEV_USER_ROLE/DEV_AUTH_TOKEN which are no longer read"},
+      {"name": "DEV_BYPASS_USER_ID", "requiredLocally": false, "requiredProduction": false, "secret": false, "consumedInCode": true, "addedInPhase": 1}
+    ],
+    "databaseUrlPresent": false,
+    "envFilesPresent": [".env.example"],
+    "realEnvFilePresent": false
+  },
+  "integrations": {
+    "geminiAi": {"status": "installed_unused", "evidence": "zero grep matches for genai/GEMINI in src/"},
+    "googleFonts": {"status": "active"},
+    "unsplashHotlinking": {"status": "active", "risk": "hotlink dependency, no local caching"},
+    "sportsDataProvider": {"status": "not_implemented"},
+    "objectStorage": {"status": "not_implemented"},
+    "authProvider": {"status": "not_implemented"},
+    "analyticsMonitoring": {"status": "not_implemented"},
+    "emailService": {"status": "not_implemented"},
+    "searchConsoleBingWebmaster": {"status": "not_implemented"}
+  },
+  "testing": {
+    "testFilesFound": false,
+    "testRunnerInstalled": false,
+    "lintScript": "tsc --noEmit (type-check only, no ESLint)",
+    "buildVerified": false,
+    "ciConfigFound": false
+  },
+  "deployment": {
+    "readiness": "NOT_READY",
+    "dockerfilePresent": false,
+    "nginxConfigPresent": false,
+    "processManagerConfigPresent": false,
+    "ciPresent": false,
+    "hardcodedProductionDomainInServerCode": true,
+    "singleFileDbUnsuitedForScale": true
+  },
+  "documentationStatus": {
+    "readmeIsGenericBoilerplate": true,
+    "developerHandoffAccurateOnStructure": true,
+    "developerHandoffOverstatesRbacSecurity": true,
+    "developerHandoffOmitsUserCreationMock": true,
+    "developerHandoffOmitsHardcodedSeoAuditMetrics": true,
+    "developerHandoffHonestAboutVpsMigrationTodo": true
+  },
+  "known_gaps": [
+    "RESOLVED (Phase 0.1 + 1): No real authentication/session system - RBAC was header-spoofable (Phase 0.1 fix), then replaced entirely with real email+password login + server-side sessions (Phase 1). Still not a complete production auth system - no password reset/MFA/email verification/CSRF token.",
+    "RESOLVED (Phase 1): Admin user creation via UI is now server-persisted (POST /api/users) with hashed passwords",
+    "RESOLVED (Phase 1): EventEdition delete now has an orphan-article guard, mirroring Sport/Event",
+    "Mobile nav sports list ignores isVisible filter",
+    "AdminSeoAudit reports hardcoded compliance metrics",
+    "RESOLVED (Phase 0.1): Article.content renders as plain JSX text (safe); JSON-LD script-breakout XSS in SeoHead.tsx/Breadcrumbs.tsx was found and fixed",
+    "No real media upload/storage/processing pipeline",
+    "Search is client-side substring filter only, no server search, no pagination",
+    "No tests, no CI, no lint beyond tsc --noEmit",
+    "No Dockerfile/deployment tooling",
+    "Hardcoded production domain in server.ts",
+    "@google/genai and motion dependencies appear unused",
+    "RESOLVED (Phase 0.1 + 1): Hardcoded 'auth-alistair' article-ownership bypass removed (Phase 0.1); the underlying Author/User ID-namespace mismatch that necessitated it was fixed via a real Author.userId<->User.id link (Phase 1)",
+    "BRANDING.colors not actually wired through a live theme token system",
+    "RESOLVED (Phase 1, partial): login rate limiting now exists; still in-memory only, doesn't scale across instances (Phase 2 follow-up); no rate limiting on other endpoints",
+    "RESOLVED (Phase 1): Comments now require a REAL authenticated staff session (not a dev credential); no public visitor account system exists yet (documented STAFF vs PUBLIC distinction)",
+    "No CSRF token (SameSite=Lax only) - tracked for Phase 2",
+    "A new Author-role staff account with no linked Author profile gets a raw-userId byline until an Admin creates a matching Author profile"
+  ],
+  "next_steps": {
+    "phase0_critical_STATUS": "COMPLETE as of Phase 0.1 Security Hardening - see PROJECT_BRAIN.md",
+    "phase0_critical": [
+      "DONE: Verified ArticlePage.tsx content rendering - safe (plain JSX text); fixed a real JSON-LD script-breakout XSS in SeoHead.tsx/Breadcrumbs.tsx instead",
+      "DONE: Removed the RBAC spoofing vulnerability entirely (server/auth.ts); real production auth is still a separate future phase",
+      "DONE: Removed hardcoded auth-alistair ownership bypass",
+      "DONE (Phase 1): Added orphan-article guard to EventEdition delete"
+    ],
+    "phase1_STATUS": "COMPLETE as of Phase 1 Authentication & Staff Identity - see PROJECT_BRAIN.md (23/23 tests passing)",
+    "phase1_core_missing": [
+      "DONE: Real authentication (email+password) + server-side session management",
+      "DONE: Persist admin user creation server-side (POST /api/users) with hashed passwords",
+      "DONE: Fixed Author ownership via real Author.userId<->User.id relationship",
+      "DONE: EventEdition orphan-article guard",
+      "DONE: Basic login rate limiting",
+      "NOT DONE (deferred to Phase 2): Real media upload + storage",
+      "NOT DONE (deferred to Phase 2): Link MediaItem to Article.featuredImage as a real FK",
+      "NOT DONE (deferred to Phase 2): CSRF protection, password reset, shared-store rate limiting",
+      "NOT DONE (out of scope by design): Public user registration/login (staff-only auth this phase)"
+    ],
+    "phase2_production_hardening": [
+      "Migrate data/db.json to PostgreSQL + ORM",
+      "Add input validation (Zod) on all API bodies",
+      "Add rate limiting",
+      "Add security headers (helmet) + CORS policy",
+      "Environment-drive hardcoded domain",
+      "Add test suite (Vitest/Playwright)"
+    ],
+    "phase3_seo_content_intelligence": [
+      "Add SSR/SSG for crawlability",
+      "Replace hardcoded SEO audit metrics with real checks",
+      "Add dynamic Twitter card tags",
+      "Move to server-side/indexed search"
+    ],
+    "phase4_media_infrastructure": [
+      "Image processing pipeline (Sharp)",
+      "CDN/caching layer"
+    ],
+    "phase5_monetization": [
+      "Real ad network integration (only if/when decided; currently correctly OFF)"
+    ],
+    "phase6_deployment_vps": [
+      "Dockerfile + Nginx reverse proxy config",
+      "Process management (PM2/systemd)"
+    ],
+    "phase7_future_integrations": [
+      "Decide fate of unused @google/genai dependency",
+      "Analytics/monitoring integration",
+      "Search Console/Bing Webmaster verification"
+    ]
+  }
+}
