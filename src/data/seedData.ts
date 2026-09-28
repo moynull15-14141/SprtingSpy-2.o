@@ -634,7 +634,7 @@ Under Grand Slam rules, Court Philippe-Chatrier and Court Suzanne-Lenglen are eq
     sportSlug: 'tennis',
     eventSlug: 'french-open',
     editionYear: 2027,
-    articleType: 'Sports Viewing Guide',
+    articleType: 'How to Watch',
     excerpt: 'Your definitive guide to following every serve at Roland-Garros across Europe, North America, Australasia, and international broadcast territories.',
     content: `
 Global broadcast distribution for Roland-Garros is managed in direct partnership between the Fédération Française de Tennis (FFT) and major regional sports networks.
@@ -1031,6 +1031,7 @@ export const INITIAL_MEDIA_ITEMS: MediaItem[] = [
     license: 'All Editorial Rights Reserved',
     creationType: 'Original',
     uploadedAt: '2026-09-01T10:00:00Z',
+    copyrightReview: 'pending',
     dimensions: '1920x1080',
   },
   {
@@ -1044,6 +1045,7 @@ export const INITIAL_MEDIA_ITEMS: MediaItem[] = [
     license: 'Editorial Syndication',
     creationType: 'Original',
     uploadedAt: '2026-09-02T11:15:00Z',
+    copyrightReview: 'pending',
     dimensions: '1600x1200',
   },
   {
@@ -1057,6 +1059,7 @@ export const INITIAL_MEDIA_ITEMS: MediaItem[] = [
     license: 'Editorial Syndication',
     creationType: 'Original',
     uploadedAt: '2026-09-03T12:00:00Z',
+    copyrightReview: 'pending',
     dimensions: '1600x1200',
   },
   {
@@ -1070,6 +1073,7 @@ export const INITIAL_MEDIA_ITEMS: MediaItem[] = [
     license: 'Editorial Use',
     creationType: 'Original',
     uploadedAt: '2026-09-04T08:30:00Z',
+    copyrightReview: 'pending',
     dimensions: '1920x1080',
   },
   {
@@ -1083,6 +1087,7 @@ export const INITIAL_MEDIA_ITEMS: MediaItem[] = [
     license: 'Licensed Partner',
     creationType: 'Licensed',
     uploadedAt: '2026-09-05T14:45:00Z',
+    copyrightReview: 'pending',
     dimensions: '1920x1080',
   },
 ];

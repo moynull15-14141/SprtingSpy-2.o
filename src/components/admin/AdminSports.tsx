@@ -8,6 +8,9 @@
  */
 
 import React, { useState } from 'react';
+import { SportIconPicker } from './SportIconPicker';
+import { SportIcon } from '../ui/SportIcon';
+import { suggestSportIcons } from '../../config/sportIcons';
 import { useApp } from '../../context/AppContext';
 import { Sport } from '../../types';
 import { Button } from '../ui/Button';
@@ -24,6 +27,8 @@ export const AdminSports: React.FC = () => {
   const [description, setDescription] = useState('');
   const [order, setOrder] = useState<number>(1);
   const [isVisible, setIsVisible] = useState(true);
+  // null = use the top suggestion for the name.
+  const [icon, setIcon] = useState<string | null>(null);
   const [metaTitle, setMetaTitle] = useState('');
   const [metaDescription, setMetaDescription] = useState('');
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -35,6 +40,7 @@ export const AdminSports: React.FC = () => {
     setDescription('');
     setOrder(sports.length + 1);
     setIsVisible(true);
+    setIcon(null);
     setMetaTitle('');
     setMetaDescription('');
     setIsCreating(false);
@@ -59,6 +65,8 @@ export const AdminSports: React.FC = () => {
       description,
       order: Number(order),
       isVisible,
+      // Store the concrete icon (chosen, or the current top suggestion) so it never changes by itself.
+      icon: icon ?? suggestSportIcons(name, slug, 1)[0]?.emoji ?? null,
       featuredEventIds: [],
       seo: {
         metaTitle: metaTitle || `${name} Tournament Guides & Records | SportingSpy`,
@@ -87,6 +95,7 @@ export const AdminSports: React.FC = () => {
     setDescription(s.description);
     setOrder(s.order);
     setIsVisible(s.isVisible);
+    setIcon(s.icon ?? null);
     setMetaTitle(s.seo.metaTitle || '');
     setMetaDescription(s.seo.metaDescription || '');
   };
@@ -98,7 +107,7 @@ export const AdminSports: React.FC = () => {
           <h2 className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">
             Sports Disciplines ({sports.length})
           </h2>
-          <p className="text-xs text-stone-500 mt-1">
+          <p className="text-xs text-stone-500 mt-1 dark:text-stone-400">
             Dynamic catalog of sports hubs. Extensible beyond the initial 12 disciplines.
           </p>
         </div>
@@ -121,7 +130,7 @@ export const AdminSports: React.FC = () => {
             <h3 className="font-serif text-lg font-bold text-stone-900 dark:text-stone-100">
               {editingId ? 'Edit Sport Hub' : 'Add New Sport Discipline'}
             </h3>
-            <button type="button" onClick={resetForm} className="text-xs text-stone-500">
+            <button type="button" onClick={resetForm} className="text-xs text-stone-500 dark:text-stone-400">
               Cancel
             </button>
           </div>
@@ -154,6 +163,8 @@ export const AdminSports: React.FC = () => {
               />
             </div>
           </div>
+
+          <SportIconPicker name={name} slug={slug} value={icon} onChange={setIcon} />
 
           <div>
             <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
@@ -220,7 +231,7 @@ export const AdminSports: React.FC = () => {
       {/* SPORTS LIST */}
       <div className="overflow-x-auto rounded-xl border border-stone-200 dark:border-stone-800">
         <table className="w-full text-left text-xs">
-          <thead className="bg-stone-50 dark:bg-stone-900/60 uppercase tracking-wider text-stone-500 border-b border-stone-200 dark:border-stone-800">
+          <thead className="bg-stone-50 dark:bg-stone-900/60 uppercase tracking-wider text-stone-500 border-b border-stone-200 dark:border-stone-800 dark:text-stone-400">
             <tr>
               <th className="p-3">Order</th>
               <th className="p-3">Name & Slug</th>
@@ -234,10 +245,11 @@ export const AdminSports: React.FC = () => {
               <tr key={sport.id} className="hover:bg-stone-50 dark:hover:bg-stone-900/40">
                 <td className="p-3 font-mono tabular-nums">{sport.order}</td>
                 <td className="p-3">
+                  <span className="mr-2 inline-flex align-middle"><SportIcon slug={sport.slug} name={sport.name} icon={sport.icon} size="sm" /></span>
                   <span className="font-semibold text-stone-900 dark:text-stone-100 mr-2">{sport.name}</span>
-                  <span className="text-stone-400 font-mono text-[11px]">/{sport.slug}</span>
+                  <span className="text-stone-500 font-mono text-[11px] dark:text-stone-400">/{sport.slug}</span>
                 </td>
-                <td className="p-3 text-stone-500 max-w-xs truncate">{sport.tagline}</td>
+                <td className="p-3 text-stone-500 max-w-xs truncate dark:text-stone-400">{sport.tagline}</td>
                 <td className="p-3">
                   <button
                     onClick={() => updateSport(sport.id, { isVisible: !sport.isVisible })}
@@ -259,7 +271,7 @@ export const AdminSports: React.FC = () => {
                   </button>
                   <button
                     onClick={() => startEdit(sport)}
-                    className="text-amber-600 dark:text-amber-400 font-semibold hover:underline"
+                    className="text-amber-700 dark:text-amber-400 font-semibold hover:underline"
                   >
                     Edit
                   </button>

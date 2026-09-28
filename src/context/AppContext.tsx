@@ -1,22 +1,17 @@
+'use client';
+
 /**
- * SportingSpy Central Application State & Navigation Context
- * Provides reactive access to sports, events, editions, articles, authors,
- * comments, media library, ad slot configuration, theme, and authenticated user.
- * Integrates directly with the full-stack server API (/api/*) for real persistence and RBAC.
+ * SportingSpy CMS data context (admin only).
+ *
+ * PHASE B: this used to be the whole application's state, hydrated from a
+ * full-database GET /api/data on every page. Public pages now render on the
+ * server with route-specific queries; this provider is mounted only under
+ * /admin and loads the CMS dataset from the staff-only GET /api/cms/data.
+ * Theme, session, notifications and navigation come from SiteContext.
+ * Every mutation below is still authorized server-side.
  */
 
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import {
-  INITIAL_AD_SLOTS,
-  INITIAL_ARTICLES,
-  INITIAL_AUTHORS,
-  INITIAL_COMMENTS,
-  INITIAL_EDITIONS,
-  INITIAL_EVENTS,
-  INITIAL_MEDIA_ITEMS,
-  INITIAL_REDIRECT_RULES,
-  INITIAL_SPORTS,
-} from '../data/seedData';
 import {
   AdSlotConfig,
   AdSlotId,
@@ -25,58 +20,21 @@ import {
   Author,
   Comment,
   EventEdition,
+  FeatureFlags,
   MediaItem,
+  MediaUsage,
   RedirectRule,
   Role,
-  SafeUser,
   Sport,
   SportEvent,
   User,
   UserStatus,
 } from '../types';
+import { useSite, type SiteContextType } from './SiteContext';
 
-/** A safe placeholder shown to logged-out visitors so components that read currentUser.role/.avatar/.name don't need a null check everywhere. It carries no real identity and the server never treats it as authenticated. */
-const GUEST_READER: SafeUser = {
-  id: 'guest-reader',
-  name: 'Guest',
-  email: '',
-  role: 'Reader',
-  avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&h=120&q=80',
-  joinedAt: new Date(0).toISOString(),
-};
+const STAFF_ROLES = ['Admin', 'Editor', 'Author'];
 
-export interface AppNotification {
-  id: string;
-  type: 'success' | 'error' | 'info';
-  message: string;
-}
-
-interface AppContextType {
-  // Theme
-  theme: 'light' | 'dark';
-  toggleTheme: () => void;
-  accountLanguage: 'en' | 'bn';
-  setAccountLanguage: (language: 'en' | 'bn') => void;
-
-  // Routing
-  currentPath: string;
-  navigate: (path: string) => void;
-
-  // PHASE 1: real authentication. `currentUser` is a derived, always-present
-  // display value (GUEST_READER when logged out) so existing components can
-  // keep reading currentUser.role/.avatar/.name without null checks — but it
-  // is NOT the source of truth for security. `authUser` (null when logged
-  // out) and `isAuthenticated` are the real signal; every mutation is
-  // enforced server-side against the session cookie regardless of what this
-  // client-side state says.
-  currentUser: SafeUser;
-  authUser: SafeUser | null;
-  isAuthenticated: boolean;
-  authLoading: boolean;
-  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  logout: () => Promise<boolean>;
-  apiCall: <T>(endpoint: string, options?: { method?: string; body?: unknown }) => Promise<{ data: T | null; error: string | null; status?: number }>;
-  updateAccountIdentity: (user: SafeUser) => void;
+interface AdminDataContextType {
   users: User[];
 
   // Core Data
@@ -90,6 +48,8 @@ interface AppContextType {
   adSlots: AdSlotConfig[];
   auditLogs: AuditLog[];
   redirectRules: RedirectRule[];
+  /** PHASE C: where each media item is used (by media id). */
+  mediaUsage: Record<string, MediaUsage[]>;
 
   // Actions for Editorial CMS
   addSport: (sport: Omit<Sport, 'id'>) => Promise<boolean>;
@@ -101,7 +61,7 @@ interface AppContextType {
   addEdition: (edition: Omit<EventEdition, 'id'>) => Promise<boolean>;
   updateEdition: (id: string, updates: Partial<EventEdition>) => Promise<boolean>;
   deleteEdition: (id: string) => Promise<boolean>;
-  addArticle: (article: Omit<Article, 'id' | 'publishedAt'>) => Promise<boolean>;
+  addArticle: (article: Omit<Article, 'id' | 'publishedAt' | 'content'> & { content?: string }) => Promise<Article | null>;
   updateArticle: (id: string, updates: Partial<Article>) => Promise<boolean>;
   deleteArticle: (id: string) => Promise<boolean>;
 
@@ -128,18 +88,15 @@ interface AppContextType {
   deleteComment: (id: string) => Promise<boolean>;
 
   // Media
-  addMediaItem: (item: Omit<MediaItem, 'id' | 'uploadedAt'>) => Promise<boolean>;
+  addMediaItem: (item: Omit<MediaItem, 'id' | 'uploadedAt' | 'copyrightReview'>) => Promise<boolean>;
+  /** PHASE C: multipart upload to the Media Library; returns the new item. */
+  uploadMedia: (file: File, metadata: Record<string, string>) => Promise<MediaItem | null>;
   updateMediaItem: (id: string, updates: Partial<MediaItem>) => Promise<boolean>;
   deleteMediaItem: (id: string) => Promise<boolean>;
 
   // Ads
   toggleAdSlot: (slotId: AdSlotId, enabled?: boolean) => void;
   updateAdSlot: (slotId: AdSlotId, updates: Partial<AdSlotConfig>) => Promise<boolean>;
-
-  // Notifications
-  notification: AppNotification | null;
-  showNotification: (message: string, type?: 'success' | 'error' | 'info') => void;
-  clearNotification: () => void;
 
   // Search
   searchQuery: string;
@@ -149,257 +106,40 @@ interface AppContextType {
   refreshData: () => Promise<void>;
 }
 
-const AppContext = createContext<AppContextType | undefined>(undefined);
+type AppContextType = SiteContextType & AdminDataContextType;
+
+const AppContext = createContext<AdminDataContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [accountLanguage, setAccountLanguage] = useState<'en' | 'bn'>(() => localStorage.getItem('sportingspy_account_language') === 'bn' ? 'bn' : 'en');
-  useEffect(() => { localStorage.setItem('sportingspy_account_language', accountLanguage); }, [accountLanguage]);
-  const authGeneration = useRef(0);
+  const { authUser, authLoading, authEpoch, authGeneration, apiCall, showNotification } = useSite();
   const dataGeneration = useRef(0);
-  // Theme setup with localStorage persistence
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('sportingspy_theme');
-      if (saved === 'dark' || saved === 'light') return saved;
-      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    }
-    return 'light';
-  });
 
-  useEffect(() => {
-    const root = document.documentElement;
-    if (theme === 'dark') {
-      root.classList.add('dark');
-    } else {
-      root.classList.remove('dark');
-    }
-    localStorage.setItem('sportingspy_theme', theme);
-  }, [theme]);
-
-  const toggleTheme = () => {
-    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
-  };
-
-  const [notification, setNotification] = useState<AppNotification | null>(null);
-
-  const showNotification = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
-    setNotification({ id: `notif-${Date.now()}`, message, type });
-    setTimeout(() => {
-      setNotification((curr) => (curr && curr.message === message ? null : curr));
-    }, 4500);
-  };
-
-  const clearNotification = () => setNotification(null);
-
-  const [redirectRules, setRedirectRules] = useState<RedirectRule[]>(INITIAL_REDIRECT_RULES);
-
-  // URL-synchronized client-side router with 301/302 redirect engine
-  const [currentPath, setCurrentPath] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      const rawPath = window.location.pathname || '/';
-      const path = rawPath.endsWith('/') && rawPath.length > 1 ? rawPath.slice(0, -1) : rawPath;
-      const matched = INITIAL_REDIRECT_RULES.find((r) => r.isActive && r.sourceUrl === path);
-      return matched ? matched.targetUrl : path;
-    }
-    return '/';
-  });
-
-  const navigate = (path: string) => {
-    const raw = path.endsWith('/') && path.length > 1 ? path.slice(0, -1) : path;
-    const activeRule = redirectRules.find((r) => r.isActive && r.sourceUrl === raw);
-    const destination = activeRule ? activeRule.targetUrl : raw;
-
-    if (typeof window !== 'undefined') {
-      if (activeRule) {
-        window.history.replaceState({}, '', destination);
-      } else {
-        window.history.pushState({}, '', destination);
-      }
-    }
-    setCurrentPath(destination);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    const onPopState = () => {
-      const raw = window.location.pathname || '/';
-      const path = raw.endsWith('/') && raw.length > 1 ? raw.slice(0, -1) : raw;
-      const matched = redirectRules.find((r) => r.isActive && r.sourceUrl === path);
-      if (matched) {
-        window.history.replaceState({}, '', matched.targetUrl);
-        setCurrentPath(matched.targetUrl);
-      } else {
-        setCurrentPath(path);
-      }
-    };
-    window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
-  }, [redirectRules]);
-
-  // Data collections initialized from authoritative seed data
-  const [sports, setSports] = useState<Sport[]>(INITIAL_SPORTS);
-  const [events, setEvents] = useState<SportEvent[]>(INITIAL_EVENTS);
-  const [editions, setEditions] = useState<EventEdition[]>(INITIAL_EDITIONS);
-  const [articles, setArticles] = useState<Article[]>(INITIAL_ARTICLES.filter(a => a.status === 'published'));
-  const [authors, setAuthors] = useState<Author[]>(INITIAL_AUTHORS);
+  const [redirectRules, setRedirectRules] = useState<RedirectRule[]>([]);
+  const [sports, setSports] = useState<Sport[]>([]);
+  const [events, setEvents] = useState<SportEvent[]>([]);
+  const [editions, setEditions] = useState<EventEdition[]>([]);
+  const [articles, setArticles] = useState<Article[]>([]);
+  const [authors, setAuthors] = useState<Author[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [comments, setComments] = useState<Comment[]>(INITIAL_COMMENTS.filter(c => c.status === 'approved'));
-  const [mediaItems, setMediaItems] = useState<MediaItem[]>(INITIAL_MEDIA_ITEMS);
-  const [adSlots, setAdSlots] = useState<AdSlotConfig[]>(INITIAL_AD_SLOTS);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
+  const [adSlots, setAdSlots] = useState<AdSlotConfig[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [mediaUsage, setMediaUsage] = useState<Record<string, MediaUsage[]>>({});
 
-  // PHASE 1: real authenticated identity, resolved from the server's session
-  // cookie via GET /api/auth/me — never stored in localStorage, never
-  // client-decided. `authUser` is null until that check resolves (or the
-  // visitor isn't logged in). `currentUser` below is a derived display
-  // convenience, not a security signal.
-  const [authUser, setAuthUser] = useState<SafeUser | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const currentUser: SafeUser = authUser || GUEST_READER;
-  const isAuthenticated = authUser !== null;
-  const clearPrivateData = () => {
-    authGeneration.current++;
+  // Discard everything private whenever the session ends or changes.
+  useEffect(() => {
     dataGeneration.current++;
-    setAuthUser(null);
     setUsers([]);
     setAuditLogs([]);
-    setArticles(previous => previous.filter(a => a.status === 'published'));
-    setComments(previous => previous.filter(c => c.status === 'approved'));
-    setNotification(null);
-  };
-  const updateAccountIdentity = (user: SafeUser) => { setAuthUser(user); };
+    setArticles([]);
+    setComments([]);
+  }, [authEpoch]);
 
-  // Reads the CSRF token cookie the server sets on every request (see
-  // server/csrf.ts). It is deliberately NOT HttpOnly so this same-origin
-  // frontend can read it and echo it back — a cross-site attacker's page
-  // cannot read this cookie's value due to same-origin cookie restrictions,
-  // which is exactly what makes the double-submit pattern work.
-  const readCsrfCookie = (): string | undefined => {
-    if (typeof document === 'undefined') return undefined;
-    const match = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
-    return match ? decodeURIComponent(match[1]) : undefined;
-  };
+  const isStaff = !!authUser && STAFF_ROLES.includes(authUser.role);
 
-  // API Client Helper.
-  // PHASE 0.1 removed trust in client-supplied x-user-id/x-user-role
-  // headers. PHASE 1 removes the dev-token placeholder entirely: identity
-  // now travels via an HttpOnly session cookie the browser can't read or
-  // forge, sent automatically by the browser on same-origin requests as
-  // long as `credentials: 'include'` is set — no header this code writes
-  // has any bearing on who the server thinks is making the request.
-  // PHASE 3: mutating requests also echo the csrf_token cookie back as an
-  // `x-csrf-token` header — required by server/csrf.ts's double-submit CSRF
-  // check for every POST/PUT/PATCH/DELETE.
-  const apiCall = async <T,>(
-    endpoint: string,
-    options: {
-      method?: string;
-      body?: unknown;
-    } = {}
-  ): Promise<{ data: T | null; error: string | null; status?: number }> => {
-    const generation = authGeneration.current;
-    try {
-      const method = options.method || 'GET';
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (method !== 'GET' && method !== 'HEAD') {
-        const csrfToken = readCsrfCookie();
-        if (csrfToken) headers['x-csrf-token'] = csrfToken;
-      }
-
-      const res = await fetch(endpoint, {
-        method,
-        headers,
-        credentials: 'include',
-        cache: 'no-store',
-        body: options.body ? JSON.stringify(options.body) : undefined,
-      });
-
-      if (!res.ok) {
-        if (res.status === 401 && endpoint !== '/api/auth/login' && generation === authGeneration.current) clearPrivateData();
-        const errorJson = await res.json().catch(() => ({ error: `Server error: ${res.status} ${res.statusText}` }));
-        const errorMessage = errorJson.error || `HTTP ${res.status}`;
-        if (res.status !== 401) {
-          // 401s happen routinely for logged-out visitors browsing normally
-          // (e.g. GET /api/auth/me) — surfacing a toast for every one of
-          // those would be noisy and misleading, so only genuine failures
-          // on actions the user actively took are announced.
-          showNotification(errorMessage, 'error');
-        }
-        return { data: null, error: errorMessage, status: res.status };
-      }
-
-      const json = await res.json();
-      if (generation !== authGeneration.current) return { data: null, error: 'Session changed. Please try again.' };
-      return { data: json as T, error: null, status: res.status };
-    } catch (err: unknown) {
-      console.warn(`[API] Failed to fetch from ${endpoint}:`, err);
-      return { data: null, error: 'Network failure' };
-    }
-  };
-
-  const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
-    const res = await apiCall<{ user: SafeUser }>('/api/auth/login', {
-      method: 'POST',
-      body: { email, password },
-    });
-    if (res.data?.user) {
-      clearPrivateData();
-      setAuthUser(res.data.user);
-      showNotification(`Welcome back, ${res.data.user.name}.`, 'success');
-      return { success: true };
-    }
-    return { success: false, error: res.error || 'Login failed.' };
-  };
-
-  const logout = async (): Promise<boolean> => {
-    const result = await apiCall<{ success: boolean }>('/api/auth/logout', { method: 'POST', body: {} });
-    if (!result.data?.success) {
-      showNotification('Logout could not be completed. Please try again.', 'error');
-      return false;
-    }
-    clearPrivateData();
-    localStorage.setItem('sportingspy_logout', String(Date.now()));
-    showNotification('Logged out.', 'info');
-    navigate('/');
-    return true;
-  };
-
-  // On first mount, ask the server who (if anyone) this browser is
-  // currently logged in as. This is the ONLY place client-side auth state
-  // is established — never from localStorage, never assumed.
-  useEffect(() => {
-    (async () => {
-      const generation = authGeneration.current;
-      const res = await apiCall<{ user: SafeUser }>('/api/auth/me');
-      if (generation === authGeneration.current) setAuthUser(res.data?.user || null);
-      setAuthLoading(false);
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    const onStorage = (event: StorageEvent) => { if (event.key === 'sportingspy_logout') clearPrivateData(); };
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, []);
-
-  useEffect(() => {
-    if (!authUser) return;
-    const recheck = async () => {
-      const generation = authGeneration.current;
-      const result = await apiCall<{ user: SafeUser }>('/api/auth/me');
-      if (result.data && generation === authGeneration.current) {
-        if (result.data.user.role !== authUser.role) clearPrivateData();
-        setAuthUser(result.data.user);
-      }
-    };
-    window.addEventListener('focus', recheck);
-    const timer = window.setInterval(recheck, 60_000);
-    return () => { window.removeEventListener('focus', recheck); window.clearInterval(timer); };
-  }, [authUser?.id, authUser?.role]);
-
-  // Synchronize state with persistent backend API
   const refreshData = async () => {
+    if (!isStaff) return;
     const generation = authGeneration.current;
     const request = ++dataGeneration.current;
     const res = await apiCall<{
@@ -414,25 +154,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       adSlots: AdSlotConfig[];
       auditLogs: AuditLog[];
       redirectRules: RedirectRule[];
-    }>('/api/data');
+      features: FeatureFlags;
+      mediaUsage: Record<string, MediaUsage[]>;
+    }>('/api/cms/data');
 
     if (res.data && generation === authGeneration.current && request === dataGeneration.current) {
-      if (res.data.sports) setSports(res.data.sports);
-      if (res.data.events) setEvents(res.data.events);
-      if (res.data.editions) setEditions(res.data.editions);
-      if (res.data.articles) setArticles(res.data.articles);
-      if (res.data.authors) setAuthors(res.data.authors);
-      if (res.data.users) setUsers(res.data.users);
-      if (res.data.comments) setComments(res.data.comments);
-      if (res.data.mediaItems) setMediaItems(res.data.mediaItems);
-      if (res.data.adSlots) setAdSlots(res.data.adSlots);
-      if (res.data.auditLogs) setAuditLogs(res.data.auditLogs);
-      if (res.data.redirectRules) setRedirectRules(res.data.redirectRules);
+      setSports(res.data.sports);
+      setEvents(res.data.events);
+      setEditions(res.data.editions);
+      setArticles(res.data.articles);
+      setAuthors(res.data.authors);
+      setUsers(res.data.users);
+      setComments(res.data.comments);
+      setMediaItems(res.data.mediaItems);
+      setAdSlots(res.data.adSlots);
+      setAuditLogs(res.data.auditLogs);
+      setRedirectRules(res.data.redirectRules);
+      setMediaUsage(res.data.mediaUsage || {});
     }
   };
 
-  // Initial data load + re-sync whenever auth state changes (login/logout
-  // changes which articles/preview content the server will include).
+  // Load once the session is known, and again whenever the identity changes.
   useEffect(() => {
     if (authLoading) return;
     refreshData();
@@ -567,7 +309,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return false;
   };
 
-  const addArticle = async (newArticle: Omit<Article, 'id' | 'publishedAt'>): Promise<boolean> => {
+  const addArticle = async (newArticle: Omit<Article, 'id' | 'publishedAt' | 'content'> & { content?: string }): Promise<Article | null> => {
     const res = await apiCall<Article>('/api/articles', {
       method: 'POST',
       body: newArticle,
@@ -576,9 +318,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setArticles((prev) => [res.data!, ...prev]);
       showNotification(`Article "${newArticle.title}" created (${newArticle.status}).`, 'success');
       refreshData();
-      return true;
+      return res.data;
     }
-    return false;
+    return null;
   };
 
   const updateArticle = async (id: string, updates: Partial<Article>): Promise<boolean> => {
@@ -776,7 +518,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return false;
   };
 
-  const addMediaItem = async (item: Omit<MediaItem, 'id' | 'uploadedAt'>): Promise<boolean> => {
+  const uploadMedia = async (file: File, metadata: Record<string, string>): Promise<MediaItem | null> => {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(metadata)) if (value) form.append(key, value);
+    form.append('file', file);
+    const csrf = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/)?.[1];
+    try {
+      const res = await fetch('/api/media/upload', {
+        method: 'POST',
+        body: form,
+        credentials: 'include',
+        headers: csrf ? { 'x-csrf-token': decodeURIComponent(csrf) } : {},
+      });
+      const json = await res.json().catch(() => ({ error: `Upload failed (HTTP ${res.status}).` }));
+      if (!res.ok) {
+        showNotification(json.error || 'Upload failed.', 'error');
+        return null;
+      }
+      setMediaItems((prev) => [json as MediaItem, ...prev]);
+      showNotification(`Uploaded "${(json as MediaItem).title}".`, 'success');
+      refreshData();
+      return json as MediaItem;
+    } catch {
+      showNotification('Upload failed: network error.', 'error');
+      return null;
+    }
+  };
+
+  const addMediaItem = async (item: Omit<MediaItem, 'id' | 'uploadedAt' | 'copyrightReview'>): Promise<boolean> => {
     const res = await apiCall<MediaItem>('/api/media', {
       method: 'POST',
       body: item,
@@ -841,20 +610,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   return (
     <AppContext.Provider
       value={{
-        theme,
-        toggleTheme,
-        accountLanguage,
-        setAccountLanguage,
-        apiCall,
-        updateAccountIdentity,
-        currentPath,
-        navigate,
-        currentUser,
-        authUser,
-        isAuthenticated,
-        authLoading,
-        login,
-        logout,
         users,
         sports,
         events,
@@ -866,6 +621,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         adSlots,
         auditLogs,
         redirectRules,
+        mediaUsage,
+        uploadMedia,
         addSport,
         updateSport,
         deleteSport,
@@ -895,9 +652,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteMediaItem,
         toggleAdSlot,
         updateAdSlot,
-        notification,
-        showNotification,
-        clearNotification,
         searchQuery,
         setSearchQuery,
         selectedSportFilter,
@@ -910,10 +664,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 };
 
-export const useApp = () => {
-  const context = useContext(AppContext);
-  if (!context) {
-    throw new Error('useApp must be used within an AppProvider');
-  }
-  return context;
-};
+/** CMS components read both the site context (session, theme, navigation) and the CMS data. */
+export function useApp(): AppContextType {
+  const site = useSite();
+  const data = useContext(AppContext);
+  if (!data) throw new Error('useApp must be used within an AppProvider');
+  return { ...site, ...data };
+}

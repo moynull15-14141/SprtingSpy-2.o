@@ -16,7 +16,7 @@ export const AdminComments: React.FC = () => {
           <h2 className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">
             Reader Discussion Moderation
           </h2>
-          <p className="text-xs text-stone-500 mt-1">
+          <p className="text-xs text-stone-500 mt-1 dark:text-stone-400">
             Review community submissions to maintain verified, civil sports discourse.
           </p>
         </div>
@@ -24,7 +24,7 @@ export const AdminComments: React.FC = () => {
 
       <div className="overflow-x-auto rounded-xl border border-stone-200 dark:border-stone-800">
         <table className="w-full text-left text-xs">
-          <thead className="bg-stone-50 dark:bg-stone-900/60 uppercase text-stone-500 border-b border-stone-200 dark:border-stone-800">
+          <thead className="bg-stone-50 dark:bg-stone-900/60 uppercase text-stone-500 border-b border-stone-200 dark:border-stone-800 dark:text-stone-400">
             <tr>
               <th className="p-3">Author</th>
               <th className="p-3">Comment Text</th>
@@ -41,13 +41,13 @@ export const AdminComments: React.FC = () => {
                 <tr key={comment.id} className="hover:bg-stone-50 dark:hover:bg-stone-900/40">
                   <td className="p-3 font-semibold text-stone-900 dark:text-stone-100 whitespace-nowrap">
                     {comment.userName}
-                    <span className="block text-[10px] text-stone-400 font-normal">
+                    <span className="block text-[10px] text-stone-500 font-normal dark:text-stone-400">
                       Role: {comment.userRole || 'Reader'}
                     </span>
                   </td>
                   <td className="p-3 max-w-sm">
                     <p className="text-stone-700 dark:text-stone-300 leading-snug">{comment.content}</p>
-                    <span className="text-[10px] text-stone-400 tabular-nums">
+                    <span className="text-[10px] text-stone-500 tabular-nums dark:text-stone-400">
                       {new Date(comment.createdAt).toLocaleString()}
                     </span>
                   </td>
@@ -79,7 +79,7 @@ export const AdminComments: React.FC = () => {
                     {comment.status !== 'rejected' && (
                       <button
                         onClick={() => moderateComment(comment.id, 'rejected')}
-                        className="text-stone-500 hover:text-stone-700 dark:hover:text-stone-300 hover:underline"
+                        className="text-stone-500 hover:text-stone-700 dark:hover:text-stone-300 hover:underline dark:text-stone-400"
                       >
                         Reject
                       </button>

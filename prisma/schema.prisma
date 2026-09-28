@@ -52,10 +52,13 @@ enum ArticleStatus {
   archived
 }
 
+// Spec v1.1 §4.3. Phase A renamed "ongoing" -> "active" and added
+// "archived" (migration 20260927000000_phase_a_foundation).
 enum EditionStatus {
   upcoming
-  ongoing
+  active
   completed
+  archived
 }
 
 enum CommentStatus {
@@ -66,7 +69,7 @@ enum CommentStatus {
 
 // ArticleType and MediaCreationType are deliberately plain, app-validated
 // String columns rather than Prisma enums. Both TS unions contain values
-// with spaces/ampersands ("Rules & Format", "Sports Viewing Guide") that
+// with spaces/ampersands ("Rules & Format", "How to Watch") that
 // cannot be Prisma enum identifiers without an @map translation layer on
 // every single read/write call site across server.ts. That translation
 // buys no real integrity benefit here (these fields were never DB-enforced
@@ -100,6 +103,8 @@ model Sport {
   colorTheme       String?
   heroImage        String?
   seo              Json
+  // Icon from the curated set in src/config/sportIcons.ts; null = suggested from the name.
+  icon             String?
 
   events   SportEvent[]
   articles Article[]
@@ -123,6 +128,8 @@ model SportEvent {
   featured           Boolean @default(false)
   isVisible          Boolean @default(true)
   featuredImage      String?
+  officialSourceUrl  String?
+  eventType          String?
   seo                Json
 
   sport    Sport          @relation(fields: [sportSlug], references: [slug])
@@ -185,11 +192,28 @@ model Article {
   tables             Json?
   references         Json?
   seo                Json
+  // PHASE C: rich-text body (validated TipTap/ProseMirror JSON document).
+  // When null the legacy plain-text `content` is rendered. `content` is
+  // always kept as the plain-text projection (search, reading time).
+  body               Json?
+  // PHASE C: the featured image as a Media Library relation. `featuredImage`
+  // (URL) is kept as the resolved fallback for legacy/URL-only images.
+  featuredMediaId    String?
+  // PHASE D: when an editor last confirmed the content is still accurate
+  // (freshness review). Never changes updatedAt.
+  reviewedAt         DateTime?
+  // PHASE E: weighted full-text search document. A STORED generated column
+  // computed by PostgreSQL from title/subtitle/type/sport/event/keywords/
+  // excerpt/content (see migration 20260929090000_phase_e_search). Never
+  // written by the application; read only through server/services/search.
+  searchVector       Unsupported("tsvector")? @default(dbgenerated("(((setweight(to_tsvector('english'::regconfig, COALESCE(title, ''::text)), 'A'::\"char\") || setweight(to_tsvector('english'::regconfig, ((((((((COALESCE(subtitle, ''::text) || ' '::text) || COALESCE(\"articleType\", ''::text)) || ' '::text) || replace(COALESCE(\"sportSlug\", ''::text), '-'::text, ' '::text)) || ' '::text) || replace(COALESCE(\"eventSlug\", ''::text), '-'::text, ' '::text)) || ' '::text) || COALESCE(((seo -> 'keywords'::text))::text, ''::text))), 'B'::\"char\")) || setweight(to_tsvector('english'::regconfig, COALESCE(excerpt, ''::text)), 'C'::\"char\")) || setweight(to_tsvector('english'::regconfig, COALESCE(content, ''::text)), 'D'::\"char\"))"))
 
-  sport    Sport         @relation(fields: [sportSlug], references: [slug])
-  author   Author        @relation(fields: [authorId], references: [id])
-  edition  EventEdition? @relation(fields: [sportSlug, eventSlug, editionYear], references: [sportSlug, eventSlug, year])
-  comments Comment[]
+  sport         Sport          @relation(fields: [sportSlug], references: [slug])
+  author        Author         @relation(fields: [authorId], references: [id])
+  edition       EventEdition?  @relation(fields: [sportSlug, eventSlug, editionYear], references: [sportSlug, eventSlug, year])
+  featuredMedia MediaItem?     @relation("ArticleFeaturedMedia", fields: [featuredMediaId], references: [id], onDelete: Restrict)
+  bodyMedia     ArticleMedia[]
+  comments      Comment[]
 
   // NOTE: true slug-collision scoping (sportSlug+eventSlug+editionYear+slug,
   // with JS `undefined === undefined` semantics for general articles) is
@@ -203,6 +227,24 @@ model Article {
   @@index([status, scheduledFor])
   @@index([slug])
   @@index([authorId])
+  @@index([featuredMediaId])
+  @@index([status, publishedAt])
+  @@index([searchVector], type: Gin)
+  @@index([title(ops: raw("gin_trgm_ops"))], map: "Article_title_trgm_idx", type: Gin)
+  @@index([excerpt(ops: raw("gin_trgm_ops"))], map: "Article_excerpt_trgm_idx", type: Gin)
+}
+
+// PHASE C: images referenced inside an article body (usage tracking).
+// Maintained by the server on every article save.
+model ArticleMedia {
+  articleId String
+  mediaId   String
+
+  article Article   @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  media   MediaItem @relation(fields: [mediaId], references: [id], onDelete: Restrict)
+
+  @@id([articleId, mediaId])
+  @@index([mediaId])
 }
 
 // ── Authors & Staff Identity (Phase 1 relationship preserved) ──
@@ -302,6 +344,23 @@ model MediaItem {
   uploadedAt   DateTime
   fileSize     String?
   dimensions   String?
+
+  // PHASE C: stored file + processing results (null for legacy URL-only items).
+  storageKey      String?
+  filename        String?
+  mimeType        String?
+  width           Int?
+  height          Int?
+  sizeBytes       Int?
+  variants        Json?
+  // PHASE C: Spec v1.1 §16 metadata.
+  aiTool          String?
+  humanEditing    String?
+  copyrightReview String    @default("pending")
+  updatedAt       DateTime?
+
+  featuredIn Article[]      @relation("ArticleFeaturedMedia")
+  bodyUsages ArticleMedia[]
 }
 
 model AdSlotConfig {
@@ -313,21 +372,102 @@ model AdSlotConfig {
   bannerText           String?
   linkUrl              String?
   dimensions           String
+  // PHASE F: who fills the slot. "house" = the sponsor/partner banner above
+  // (no third party); "adsense" = a Google AdSense unit, rendered only with
+  // advertising consent. providerSlotId = the provider's ad unit ID.
+  provider             String  @default("house")
+  providerSlotId       String?
+  creativeId           String?
+  creative             AdCreative? @relation(fields: [creativeId], references: [id], onDelete: Restrict)
+  creativeAlt          String?
+  creativeFit          String @default("contain")
+}
+
+model AdCreative {
+  id              String @id
+  title           String
+  url             String
+  storageKey      String @unique
+  kind            String
+  mimeType        String
+  width           Int
+  height          Int
+  sizeBytes       Int
+  durationSeconds Float?
+  createdAt       DateTime @default(now())
+  slots           AdSlotConfig[]
 }
 
 model RedirectRule {
-  id         String   @id
-  sourceUrl  String
+  id         String    @id
+  // PHASE C: one rule per source path (stored without trailing slash).
+  sourceUrl  String    @unique
   targetUrl  String
   statusCode Int
   createdAt  DateTime
-  isActive   Boolean  @default(true)
+  isActive   Boolean   @default(true)
+  // PHASE C: "manual" or "article-slug" (created automatically on URL change).
+  origin     String    @default("manual")
+  notes      String?
+  updatedAt  DateTime?
 
-  // No uniqueness constraint on sourceUrl — matches the current app's
-  // documented gap exactly (duplicate/conflicting rules are possible today;
-  // not introduced or fixed by this migration).
-  @@index([sourceUrl])
   @@index([isActive])
+}
+
+// PHASE D: SEO rules engine. Rule logic lives in code (server/seo/rules.ts),
+// keyed by `key`; everything an editor may tune without a rebuild —
+// enabled, severity, applicable article types, thresholds/term lists — is here.
+model SeoRule {
+  id           String   @id
+  key          String   @unique
+  name         String
+  description  String
+  category     String
+  targetType   String
+  articleTypes String[] @default([])
+  severity     String
+  enabled      Boolean  @default(true)
+  config       Json
+  version      Int      @default(1)
+  createdAt    DateTime
+  updatedAt    DateTime
+}
+
+// PHASE D: one SEO Intelligence scan (admin-triggered). Findings are cached
+// here so the admin UI never scans on page load and public pages never scan.
+model SeoScanRun {
+  id          String    @id
+  startedAt   DateTime
+  finishedAt  DateTime?
+  status      String
+  triggeredBy String
+  summary     Json
+  findings    Json
+
+  @@index([startedAt])
+}
+
+// PHASE D: outbound integration attempts (IndexNow submissions).
+model SeoIntegrationLog {
+  id          String   @id
+  integration String
+  action      String
+  status      String
+  httpStatus  Int?
+  detail      String
+  urls        Json
+  createdAt   DateTime
+
+  @@index([integration, createdAt])
+}
+
+// PHASE C: CMS settings (key/value). Allowed keys, validation and which keys
+// may reach public pages are defined in server/settings.ts.
+model SiteSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime
+  updatedBy String
 }
 
 model AuditLog {
@@ -348,4 +488,22 @@ model AuditLog {
   @@index([timestamp])
   @@index([userId])
   @@index([entityType, entityId])
+}
+
+// PHASE F.1: Site Experience — one validated JSON document per public-site
+// area (homepage, navigation, footer, announcements, blocks); see
+// src/lib/siteExperience. `published` is what visitors see (NULL = built-in
+// defaults); `draft` is the editors' working copy; `scheduled` goes live at
+// `scheduledFor`.
+model SiteExperience {
+  area           String    @id
+  draft          Json
+  published      Json?
+  scheduled      Json?
+  scheduledFor   DateTime?
+  version        Int       @default(0)
+  draftUpdatedAt DateTime
+  draftUpdatedBy String
+  publishedAt    DateTime?
+  publishedBy    String?
 }

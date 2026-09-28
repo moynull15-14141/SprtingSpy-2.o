@@ -6,34 +6,49 @@
 
 export type Role = 'Admin' | 'Editor' | 'Author' | 'Reader';
 
-export type ArticleType =
-  | 'Event Guide'
-  | 'Schedule'
-  | 'Results'
-  | 'Sports Viewing Guide'
-  | 'Preview'
-  | 'Update'
-  | 'News'
-  | 'Past Winners'
-  | 'Records'
-  | 'Prize Money'
-  | 'Players'
-  | 'Teams'
-  | 'Venue'
-  | 'Qualification'
-  | 'Rules & Format'
-  | 'History'
-  | 'Analysis'
-  | 'General Information'
-  | 'Other';
+// Spec v1.1 §5: the standard article types. "How to Watch" is one normal
+// type; there are deliberately no "viewing/streaming/TV guide" variants.
+export const ARTICLE_TYPES = [
+  'Event Guide',
+  'Schedule',
+  'Results',
+  'How to Watch',
+  'Preview',
+  'Update',
+  'News',
+  'Past Winners',
+  'Records',
+  'Prize Money',
+  'Players',
+  'Teams',
+  'Venue',
+  'Qualification',
+  'Rules & Format',
+  'History',
+  'Analysis',
+  'General Information',
+  'Other',
+] as const;
+
+export type ArticleType = (typeof ARTICLE_TYPES)[number];
+
+// Spec v1.1 §4.3: Event Edition lifecycle.
+export const EDITION_STATUSES = ['upcoming', 'active', 'completed', 'archived'] as const;
+
+export type EditionStatus = (typeof EDITION_STATUSES)[number];
 
 export interface SeoMetadata {
   metaTitle?: string;
   metaDescription?: string;
   canonicalUrl?: string;
   keywords?: string[];
-  ogImage?: string;
   noIndex?: boolean;
+  // Social metadata (Spec v1.1 §4.4). Each falls back to the SEO title /
+  // description / featured image when empty. Twitter/X reads these same
+  // Open Graph values, so no separate twitter* fields are stored.
+  ogTitle?: string;
+  ogDescription?: string;
+  ogImage?: string;
 }
 
 export interface Sport {
@@ -48,6 +63,8 @@ export interface Sport {
   colorTheme?: string;
   heroImage?: string;
   seo: SeoMetadata;
+  /** Chosen from src/config/sportIcons.ts; null/undefined = suggested from the name. */
+  icon?: string | null;
 }
 
 export interface SportEvent {
@@ -66,6 +83,8 @@ export interface SportEvent {
   featured: boolean;
   isVisible: boolean;
   featuredImage?: string;
+  officialSourceUrl?: string; // official event website/source (Spec v1.1 §4.2)
+  eventType?: string; // e.g. "Grand Slam", "League", "Major", "Grand Prix"
   seo: SeoMetadata;
 }
 
@@ -84,7 +103,7 @@ export interface EventEdition {
   endDate: string; // ISO date e.g. "2027-06-06"
   venue: string; // e.g. "Stade Roland Garros"
   location: string; // e.g. "Paris, France"
-  status: 'upcoming' | 'ongoing' | 'completed';
+  status: EditionStatus;
   quickFacts: QuickFact[];
   prizeMoneyTotal?: string; // e.g. "€53,500,000"
   defendingChampions?: {
@@ -121,6 +140,8 @@ export interface Article {
   authorId: string;
   publishedAt: string; // ISO date
   updatedAt?: string;
+  /** Last explicit editorial freshness review; does not pretend content changed. */
+  reviewedAt?: string;
   scheduledFor?: string; // ISO date for scheduled publication
   status: 'draft' | 'preview' | 'scheduled' | 'published' | 'archived';
   readingTimeMinutes: number;
@@ -128,6 +149,10 @@ export interface Article {
   tables?: StructuredTable[];
   references?: { title: string; url: string }[];
   seo: SeoMetadata;
+  /** PHASE C: rich-text body (see src/lib/richText.ts); null/absent = legacy plain-text `content`. */
+  body?: import('../lib/richText').RichDoc | null;
+  /** PHASE C: featured image as a Media Library item. */
+  featuredMediaId?: string | null;
 }
 
 export interface Author {
@@ -213,19 +238,43 @@ export type MediaCreationType =
   | 'Creative Commons'
   | 'Other';
 
+export type CopyrightReview = 'pending' | 'reviewed' | 'restricted';
+
 export interface MediaItem {
   id: string;
   title: string;
   url: string;
   altText: string;
-  caption?: string;
-  credit?: string;
-  source?: string;
-  license?: string;
+  caption?: string | null;
+  credit?: string | null;
+  source?: string | null;
+  /** Spec §16 "License/Usage Notes". */
+  license?: string | null;
   creationType: MediaCreationType;
   uploadedAt: string;
-  fileSize?: string;
-  dimensions?: string;
+  fileSize?: string | null;
+  dimensions?: string | null;
+  // PHASE C: stored file (null for URL-only items)
+  storageKey?: string | null;
+  filename?: string | null;
+  mimeType?: string | null;
+  width?: number | null;
+  height?: number | null;
+  sizeBytes?: number | null;
+  variants?: import('../lib/media').MediaVariant[] | null;
+  // PHASE C: Spec §16 metadata
+  aiTool?: string | null;
+  humanEditing?: string | null;
+  copyrightReview: CopyrightReview;
+  updatedAt?: string | null;
+}
+
+/** PHASE C: where a media item is used. */
+export interface MediaUsage {
+  kind: 'article' | 'event' | 'edition' | 'sport' | 'site';
+  id: string;
+  title: string;
+  role: 'featured' | 'body' | 'image';
 }
 
 export type AdSlotId =
@@ -248,7 +297,23 @@ export interface AdSlotConfig {
   bannerText?: string;
   linkUrl?: string;
   dimensions: string; // e.g. "728x90" or "300x250"
+  /** PHASE F: "house" = sponsor/partner banner (no third party); "adsense" = Google AdSense unit (advertising consent required). */
+  provider?: AdProvider;
+  /** The provider's ad unit ID (AdSense: numeric data-ad-slot). */
+  providerSlotId?: string | null;
+  creativeId?: string | null;
+  creative?: AdCreative | null;
+  creativeAlt?: string | null;
+  creativeFit?: string;
 }
+
+export interface AdCreative {
+  id: string; title: string; url: string; kind: string; mimeType: string;
+  width: number; height: number; sizeBytes: number; durationSeconds?: number | null;
+}
+
+export const AD_PROVIDERS = ['house', 'adsense'] as const;
+export type AdProvider = (typeof AD_PROVIDERS)[number];
 
 export interface AuditLog {
   id: string;
@@ -268,4 +333,16 @@ export interface RedirectRule {
   statusCode: 301 | 302;
   createdAt: string;
   isActive: boolean;
+  /** PHASE C: "manual" or "article-slug" (automatic on article URL change). */
+  origin?: 'manual' | 'article-slug';
+  notes?: string | null;
+  updatedAt?: string | null;
+}
+
+// Launch feature flags, decided server-side from environment variables and
+// sent to the client for display only. The server enforces every flag
+// independently; flipping these in the browser cannot enable anything.
+export interface FeatureFlags {
+  readerAccounts: boolean;
+  comments: boolean;
 }

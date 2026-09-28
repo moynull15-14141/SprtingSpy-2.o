@@ -6,7 +6,7 @@ import type { Request, Response, NextFunction } from 'express';
 
 export class DeploymentConfigError extends Error {}
 
-export function deploymentConfig(env: NodeJS.ProcessEnv = process.env, buildExists = fs.existsSync(path.resolve('dist/index.html'))) {
+export function deploymentConfig(env: NodeJS.ProcessEnv = process.env, buildExists = fs.existsSync(path.resolve('.next/BUILD_ID'))) {
   const production = env.NODE_ENV === 'production';
   const fail = (message: string): never => { throw new DeploymentConfigError(message); };
   const port = Number(env.PORT || '3000');
@@ -46,8 +46,8 @@ export function deploymentConfig(env: NodeJS.ProcessEnv = process.env, buildExis
 }
 
 export function enforceProductionTransport(req: Request, res: Response, next: NextFunction) {
-  // Direct HTTP health probes are allowed, but receive neither cookies nor HSTS.
-  if (process.env.NODE_ENV === 'production' && process.env.ALLOWED_ORIGIN?.startsWith('https:') && !req.secure && req.path !== '/api/health') {
+  // Direct HTTP health probes (liveness and readiness) are allowed, but receive neither cookies nor HSTS.
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOWED_ORIGIN?.startsWith('https:') && !req.secure && req.path !== '/api/health' && req.path !== '/api/health/ready') {
     return res.status(426).json({ error: 'HTTPS is required.' });
   }
   next();

@@ -39,9 +39,14 @@ export async function productionTransport(upstreamPort: number) {
   const request = async (url: string, init: RequestInit = {}): Promise<Response> => new Promise((resolve, reject) => {
     const parsed = new URL(url);
     assert.equal(parsed.origin, origin, 'Local smoke client may only contact its test proxy.');
+    // Send an explicit Content-Length (as fetch does) instead of chunked encoding.
+    const headers = { ...(init.headers as Record<string, string>) };
+    if (typeof init.body === 'string') headers['Content-Length'] = String(Buffer.byteLength(init.body));
     const req = https.request(parsed, {
-      method: init.method || 'GET', headers: init.headers as Record<string, string>, ca: cert,
-      lookup: (_hostname, _options, callback) => callback(null, '127.0.0.1', 4),
+      method: init.method || 'GET', headers, ca: cert,
+      // Node 22 calls lookup with { all: true } and expects an address list.
+      lookup: ((_hostname: string, options: { all?: boolean }, callback: (...args: unknown[]) => void) =>
+        options?.all ? callback(null, [{ address: '127.0.0.1', family: 4 }]) : callback(null, '127.0.0.1', 4)) as never,
     }, res => {
       const chunks: Buffer[] = [];
       res.on('data', chunk => chunks.push(Buffer.from(chunk)));

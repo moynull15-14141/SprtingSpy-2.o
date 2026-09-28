@@ -159,6 +159,15 @@ async function main() {
       counts.events++;
     }
 
+    // PHASE A: data/db.json predates the Spec v1.1 values. Normalize the
+    // in-memory copy only (the JSON file itself is never modified).
+    for (const ed of db.editions) {
+      if ((ed.status as string) === 'ongoing') ed.status = 'active';
+    }
+    for (const art of db.articles) {
+      if ((art.articleType as string) === 'Sports Viewing Guide') art.articleType = 'How to Watch';
+    }
+
     console.log('[migrate] Event Editions...');
     for (const ed of db.editions) {
       await tx.eventEdition.upsert({

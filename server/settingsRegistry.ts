@@ -1,0 +1,38 @@
+/**
+ * CMS settings registry (PHASE C): allowed keys, validators, and which keys
+ * may reach public pages. Kept free of Express so the Next.js server can use it.
+ */
+
+import { prisma } from './db';
+import { validateSafeUrl, validateText, type ValidationResult } from './validation';
+
+type Validator = (value: string) => ValidationResult;
+const pattern = (re: RegExp, message: string): Validator => (v) => (re.test(v) ? { valid: true } : { valid: false, error: message });
+
+export const SETTINGS = {
+  // Site identity
+  siteName: { group: 'Site identity', label: 'Site name', public: false, validate: (v: string) => validateText(v, 'siteName', 80) },
+  siteDescription: { group: 'Site identity', label: 'Site description', public: false, validate: (v: string) => validateText(v, 'siteDescription', 300) },
+  // SEO / social defaults
+  defaultOgImage: { group: 'SEO & social defaults', label: 'Default social image URL', public: false, validate: (v: string) => validateSafeUrl(v, 'defaultOgImage') },
+  twitterHandle: { group: 'SEO & social defaults', label: 'X/Twitter handle', public: false, validate: pattern(/^@[A-Za-z0-9_]{1,15}$/, 'twitterHandle must look like @SportingSpy.') },
+  // Search engine verification (rendered into public <head>)
+  googleSiteVerification: { group: 'Search engine verification', label: 'Google Search Console verification token', public: true, validate: pattern(/^[A-Za-z0-9_-]{10,100}$/, 'Enter only the token from the google-site-verification tag.') },
+  bingSiteVerification: { group: 'Search engine verification', label: 'Bing Webmaster verification token', public: true, validate: pattern(/^[A-Za-z0-9]{10,64}$/, 'Enter only the token from the msvalidate.01 tag.') },
+  // Analytics / advertising identifiers (PHASE F: activate the provider in production, behind visitor consent; see trackingConfig.ts)
+  ga4MeasurementId: { group: 'Analytics & advertising', label: 'GA4 measurement ID', public: false, validate: pattern(/^G-[A-Z0-9]{4,15}$/, 'ga4MeasurementId must look like G-XXXXXXX.') },
+  // PHASE D: IndexNow (the key is public by design: it is served at /<key>.txt)
+  indexNowKey: { group: 'IndexNow', label: 'IndexNow key (8–128 letters, digits or dashes)', public: false, validate: pattern(/^[A-Za-z0-9-]{8,128}$/, 'indexNowKey must be 8–128 letters, digits or dashes.') },
+  adsensePublisherId: { group: 'Analytics & advertising', label: 'AdSense publisher ID', public: false, validate: pattern(/^ca-pub-\d{16}$/, 'adsensePublisherId must look like ca-pub-0000000000000000.') },
+} as const;
+
+export type SettingKey = keyof typeof SETTINGS;
+export const SETTING_KEYS = Object.keys(SETTINGS) as SettingKey[];
+
+/** Settings that public pages may read (server-side only). */
+export async function publicSettings(): Promise<Partial<Record<SettingKey, string>>> {
+  const keys = SETTING_KEYS.filter((k) => SETTINGS[k].public);
+  const rows = await prisma.siteSetting.findMany({ where: { key: { in: keys } } });
+  return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+}
+

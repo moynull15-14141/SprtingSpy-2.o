@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+/* Theme: `dark:` utilities follow the `.dark` class on <html> (set before
+   first paint by the script in app/layout.tsx and by the theme toggle), not
+   only the operating-system setting. Tailwind v4's default is the media query,
+   which made the toggle a no-op. */
+@custom-variant dark (&:where(.dark, .dark *));
+:root { color-scheme: light; }
+:root.dark { color-scheme: dark; }
+
 @layer base {
   :root {
     --font-serif: 'Newsreader', Georgia, Cambria, serif;
@@ -36,4 +44,88 @@
 }
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(150, 150, 150, 0.5);
+}
+
+/* PHASE C: CMS rich-text editor content (admin only). Tailwind's preflight
+   resets element styles, so the editing surface restores readable defaults. */
+.prose-editor h2 { font-family: var(--font-serif); font-size: 1.5rem; font-weight: 700; margin: 1rem 0 0.5rem; }
+.prose-editor h3 { font-family: var(--font-serif); font-size: 1.25rem; font-weight: 700; margin: 0.875rem 0 0.5rem; }
+.prose-editor h4 { font-family: var(--font-serif); font-size: 1.1rem; font-weight: 600; margin: 0.75rem 0 0.5rem; }
+.prose-editor p { margin: 0.5rem 0; }
+.prose-editor ul { list-style: disc; padding-left: 1.5rem; }
+.prose-editor ol { list-style: decimal; padding-left: 1.5rem; }
+.prose-editor blockquote { border-left: 4px solid #d97706; padding-left: 1rem; font-style: italic; }
+.prose-editor hr { margin: 1.5rem 0; border-color: rgba(120, 113, 108, 0.4); }
+.prose-editor a { color: #b45309; text-decoration: underline; }
+.prose-editor img { max-width: 100%; height: auto; border-radius: 0.5rem; }
+.prose-editor img.ProseMirror-selectednode { outline: 3px solid #d97706; }
+.prose-editor table { border-collapse: collapse; width: 100%; margin: 0.75rem 0; table-layout: fixed; }
+.prose-editor th, .prose-editor td { border: 1px solid rgba(120, 113, 108, 0.45); padding: 0.35rem 0.5rem; vertical-align: top; }
+.prose-editor th { background: rgba(120, 113, 108, 0.12); font-weight: 600; }
+.prose-editor .selectedCell { background: rgba(217, 119, 6, 0.15); }
+.prose-editor ul[data-type="taskList"] { list-style: none; padding-left: 0; }
+.prose-editor ul[data-type="taskList"] li { display: flex; gap: 0.5rem; align-items: flex-start; }
+.prose-editor .newsroom-node { margin: 0.75rem 0; border: 1px solid rgba(217,119,6,.45); border-left-width: 4px; border-radius: .6rem; background: rgba(245,158,11,.08); padding: 1rem; white-space: pre-wrap; cursor: grab; }
+.prose-editor .newsroom-node.ProseMirror-selectednode { outline: 3px solid #d97706; }
+.prose-editor pre { overflow-x: auto; border-radius: .5rem; background: #0c0a09; color: #f5f5f4; padding: 1rem; }
+
+/* Editor affordances: atomic newsroom blocks show their type, and text keeps
+   a readable measure while media, tables and blocks use the full width. */
+.prose-editor .newsroom-node:hover { border-color: #d97706; }
+.prose-editor > p, .prose-editor > h2, .prose-editor > h3, .prose-editor > h4,
+.prose-editor > ul, .prose-editor > ol, .prose-editor > blockquote { max-width: 48rem; }
+
+/* ---------------------------------------------------------------------------
+   Admin CMS shell. The CMS renders inside the public root layout, so on
+   desktop it takes over the viewport: the browser page never scrolls, the
+   footer is hidden, and the desk navigation and content pane are independent
+   regions. Heights come from flex/grid (min-height: 0), not measured pixels,
+   so they follow the real header height and window size.
+   ------------------------------------------------------------------------- */
+.site-shell:has([data-admin-shell]) > footer,
+.site-shell:has([data-admin-shell]) > .site-footer-blocks,
+.site-shell:has([data-admin-shell]) > .site-announcements { display: none; }
+/* Public pages use a 98rem content column (space outside is left for ads);
+   the CMS keeps the wider 120rem workspace. */
+.site-main:has([data-admin-shell]) { max-width: 120rem; }
+
+/* The CMS main column is the sizing context for its nested editor. The
+   article editor switches to Article | SEO columns only when both fit. */
+.cms-main {
+  container-name: cms-workspace;
+  container-type: inline-size;
+}
+
+@media (min-width: 1024px) {
+  .site-shell:has([data-admin-shell]) { height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
+  .site-main:has([data-admin-shell]) { display: flex; min-height: 0; flex-direction: column; padding-top: 1rem; padding-bottom: 1rem; }
+  [data-admin-shell] { display: flex; flex: 1; min-height: 0; flex-direction: column; overflow-y: auto; }
+  .cms-shell { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+  .cms-workspace-frame { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+  .cms-admin-nav { display: flex; min-height: 0; flex-direction: column; overflow: hidden; }
+  .cms-admin-nav-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .cms-main { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+
+  /* Article editing: Title & Hierarchy scrolls away with the content (more
+     room to write); the formatting toolbar stays reachable while a long
+     article scrolls. */
+  .cms-editor-toolbar { position: sticky; top: 0; z-index: 15; box-shadow: 0 10px 14px -16px rgba(0,0,0,.6); }
+}
+
+@container cms-workspace (min-width: 60rem) {
+  /* The form fills the content pane exactly; only its two columns scroll. */
+  .cms-articles-screen:has(.cms-article-form) { display: flex; height: 100%; min-height: 0; flex-direction: column; gap: 1rem; }
+  .cms-articles-screen:has(.cms-article-form) > * { margin-top: 0; }
+  .cms-article-form { display: flex; flex: 1; min-height: 0; flex-direction: column; overflow: hidden; }
+  .cms-article-grid {
+    flex: 1;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr) minmax(20rem, 23rem);
+    grid-template-rows: minmax(0, 1fr);
+    gap: 1.25rem;
+  }
+  .cms-editor-column, .cms-seo-sidebar { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+  .cms-editor-column { padding-right: .5rem; }
+  .cms-seo-sidebar { padding-right: .35rem; }
+  .prose-editor { min-height: 32rem; }
 }

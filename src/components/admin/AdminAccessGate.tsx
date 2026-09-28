@@ -20,14 +20,13 @@
  */
 
 import React, { useState } from 'react';
-import { useApp } from '../../context/AppContext';
+import { useSite } from '../../context/SiteContext';
 import { Button } from '../ui/Button';
-import { SeoHead } from '../layout/SeoHead';
 
 const STAFF_ROLES = ['Admin', 'Editor', 'Author'] as const;
 
 export const AdminAccessGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { authLoading, isAuthenticated, currentUser, login, navigate } = useApp();
+  const { authLoading, isAuthenticated, currentUser, login, navigate } = useSite();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -46,8 +45,7 @@ export const AdminAccessGate: React.FC<{ children: React.ReactNode }> = ({ child
 
   if (authLoading) {
     return (
-      <div className="max-w-md mx-auto py-24 text-center text-sm text-stone-500">
-        <SeoHead title="Loading | SportingSpy" canonicalPath="/admin" />
+      <div className="max-w-md mx-auto py-24 text-center text-sm text-stone-500 dark:text-stone-400">
         Checking session&hellip;
       </div>
     );
@@ -56,11 +54,10 @@ export const AdminAccessGate: React.FC<{ children: React.ReactNode }> = ({ child
   if (!isAuthenticated) {
     return (
       <div className="max-w-sm mx-auto py-16">
-        <SeoHead title="Staff Sign In | SportingSpy" canonicalPath="/admin" />
         <div className="rounded-2xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-[#121417] p-6 shadow-sm space-y-4">
           <div>
             <h1 className="font-serif text-xl font-bold text-stone-900 dark:text-stone-100">Staff Sign In Required</h1>
-            <p className="mt-1 text-xs text-stone-500">
+            <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
               This area is restricted to SportingSpy staff. Sign in with your Admin, Editor, or Author account to continue.
             </p>
           </div>
@@ -89,7 +86,7 @@ export const AdminAccessGate: React.FC<{ children: React.ReactNode }> = ({ child
           </form>
           <button
             onClick={() => navigate('/')}
-            className="w-full text-center text-xs text-stone-500 hover:text-stone-800 dark:hover:text-stone-200"
+            className="w-full text-center text-xs text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 dark:text-stone-400"
           >
             &larr; Back to the public site
           </button>
@@ -101,7 +98,6 @@ export const AdminAccessGate: React.FC<{ children: React.ReactNode }> = ({ child
   if (!STAFF_ROLES.includes(currentUser.role as (typeof STAFF_ROLES)[number])) {
     return (
       <div className="max-w-md mx-auto py-24 text-center space-y-4">
-        <SeoHead title="Access Denied | SportingSpy" canonicalPath="/admin" />
         <h1 className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">Access Denied</h1>
         <p className="text-sm text-stone-600 dark:text-stone-400">
           Your account ({currentUser.email}, role: {currentUser.role}) does not have permission to view the Editorial CMS.

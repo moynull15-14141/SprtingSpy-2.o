@@ -124,6 +124,51 @@ export function validateRedirectSource(value: unknown, fieldName: string): Valid
   return { valid: true };
 }
 
+/** Accepts only one of `allowed` (or empty when not required). */
+export function validateOneOf(value: unknown, fieldName: string, allowed: readonly string[], required = false): ValidationResult {
+  if (value === undefined || value === null || value === '') {
+    return required ? { valid: false, error: `${fieldName} is required.` } : { valid: true };
+  }
+  if (typeof value !== 'string' || !allowed.includes(value)) {
+    return { valid: false, error: `${fieldName} must be one of: ${allowed.join(', ')}.` };
+  }
+  return { valid: true };
+}
+
+const SEO_KEYS = ['metaTitle', 'metaDescription', 'canonicalUrl', 'keywords', 'noIndex', 'ogTitle', 'ogDescription', 'ogImage'];
+
+/**
+ * Validates an SEO/social metadata object (see SeoMetadata in
+ * src/types/index.ts). Unknown keys are rejected so the stored JSON stays a
+ * known contract Phase B can render server-side without surprises.
+ */
+export function validateSeo(value: unknown, fieldName = 'seo'): ValidationResult {
+  if (value === undefined || value === null) return { valid: true };
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    return { valid: false, error: `${fieldName} must be an object.` };
+  }
+  const seo = value as Record<string, unknown>;
+  const unknownKey = Object.keys(seo).find((key) => !SEO_KEYS.includes(key));
+  if (unknownKey) {
+    return { valid: false, error: `${fieldName}.${unknownKey} is not a supported field.` };
+  }
+  if (seo.keywords !== undefined && (!Array.isArray(seo.keywords) || seo.keywords.length > 30 || seo.keywords.some((k) => typeof k !== 'string' || k.length > 100))) {
+    return { valid: false, error: `${fieldName}.keywords must be a list of at most 30 short strings.` };
+  }
+  if (seo.noIndex !== undefined && typeof seo.noIndex !== 'boolean') {
+    return { valid: false, error: `${fieldName}.noIndex must be true or false.` };
+  }
+  const error = firstError(
+    validateText(seo.metaTitle, `${fieldName}.metaTitle`, 300, false),
+    validateText(seo.metaDescription, `${fieldName}.metaDescription`, 500, false),
+    validateSafeUrl(seo.canonicalUrl, `${fieldName}.canonicalUrl`, { required: false }),
+    validateText(seo.ogTitle, `${fieldName}.ogTitle`, 200, false),
+    validateText(seo.ogDescription, `${fieldName}.ogDescription`, 500, false),
+    validateSafeUrl(seo.ogImage, `${fieldName}.ogImage`, { required: false })
+  );
+  return error ? { valid: false, error } : { valid: true };
+}
+
 /** Runs a list of validators in order and returns the first failure, or null if all pass. */
 export function firstError(...results: ValidationResult[]): string | null {
   for (const r of results) {

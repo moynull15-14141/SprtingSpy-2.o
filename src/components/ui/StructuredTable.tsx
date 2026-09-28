@@ -57,7 +57,7 @@ export const StructuredTable: React.FC<StructuredTableProps> = ({ table, classNa
         </table>
       </div>
       {table.caption && (
-        <div className="bg-stone-50 dark:bg-stone-900/30 px-4 py-2 border-t border-stone-200 dark:border-stone-800 text-xs text-stone-500 italic">
+        <div className="bg-stone-50 dark:bg-stone-900/30 px-4 py-2 border-t border-stone-200 dark:border-stone-800 text-xs text-stone-500 italic dark:text-stone-400">
           {table.caption}
         </div>
       )}

@@ -26,14 +26,18 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
-const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+// PHASE B: Express (loaded by tsx) and the Next.js server bundle both
+// import this module inside the same Node process, so it can be evaluated
+// twice. A process-wide singleton keeps ONE connection pool and one set of
+// shutdown handlers regardless.
+const globalForPrisma = globalThis as unknown as { __sportingspyPrisma?: PrismaClient; __sportingspyShutdownHooked?: boolean };
 
-export const prisma = new PrismaClient({ adapter });
+export const prisma: PrismaClient =
+  globalForPrisma.__sportingspyPrisma ??
+  (globalForPrisma.__sportingspyPrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) }));
 
 // PHASE 2.1: close the connection pool cleanly on shutdown instead of
-// leaving it to be torn down abruptly. Registered once, here, since this
-// module is only ever loaded once (Node module caching) regardless of how
-// many files import { prisma } from here.
+// leaving it to be torn down abruptly. Registered once per process.
 let shuttingDown = false;
 async function shutdown(signal: string) {
   if (shuttingDown) return;
@@ -47,5 +51,8 @@ async function shutdown(signal: string) {
     process.exit(0);
   }
 }
-process.on('SIGINT', () => void shutdown('SIGINT'));
-process.on('SIGTERM', () => void shutdown('SIGTERM'));
+if (!globalForPrisma.__sportingspyShutdownHooked) {
+  globalForPrisma.__sportingspyShutdownHooked = true;
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+}

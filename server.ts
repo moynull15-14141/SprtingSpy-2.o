@@ -6,7 +6,8 @@
  * 3. Dynamic XML Sitemap & Robots.txt generation with proper HTTP headers.
  * 4. Server-Side RBAC Enforcement on all mutation endpoints (Admin, Editor, Author, Reader).
  * 5. Persistent PostgreSQL Database via Prisma, with CRUD APIs. (PHASE 2 — see PROJECT_BRAIN.md)
- * 6. Vite Dev Middleware integration in development and static asset serving in production.
+ * 6. Next.js (App Router) server rendering for every page (PHASE B), mounted
+ *    behind this server's security, CSRF, CORS and redirect middleware.
  *
  * PHASE 2 — POSTGRESQL MIGRATION:
  * This file used to read/write the ENTIRE data/db.json on every request
@@ -19,6 +20,7 @@
 
 import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
+import next from 'next';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'node:crypto';
@@ -26,9 +28,34 @@ import { accountRouter } from './server/account';
 import { rejectNestedCmsWrites } from './server/cmsFields';
 import { deploymentConfig, DeploymentConfigError, enforceProductionTransport } from './server/deployment';
 import { prisma } from './server/db';
-import { Role } from './src/types';
+import { Role, ARTICLE_TYPES, EDITION_STATUSES, AD_PROVIDERS } from './src/types';
+import { isSportIcon } from './src/config/sportIcons';
+
+/** A sport icon must come from the curated set (or be cleared). */
+const validateSportIcon = (icon: unknown) => (icon === undefined || icon === null || icon === '' || isSportIcon(icon) ? { valid: true as const } : { valid: false as const, error: 'icon must be one of the curated sport icons.' });
+import { LEGACY_PAGE_REDIRECTS, canonicalPagePath, isPagePath, stripTrailingSlash } from './src/config/urls';
+import { featureFlags } from './server/features';
+import { resolveSessionIdentity } from './server/sessionLookup';
+import { mediaRouter } from './server/media/routes';
+import { adCreativesRouter } from './server/adCreatives';
+import { mediaStorage } from './server/media/storage';
+import { mediaUsageMap } from './server/media/service';
+import { redirectRouter, redirectMovedArticle, releasePath, RedirectConflict } from './server/redirects';
+import { settingsRouter } from './server/settings';
+import { prepareArticleContent, syncBodyMedia } from './server/articleContent';
+import { articlePath, siteOrigin } from './src/lib/paths';
+import { sitemapFiles } from './server/seo/sitemap';
+import { robotsTxt } from './server/seo/robots';
+import { seoRouter } from './server/seo/routes';
+import { searchRouter } from './server/services/search/routes';
+import { trackingConfig } from './server/trackingConfig';
+import { assertProductionLaunchSafe, LaunchGuardError } from './server/launchGuards';
+import { siteExperienceRouter } from './server/siteExperienceRoutes';
+import { applyDueSchedules } from './server/siteExperience';
+import { ensureSeoRules } from './server/seo/engine';
+import { indexNowKey, notifyIndexNow } from './server/seo/indexnow';
 import { assertSafeAuthBoot, getAuthContext, requireAuth, requireRole, AuthLookup } from './server/auth';
-import { validateSlug, validateText, validateSafeUrl, validateRedirectSource, validateEmail, firstError } from './server/validation';
+import { validateSlug, validateText, validateSafeUrl, validateRedirectSource, validateEmail, validateOneOf, validateSeo, firstError } from './server/validation';
 import { hashPassword, verifyPassword, validatePasswordStrength } from './server/password';
 import {
   generateSessionId,
@@ -102,8 +129,10 @@ async function publishScheduledArticles(): Promise<number> {
   for (const art of due) {
     await prisma.article.update({
       where: { id: art.id },
-      data: { status: 'published', publishedAt: art.scheduledFor || now, updatedAt: now },
+      // PHASE D: publishing is not a content change, so updatedAt is left alone.
+      data: { status: 'published', publishedAt: art.scheduledFor || now },
     });
+    notifyIndexNow(siteOrigin(), [articlePath(art)], 'scheduled article published');
     await prisma.auditLog.create({
       data: {
         id: `log-scheduler-${Date.now()}-${art.id}`,
@@ -126,21 +155,52 @@ async function publishScheduledArticles(): Promise<number> {
 
 async function startServer() {
   const deployment = deploymentConfig();
+  const features = featureFlags();
+  // Fail fast on a misconfigured media storage provider.
+  const storage = mediaStorage();
+  // PHASE D: make sure every SEO rule has a stored, editable settings row.
+  await ensureSeoRules();
+  const allowedRoles: Role[] = features.readerAccounts ? ['Admin', 'Editor', 'Author', 'Reader'] : ['Admin', 'Editor', 'Author'];
   assertSafeAuthBoot();
   // Read-only connection/schema check. Startup never runs migrations or imports.
   await prisma.user.count();
+  // PHASE G: a real production site must not start with documented default passwords.
+  await assertProductionLaunchSafe(deployment);
   const app = express();
   app.disable('x-powered-by');
+  // PHASE G: every response carries a request ID; error logs and error
+  // responses quote it so a visitor's report can be matched to a log line.
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const id = crypto.randomUUID();
+    (req as Request & { requestId?: string }).requestId = id;
+    res.setHeader('X-Request-Id', id);
+    next();
+  });
   app.set('trust proxy', deployment.trustProxy);
 
   // PHASE 3 hardening — order matters here:
   //   CORS decision -> security headers -> body parsing (size-limited) ->
   //   CSRF cookie issuance -> CSRF enforcement -> everything else.
+  // PHASE F: the CSP needs the configured providers synchronously; load them once before serving.
+  await trackingConfig().catch(() => undefined);
   app.use(securityHeaders);
   app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
   app.use(enforceProductionTransport);
   app.use(corsPolicy);
+  // Liveness: the process is up and serving (no dependency checks).
   app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+  // PHASE G readiness: can this instance actually serve traffic? Checks the
+  // database (SELECT 1, 2 s timeout) and that media storage is writable.
+  // Reports only ok/fail per dependency — never hosts, URLs or error text.
+  app.get('/api/health/ready', async (_req, res) => {
+    const withTimeout = <T,>(p: Promise<T>) => Promise.race([p, new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))]);
+    const [database, storageCheck] = await Promise.all([
+      withTimeout(prisma.$queryRaw`SELECT 1`).then(() => 'ok' as const, () => 'fail' as const),
+      storage.localRoot ? fs.promises.access(storage.localRoot, fs.constants.W_OK).then(() => 'ok' as const, () => 'fail' as const) : Promise.resolve('ok' as const),
+    ]);
+    const ready = database === 'ok' && storageCheck === 'ok';
+    res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'not_ready', checks: { database, storage: storageCheck } });
+  });
   // Express's default json() body limit is 100kb, which is smaller than the
   // 200,000-character article content this app already validates elsewhere
   // (see validateText(body.content, 'content', 200000) in the articles
@@ -152,28 +212,46 @@ async function startServer() {
   app.use(express.json({ limit: '2mb' }));
   app.use(ensureCsrfCookie);
   app.use(requireCsrfToken);
+  // Draft previews are staff-only, uncached and excluded from indexing.
+  // The preference cookie alone grants no access; Next resolves the active session.
+  app.use((req, res, next) => {
+    if (/(?:^|;\s*)sportingspy_site_preview=1(?:;|$)/.test(req.headers.cookie ?? '')) {
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    }
+    next();
+  });
   app.use(rejectNestedCmsWrites);
 
-  // 1. HTTP 301/302 Redirect Engine Middleware
-  // Intercepts real HTTP requests and issues true 301 or 302 redirects with Location header
+  // 1. Page URL policy + HTTP 301/302 Redirect Engine
+  // PHASE A: public page URLs are canonical WITH a trailing slash (Spec
+  // v1.1 §10). For GET/HEAD page requests, in order:
+  //   a. legacy static URLs (/privacy, /terms) -> 301 to their spec URL
+  //   b. editor-managed redirect rules -> their target
+  //   c. a page path missing its trailing slash -> 301 to the slash form
+  // Every target is canonicalized first, so each request resolves in a
+  // single hop. API routes, files (sitemap.xml, robots.txt, assets) and
+  // non-GET methods are never touched.
   app.use(
     asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-      // Only evaluate GET requests that are not internal assets or API routes
-      if (
-        req.method !== 'GET' ||
-        req.path.startsWith('/api') ||
-        req.path.startsWith('/@') ||
-        req.path.startsWith('/src') ||
-        req.path.startsWith('/node_modules') ||
-        req.path.includes('.')
-      ) {
+      if ((req.method !== 'GET' && req.method !== 'HEAD') || !isPagePath(req.path)) {
         return next();
       }
 
-      const cleanPath = req.path.endsWith('/') && req.path.length > 1 ? req.path.slice(0, -1) : req.path;
+      const queryIndex = req.url.indexOf('?');
+      const queryString = queryIndex !== -1 ? req.url.slice(queryIndex) : '';
+      const cleanPath = stripTrailingSlash(req.path);
+
+      const legacyTarget = LEGACY_PAGE_REDIRECTS[cleanPath];
+      if (legacyTarget) {
+        return res.redirect(301, legacyTarget + queryString);
+      }
 
       const rule = await prisma.redirectRule.findFirst({ where: { isActive: true, sourceUrl: cleanPath } });
       if (!rule) {
+        if (!req.path.endsWith('/')) {
+          return res.redirect(301, canonicalPagePath(req.path) + queryString);
+        }
         return next();
       }
 
@@ -197,113 +275,54 @@ async function startServer() {
         chainCount++;
       }
 
-      // Preserve query parameters if any
-      const queryIndex = req.url.indexOf('?');
-      const queryString = queryIndex !== -1 ? req.url.slice(queryIndex) : '';
-      const finalDestination = currentDest + queryString;
+      // Preserve query parameters; canonicalize internal targets so the
+      // trailing-slash rule never adds a second hop.
+      const finalDestination = canonicalPagePath(currentDest) + queryString;
 
       console.log(`[Redirect Engine] Serving HTTP ${rule.statusCode} from ${req.url} -> ${finalDestination}`);
       return res.redirect(rule.statusCode, finalDestination);
     })
   );
 
-  // 2. Dynamic XML Sitemap Generator
-  app.get(
-    '/sitemap.xml',
-    asyncHandler(async (_req: Request, res: Response) => {
-      await publishScheduledArticles();
-      const baseUrl = deployment.origin || 'https://sportingspy.com';
-
-      const [sports, events, editions, articles, authors] = await Promise.all([
-        prisma.sport.findMany({ where: { isVisible: true } }),
-        prisma.sportEvent.findMany(),
-        prisma.eventEdition.findMany(),
-        prisma.article.findMany({ where: { status: 'published' } }),
-        prisma.author.findMany(),
-      ]);
-
-      let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
-      xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`;
-
-      const staticPages = [
-        { loc: '/', priority: '1.0', changefreq: 'daily' },
-        { loc: '/sports', priority: '0.9', changefreq: 'weekly' },
-        { loc: '/events', priority: '0.9', changefreq: 'weekly' },
-        { loc: '/latest', priority: '0.9', changefreq: 'hourly' },
-        { loc: '/search', priority: '0.6', changefreq: 'monthly' },
-        { loc: '/about', priority: '0.5', changefreq: 'monthly' },
-        { loc: '/contact', priority: '0.5', changefreq: 'monthly' },
-        { loc: '/privacy', priority: '0.3', changefreq: 'yearly' },
-        { loc: '/terms', priority: '0.3', changefreq: 'yearly' },
-        { loc: '/dmca', priority: '0.3', changefreq: 'yearly' },
-      ];
-
-      for (const p of staticPages) {
-        xml += `  <url>\n    <loc>${baseUrl}${p.loc}</loc>\n    <changefreq>${p.changefreq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>\n`;
-      }
-
-      for (const sport of sports) {
-        xml += `  <url>\n    <loc>${baseUrl}/${sport.slug}</loc>\n    <changefreq>daily</changefreq>\n    <priority>0.85</priority>\n  </url>\n`;
-      }
-
-      for (const ev of events) {
-        xml += `  <url>\n    <loc>${baseUrl}/${ev.sportSlug}/${ev.slug}</loc>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>\n`;
-      }
-
-      for (const ed of editions) {
-        xml += `  <url>\n    <loc>${baseUrl}/${ed.sportSlug}/${ed.eventSlug}/${ed.year}</loc>\n    <changefreq>daily</changefreq>\n    <priority>0.8</priority>\n  </url>\n`;
-      }
-
-      for (const art of articles) {
-        const articleUrl =
-          art.eventSlug && art.editionYear
-            ? `${baseUrl}/${art.sportSlug}/${art.eventSlug}/${art.editionYear}/${art.slug}`
-            : `${baseUrl}/${art.sportSlug}/${art.slug}`;
-        const lastMod = (art.updatedAt || art.publishedAt).toISOString().split('T')[0];
-        xml += `  <url>\n    <loc>${articleUrl}</loc>\n    <lastmod>${lastMod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.75</priority>\n  </url>\n`;
-      }
-
-      for (const auth of authors) {
-        xml += `  <url>\n    <loc>${baseUrl}/author/${auth.slug}</loc>\n    <changefreq>monthly</changefreq>\n    <priority>0.6</priority>\n  </url>\n`;
-      }
-
-      xml += `</urlset>`;
-
-      res.header('Content-Type', 'application/xml; charset=utf-8');
-      res.header('Cache-Control', 'public, max-age=3600');
-      return res.send(xml);
-    })
-  );
-
-  // 3. Dynamic Robots.txt
+  // 2. XML sitemaps + robots.txt (PHASE D: server/seo/sitemap.ts, robots.ts).
+  // Only indexable URLs; sitemap index with per-type child sitemaps.
+  const seoOrigin = () => deployment.origin || 'https://sportingspy.com';
+  const sendXml = (res: Response, xml: string) => {
+    res.header('Content-Type', 'application/xml; charset=utf-8');
+    res.header('Cache-Control', 'public, max-age=900');
+    return res.send(xml);
+  };
+  app.get('/sitemap.xml', asyncHandler(async (_req: Request, res: Response) => {
+    await publishScheduledArticles();
+    return sendXml(res, (await sitemapFiles(seoOrigin())).index);
+  }));
+  app.get('/sitemaps/:file', asyncHandler(async (req: Request, res: Response) => {
+    const xml = (await sitemapFiles(seoOrigin())).files.get(req.params.file);
+    return xml ? sendXml(res, xml) : res.status(404).json({ error: 'Not found.' });
+  }));
   app.get('/robots.txt', (_req: Request, res: Response) => {
-    const robotsContent = `User-agent: *
-Allow: /
-Disallow: /admin
-Disallow: /account
-Disallow: /api/
-
-Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
-`;
     res.header('Content-Type', 'text/plain; charset=utf-8');
-    return res.send(robotsContent);
+    return res.send(robotsTxt(seoOrigin()));
   });
+  // IndexNow key file (only when a key is configured).
+  app.get(/^\/([A-Za-z0-9-]{8,128})\.txt$/, asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+    const key = await indexNowKey();
+    if (!key || req.params[0] !== key) return next();
+    res.header('Content-Type', 'text/plain; charset=utf-8');
+    return res.send(key);
+  }));
 
   // 4. Server-Side Authorization Boundary
   // PHASE 2: identity resolution is now two targeted Prisma queries (see
   // server/auth.ts's AuthLookup interface) instead of loading the whole
   // users/sessions JSON arrays into memory on every request.
   const authLookup: AuthLookup = {
-    async resolveSession(sessionId) {
-      const session = await prisma.session.findUnique({ where: { id: sessionId }, include: { user: true } });
-      if (!session) return null;
-      if (isSessionExpired(session.expiresAt.toISOString())) return null;
-      if (!session.user || session.user.status !== 'active') return null;
-      return { userId: session.user.id, userName: session.user.name, role: session.user.role };
-    },
+    // PHASE C: shared with the Next.js staff preview (server/sessionLookup.ts).
+    // Reader sessions do not authenticate while reader accounts are disabled.
+    resolveSession: resolveSessionIdentity,
     async resolveBypassUser(userId) {
       const user = await prisma.user.findUnique({ where: { id: userId } });
-      if (!user) return null;
+      if (!user || !allowedRoles.includes(user.role)) return null;
       return { userId: user.id, userName: user.name, role: user.role };
     },
   };
@@ -339,7 +358,9 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
         verifyPassword(password, DUMMY_HASH_FOR_TIMING_CAMOUFLAGE);
         passwordOk = false;
       }
-      const isActive = user ? user.status === 'active' : false;
+      // PHASE A: a disabled role (Reader, while reader accounts are off)
+      // fails exactly like a wrong password — no new account-state oracle.
+      const isActive = user ? user.status === 'active' && allowedRoles.includes(user.role) : false;
 
       if (!user || !passwordOk || !isActive) {
         recordFailedLogin(ip, email);
@@ -429,13 +450,17 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
 
   // 6. REST API Endpoints
 
-  // Full dataset for client hydration
+  // PHASE B: the CMS dataset for /admin. This replaces the old public
+  // GET /api/data, which sent the whole database to every visitor so the SPA
+  // could render; public pages are now server-rendered from route-specific
+  // queries (server/services/public). Staff only.
   app.get(
-    '/api/data',
+    '/api/cms/data',
+    requireRole(getAuthLookup, ['Admin', 'Editor', 'Author']),
     asyncHandler(async (req: Request, res: Response) => {
       await publishScheduledArticles();
-      const { role, userId } = await getAuthContext(req, authLookup);
-      const previewAllowed = ['Admin', 'Editor', 'Author'].includes(role);
+      const { role, userId } = req.authContext!;
+      const previewAllowed = true;
 
       const [sports, events, editions, articles, authors, users, comments, mediaItems, adSlots, auditLogs, redirectRules] =
         await Promise.all([
@@ -448,9 +473,11 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
           }),
           prisma.author.findMany(),
           role === 'Admin' ? prisma.user.findMany() : Promise.resolve([]),
-          prisma.comment.findMany({ where: ['Admin', 'Editor'].includes(role) ? undefined : { OR: [{ status: 'approved' }, { userId }] }, orderBy: { createdAt: 'desc' } }),
+          features.comments
+            ? prisma.comment.findMany({ where: ['Admin', 'Editor'].includes(role) ? undefined : { OR: [{ status: 'approved' }, { userId }] }, orderBy: { createdAt: 'desc' } })
+            : Promise.resolve([]),
           prisma.mediaItem.findMany({ orderBy: { uploadedAt: 'desc' } }),
-          prisma.adSlotConfig.findMany(),
+          prisma.adSlotConfig.findMany({ include: { creative: true } }),
           ['Admin', 'Editor'].includes(role) ? prisma.auditLog.findMany({ orderBy: { timestamp: 'desc' } }) : Promise.resolve([]),
           prisma.redirectRule.findMany({ orderBy: { createdAt: 'desc' } }),
         ]);
@@ -469,6 +496,8 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
         adSlots,
         auditLogs,
         redirectRules,
+        features,
+        mediaUsage: await mediaUsageMap(),
       });
     })
   );
@@ -523,22 +552,22 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
       const { userId, userName, role } = req.authContext!;
       const body: Record<string, any> = req.body;
 
-      if (!body.title || !body.sportSlug || !body.content) {
-        return res.status(400).json({ error: 'Missing required article fields: title, sportSlug, content.' });
+      if (!body.title || !body.sportSlug || (!body.content && !body.body)) {
+        return res.status(400).json({ error: 'Missing required article fields: title, sportSlug, body.' });
       }
 
       const slug = body.slug || body.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
 
       const validationError = firstError(
         validateText(body.title, 'title', 300),
-        validateText(body.content, 'content', 200000),
+        body.body ? { valid: true } : validateText(body.content, 'content', 200000),
         validateSlug(body.sportSlug, 'sportSlug'),
         validateSlug(slug, 'slug'),
         validateText(body.subtitle, 'subtitle', 300, false),
         validateText(body.excerpt, 'excerpt', 1000, false),
         validateSafeUrl(body.featuredImage, 'featuredImage', { required: false }),
-        validateText(body.seo?.metaTitle, 'seo.metaTitle', 300, false),
-        validateText(body.seo?.metaDescription, 'seo.metaDescription', 500, false)
+        validateOneOf(body.articleType, 'articleType', ARTICLE_TYPES),
+        validateSeo(body.seo)
       );
       if (validationError) {
         return res.status(400).json({ error: validationError });
@@ -576,8 +605,14 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
         return res.status(400).json({ error: `authorId '${authorId}' does not reference an existing Author profile.` });
       }
 
+      const prepared = await prepareArticleContent(body);
+      if ('error' in prepared) {
+        return res.status(400).json({ error: prepared.error });
+      }
+
       const now = new Date();
-      const newArticle = await prisma.article.create({
+      const newArticle = await prisma.$transaction(async (tx) => {
+        const created = await tx.article.create({
         data: {
           id: `art-${Date.now()}`,
           slug,
@@ -600,7 +635,15 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
           tables: body.tables ?? undefined,
           references: body.references ?? undefined,
           seo: body.seo || { metaTitle: body.title, metaDescription: body.excerpt },
+          ...prepared.data,
         },
+        });
+        await syncBodyMedia(tx, created.id, prepared.bodyMediaIds || []);
+        // A published article must not be shadowed by an old redirect at its URL.
+        if (created.status === 'published') {
+          await releasePath(tx, articlePath(created), `Deactivated ${now.toISOString()}: article ${created.id} is published here.`);
+        }
+        return created;
       });
 
       await prisma.auditLog.create({
@@ -616,6 +659,7 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
         },
       });
 
+      if (newArticle.status === 'published') notifyIndexNow(seoOrigin(), [articlePath(newArticle)], 'article published');
       return res.status(201).json(newArticle);
     })
   );
@@ -654,19 +698,77 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
         updates.slug !== undefined ? validateSlug(updates.slug, 'slug') : { valid: true },
         validateText(updates.subtitle, 'subtitle', 300, false),
         validateText(updates.excerpt, 'excerpt', 1000, false),
-        validateSafeUrl(updates.featuredImage, 'featuredImage', { required: false })
+        validateSafeUrl(updates.featuredImage, 'featuredImage', { required: false }),
+        'articleType' in updates ? validateOneOf(updates.articleType, 'articleType', ARTICLE_TYPES, true) : { valid: true },
+        validateSeo(updates.seo)
       );
       if (validationError) {
         return res.status(400).json({ error: validationError });
       }
 
-      const data: Record<string, any> = { ...updates, updatedAt: new Date() };
+      const prepared = await prepareArticleContent(updates);
+      if ('error' in prepared) {
+        return res.status(400).json({ error: prepared.error });
+      }
+
+      const { body: _body, featuredMediaId: _featuredMediaId, ...plainUpdates } = updates;
+      const data: Record<string, any> = { ...plainUpdates, ...prepared.data };
+      // PHASE D (Spec §30): updatedAt records meaningful content changes only —
+      // not SEO-field edits, status changes or saves that change nothing.
+      const CONTENT_FIELDS = ['title', 'subtitle', 'excerpt', 'content', 'body', 'tables', 'references', 'featuredMediaId', 'featuredImage', 'articleType', 'sportSlug', 'eventSlug', 'editionYear', 'slug'];
+      // jsonb does not keep key order, so compare with sorted keys.
+      const stable = (v: unknown): string => (Array.isArray(v) ? `[${v.map(stable).join(',')}]` : v && typeof v === 'object' ? `{${Object.keys(v).sort().map((k) => JSON.stringify(k) + ':' + stable((v as Record<string, unknown>)[k])).join(',')}}` : JSON.stringify(v ?? null));
+      const contentChanged = CONTENT_FIELDS.some((f) => f in data && stable(data[f]) !== stable((existing as Record<string, unknown>)[f]));
+      if (contentChanged) data.updatedAt = new Date();
       if ('publishedAt' in updates) data.publishedAt = updates.publishedAt ? new Date(updates.publishedAt) : existing.publishedAt;
+      else if (data.status === 'published' && existing.status !== 'published') data.publishedAt = new Date(); // first publication
       if ('scheduledFor' in updates) data.scheduledFor = updates.scheduledFor ? new Date(updates.scheduledFor) : null;
       if ('eventSlug' in updates) data.eventSlug = updates.eventSlug ?? null;
       if ('editionYear' in updates) data.editionYear = updates.editionYear ?? null;
 
-      const updated = await prisma.article.update({ where: { id: existing.id }, data });
+      // PHASE C: the public URL is derived from sport/event/edition/slug.
+      const next = {
+        sportSlug: data.sportSlug ?? existing.sportSlug,
+        eventSlug: 'eventSlug' in data ? data.eventSlug : existing.eventSlug,
+        editionYear: 'editionYear' in data ? data.editionYear : existing.editionYear,
+        slug: data.slug ?? existing.slug,
+      };
+      const oldPath = articlePath(existing).replace(/\/$/, '');
+      const newPath = articlePath(next).replace(/\/$/, '');
+      if (oldPath !== newPath) {
+        const collision = await prisma.article.findFirst({
+          where: { id: { not: existing.id }, sportSlug: next.sportSlug, slug: next.slug, eventSlug: next.eventSlug ?? null, editionYear: next.editionYear ?? null },
+        });
+        if (collision) {
+          return res.status(409).json({ error: `Another article already uses ${newPath}/.` });
+        }
+      }
+
+      let updated;
+      try {
+        updated = await prisma.$transaction(async (tx) => {
+          const saved = await tx.article.update({ where: { id: existing.id }, data });
+          if (prepared.bodyMediaIds) await syncBodyMedia(tx, saved.id, prepared.bodyMediaIds);
+          // A published article that moves keeps its old URL alive: old → 301 → new.
+          if (existing.status === 'published' && oldPath !== newPath) {
+            await redirectMovedArticle(tx, saved.id, oldPath, newPath);
+          } else if (saved.status === 'published') {
+            await releasePath(tx, newPath, `Deactivated ${new Date().toISOString()}: article ${saved.id} is published here.`);
+          }
+          return saved;
+        });
+      } catch (err) {
+        if (err instanceof RedirectConflict) return res.status(409).json({ error: `URL change blocked: ${err.message}` });
+        throw err;
+      }
+
+      // IndexNow: publish / unpublish / URL move / meaningful change of a public article.
+      const wasLive = existing.status === 'published';
+      const isLive = updated.status === 'published';
+      if (wasLive || isLive) {
+        const changed = oldPath !== newPath ? [oldPath, newPath] : wasLive !== isLive || contentChanged ? [newPath] : [];
+        notifyIndexNow(seoOrigin(), changed, wasLive && !isLive ? 'article unpublished' : !wasLive && isLive ? 'article published' : oldPath !== newPath ? 'article URL changed' : 'article content changed');
+      }
 
       await prisma.auditLog.create({
         data: {
@@ -697,6 +799,7 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
       }
 
       await prisma.article.delete({ where: { id: target.id } });
+      if (target.status === 'published') notifyIndexNow(seoOrigin(), [articlePath(target)], 'article deleted');
       await prisma.auditLog.create({
         data: {
           id: `log-${Date.now()}`,
@@ -731,7 +834,8 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
         validateSlug(body.slug, 'slug'),
         validateText(body.tagline, 'tagline', 300, false),
         validateText(body.description, 'description', 5000, false),
-        validateSafeUrl(body.heroImage, 'heroImage', { required: false })
+        validateSafeUrl(body.heroImage, 'heroImage', { required: false }),
+        validateSportIcon(body.icon)
       );
       if (validationError) {
         return res.status(400).json({ error: validationError });
@@ -754,6 +858,7 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
           isVisible: body.isVisible !== false,
           featuredEventIds: body.featuredEventIds || [],
           heroImage: body.heroImage,
+          icon: body.icon || null,
           seo: body.seo || { metaTitle: `${body.name} Coverage | SportingSpy`, metaDescription: body.description },
         },
       });
@@ -792,8 +897,10 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
         sportUpdates.slug !== undefined ? validateSlug(sportUpdates.slug, 'slug') : { valid: true },
         validateText(sportUpdates.tagline, 'tagline', 300, false),
         validateText(sportUpdates.description, 'description', 5000, false),
-        validateSafeUrl(sportUpdates.heroImage, 'heroImage', { required: false })
+        validateSafeUrl(sportUpdates.heroImage, 'heroImage', { required: false }),
+        validateSportIcon(sportUpdates.icon)
       );
+      if (sportUpdates.icon === '') sportUpdates.icon = null;
       if (sportUpdateError) {
         return res.status(400).json({ error: sportUpdateError });
       }
@@ -877,7 +984,10 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
         validateText(body.description, 'description', 5000, false),
         validateText(body.defaultVenue, 'defaultVenue', 200, false),
         validateText(body.defaultLocation, 'defaultLocation', 200, false),
-        validateSafeUrl(body.featuredImage, 'featuredImage', { required: false })
+        validateSafeUrl(body.featuredImage, 'featuredImage', { required: false }),
+        validateSafeUrl(body.officialSourceUrl, 'officialSourceUrl', { required: false, allowRelative: false }),
+        validateText(body.eventType, 'eventType', 80, false),
+        validateSeo(body.seo)
       );
       if (validationError) {
         return res.status(400).json({ error: validationError });
@@ -907,6 +1017,8 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
           featured: body.featured || false,
           isVisible: body.isVisible !== false,
           featuredImage: body.featuredImage || 'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?auto=format&fit=crop&w=1200&q=80',
+          officialSourceUrl: body.officialSourceUrl?.trim() || null,
+          eventType: body.eventType?.trim() || null,
           seo: body.seo || { metaTitle: `${body.name} Guide | SportingSpy`, metaDescription: body.description },
         },
       });
@@ -939,7 +1051,27 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
         return res.status(404).json({ error: 'Event not found.' });
       }
 
-      const updated = await prisma.sportEvent.update({ where: { id: existing.id }, data: req.body });
+      const updates: Record<string, any> = req.body;
+      const validationError = firstError(
+        validateText(updates.name, 'name', 200, false),
+        updates.slug !== undefined ? validateSlug(updates.slug, 'slug') : { valid: true },
+        updates.sportSlug !== undefined ? validateSlug(updates.sportSlug, 'sportSlug') : { valid: true },
+        validateText(updates.description, 'description', 5000, false),
+        validateText(updates.defaultVenue, 'defaultVenue', 200, false),
+        validateText(updates.defaultLocation, 'defaultLocation', 200, false),
+        validateSafeUrl(updates.featuredImage, 'featuredImage', { required: false }),
+        validateSafeUrl(updates.officialSourceUrl, 'officialSourceUrl', { required: false, allowRelative: false }),
+        validateText(updates.eventType, 'eventType', 80, false),
+        validateSeo(updates.seo)
+      );
+      if (validationError) {
+        return res.status(400).json({ error: validationError });
+      }
+      const data: Record<string, any> = { ...updates };
+      if ('officialSourceUrl' in updates) data.officialSourceUrl = updates.officialSourceUrl?.trim() || null;
+      if ('eventType' in updates) data.eventType = updates.eventType?.trim() || null;
+
+      const updated = await prisma.sportEvent.update({ where: { id: existing.id }, data });
 
       await prisma.auditLog.create({
         data: {
@@ -1020,7 +1152,9 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
         validateText(body.location, 'location', 200, false),
         validateText(body.description, 'description', 5000, false),
         validateSafeUrl(body.officialSourceUrl, 'officialSourceUrl', { required: false }),
-        validateSafeUrl(body.featuredImage, 'featuredImage', { required: false })
+        validateSafeUrl(body.featuredImage, 'featuredImage', { required: false }),
+        validateOneOf(body.status, 'status', EDITION_STATUSES),
+        validateSeo(body.seo)
       );
       if (validationError) {
         return res.status(400).json({ error: validationError });
@@ -1085,7 +1219,22 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
         return res.status(404).json({ error: 'Edition not found.' });
       }
 
-      const updated = await prisma.eventEdition.update({ where: { id: existing.id }, data: req.body });
+      const updates: Record<string, any> = req.body;
+      const validationError = firstError(
+        'status' in updates ? validateOneOf(updates.status, 'status', EDITION_STATUSES, true) : { valid: true },
+        validateText(updates.title, 'title', 300, false),
+        validateText(updates.venue, 'venue', 200, false),
+        validateText(updates.location, 'location', 200, false),
+        validateText(updates.description, 'description', 5000, false),
+        validateSafeUrl(updates.officialSourceUrl, 'officialSourceUrl', { required: false }),
+        validateSafeUrl(updates.featuredImage, 'featuredImage', { required: false }),
+        validateSeo(updates.seo)
+      );
+      if (validationError) {
+        return res.status(400).json({ error: validationError });
+      }
+
+      const updated = await prisma.eventEdition.update({ where: { id: existing.id }, data: updates });
 
       await prisma.auditLog.create({
         data: {
@@ -1157,6 +1306,13 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
   // architecture here is deliberately generic enough that adding public
   // registration later means adding a `POST /api/auth/register` endpoint
   // and a public-facing login form, not redesigning this auth boundary.)
+  // PHASE A: comments are launch-disabled (ENABLE_COMMENTS). Every comment
+  // route answers 404 while off; stored comments are left untouched.
+  app.use('/api/comments', (_req: Request, res: Response, next: NextFunction) => {
+    if (!features.comments) return res.status(404).json({ error: 'Comments are not available.' });
+    next();
+  });
+
   app.post(
     '/api/comments',
     requireAuth(getAuthLookup),
@@ -1292,123 +1448,33 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
     })
   );
 
-  // Redirects API (Admin Only)
+  // PHASE C: redirect manager, Media Library and CMS settings (modules).
+  // PHASE E: public search, autocomplete and CMS article search.
+  app.use(searchRouter(getAuthLookup));
+  app.use('/api/redirects', redirectRouter(getAuthLookup));
+  // PHASE F.1: Site Experience (homepage, navigation, footer, announcements, blocks).
+  app.use('/api/site-experience', siteExperienceRouter(getAuthLookup));
+  app.use('/api/media', mediaRouter(getAuthLookup));
+  app.use('/api/ad-creatives', adCreativesRouter(getAuthLookup));
+  app.use('/api/settings', settingsRouter(getAuthLookup));
+  app.use('/api/seo', seoRouter(getAuthLookup, seoOrigin));
+
+  // PHASE D (Spec §30): an editor confirms an article is still accurate.
+  // Records reviewedAt only — never updatedAt.
   app.post(
-    '/api/redirects',
-    requireRole(getAuthLookup, ['Admin']),
+    '/api/articles/:id/review',
+    requireRole(getAuthLookup, ['Admin', 'Editor', 'Author']),
     asyncHandler(async (req: Request, res: Response) => {
-      const { userId, userName } = req.authContext!;
-      const body: Record<string, any> = req.body;
-
-      if (!body.sourceUrl || !body.targetUrl) {
-        return res.status(400).json({ error: 'sourceUrl and targetUrl are required.' });
+      const { userId, userName, role } = req.authContext!;
+      const article = await prisma.article.findUnique({ where: { id: req.params.id } });
+      if (!article) return res.status(404).json({ error: 'Article not found.' });
+      if (role === 'Author') {
+        const owner = await prisma.author.findUnique({ where: { id: article.authorId } });
+        if (owner?.userId !== userId) return res.status(403).json({ error: 'Authors can only review their own articles.' });
       }
-
-      if (body.sourceUrl === body.targetUrl) {
-        return res.status(400).json({ error: 'Source URL and Target URL cannot be identical.' });
-      }
-
-      const redirectValidationError = firstError(
-        validateRedirectSource(body.sourceUrl, 'sourceUrl'),
-        validateSafeUrl(body.targetUrl, 'targetUrl')
-      );
-      if (redirectValidationError) {
-        return res.status(400).json({ error: redirectValidationError });
-      }
-
-      const newRule = await prisma.redirectRule.create({
-        data: {
-          id: `redir-${Date.now()}`,
-          sourceUrl: body.sourceUrl.trim(),
-          targetUrl: body.targetUrl.trim(),
-          statusCode: body.statusCode === 302 ? 302 : 301,
-          createdAt: new Date(),
-          isActive: body.isActive !== false,
-        },
-      });
-
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Created Redirect Rule',
-          entityType: 'Redirect',
-          entityId: newRule.id,
-          timestamp: new Date(),
-          details: `Admin ${userName} created ${newRule.statusCode} redirect: ${newRule.sourceUrl} -> ${newRule.targetUrl}.`,
-        },
-      });
-
-      return res.status(201).json(newRule);
-    })
-  );
-
-  app.put(
-    '/api/redirects/:id',
-    requireRole(getAuthLookup, ['Admin']),
-    asyncHandler(async (req: Request, res: Response) => {
-      const { userId, userName } = req.authContext!;
-      const existing = await prisma.redirectRule.findUnique({ where: { id: req.params.id } });
-
-      if (!existing) {
-        return res.status(404).json({ error: 'Redirect rule not found.' });
-      }
-
-      const redirectUpdates: Record<string, any> = req.body;
-      const redirectUpdateError = firstError(
-        redirectUpdates.sourceUrl !== undefined ? validateRedirectSource(redirectUpdates.sourceUrl, 'sourceUrl') : { valid: true },
-        redirectUpdates.targetUrl !== undefined ? validateSafeUrl(redirectUpdates.targetUrl, 'targetUrl') : { valid: true }
-      );
-      if (redirectUpdateError) {
-        return res.status(400).json({ error: redirectUpdateError });
-      }
-
-      const updated = await prisma.redirectRule.update({ where: { id: existing.id }, data: redirectUpdates });
-
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Updated Redirect Rule',
-          entityType: 'Redirect',
-          entityId: req.params.id,
-          timestamp: new Date(),
-          details: `Admin ${userName} updated redirect rule ${req.params.id}.`,
-        },
-      });
-
-      return res.json(updated);
-    })
-  );
-
-  app.delete(
-    '/api/redirects/:id',
-    requireRole(getAuthLookup, ['Admin']),
-    asyncHandler(async (req: Request, res: Response) => {
-      const { userId, userName } = req.authContext!;
-
-      const existing = await prisma.redirectRule.findUnique({ where: { id: req.params.id } });
-      if (!existing) {
-        return res.status(404).json({ error: 'Redirect rule not found.' });
-      }
-
-      await prisma.redirectRule.delete({ where: { id: req.params.id } });
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Deleted Redirect Rule',
-          entityType: 'Redirect',
-          entityId: req.params.id,
-          timestamp: new Date(),
-          details: `Admin ${userName} deleted redirect rule ${req.params.id}.`,
-        },
-      });
-
-      return res.json({ success: true, id: req.params.id });
+      const reviewed = await prisma.article.update({ where: { id: article.id }, data: { reviewedAt: new Date() } });
+      await prisma.auditLog.create({ data: { id: `log-${crypto.randomUUID()}`, userId, userName, action: 'Reviewed Article', entityType: 'Article', entityId: article.id, timestamp: new Date(), details: `${userName} confirmed "${article.title}" is still accurate.` } });
+      return res.json(reviewed);
     })
   );
 
@@ -1515,7 +1581,7 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
       }
 
       const { role } = req.body;
-      if (!['Admin', 'Editor', 'Author', 'Reader'].includes(role)) {
+      if (!allowedRoles.includes(role)) {
         return res.status(400).json({ error: 'Invalid role specified.' });
       }
 
@@ -1574,7 +1640,7 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
       if (staffValidationError) {
         return res.status(400).json({ error: staffValidationError });
       }
-      if (!['Admin', 'Editor', 'Author', 'Reader'].includes(body.role)) {
+      if (!allowedRoles.includes(body.role)) {
         return res.status(400).json({ error: 'Invalid role specified.' });
       }
 
@@ -1754,123 +1820,6 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
     })
   );
 
-  // Media Library API
-  app.post(
-    '/api/media',
-    requireRole(getAuthLookup, ['Admin', 'Editor', 'Author']),
-    asyncHandler(async (req: Request, res: Response) => {
-      const { userId, userName } = req.authContext!;
-      const body: Record<string, any> = req.body;
-
-      if (!body.title || !body.url) {
-        return res.status(400).json({ error: 'Title and URL are required for media.' });
-      }
-
-      const mediaValidationError = firstError(
-        validateText(body.title, 'title', 200),
-        validateSafeUrl(body.url, 'url'),
-        validateText(body.altText, 'altText', 300, false),
-        validateText(body.caption, 'caption', 500, false),
-        validateText(body.credit, 'credit', 200, false),
-        validateText(body.source, 'source', 200, false),
-        validateText(body.license, 'license', 200, false)
-      );
-      if (mediaValidationError) {
-        return res.status(400).json({ error: mediaValidationError });
-      }
-
-      const newItem = await prisma.mediaItem.create({
-        data: {
-          id: `media-${Date.now()}`,
-          title: body.title,
-          url: body.url,
-          altText: body.altText || body.title,
-          caption: body.caption || '',
-          credit: body.credit || 'SportingSpy Archive',
-          source: body.source || 'Original Production',
-          license: body.license || 'All Editorial Rights Reserved',
-          creationType: body.creationType || 'Original',
-          uploadedAt: new Date(),
-          dimensions: body.dimensions || '1920x1080',
-        },
-      });
-
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Uploaded Media Asset',
-          entityType: 'Setting',
-          entityId: newItem.id,
-          timestamp: new Date(),
-          details: `Uploaded media: ${newItem.title}.`,
-        },
-      });
-
-      return res.status(201).json(newItem);
-    })
-  );
-
-  app.put(
-    '/api/media/:id',
-    requireRole(getAuthLookup, ['Admin', 'Editor']),
-    asyncHandler(async (req: Request, res: Response) => {
-      const { userId, userName } = req.authContext!;
-      const existing = await prisma.mediaItem.findUnique({ where: { id: req.params.id } });
-
-      if (!existing) {
-        return res.status(404).json({ error: 'Media item not found.' });
-      }
-
-      const updated = await prisma.mediaItem.update({ where: { id: existing.id }, data: req.body });
-
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Updated Media Metadata',
-          entityType: 'Setting',
-          entityId: req.params.id,
-          timestamp: new Date(),
-          details: `Updated media item: ${updated.title}.`,
-        },
-      });
-
-      return res.json(updated);
-    })
-  );
-
-  app.delete(
-    '/api/media/:id',
-    requireRole(getAuthLookup, ['Admin']),
-    asyncHandler(async (req: Request, res: Response) => {
-      const { userId, userName } = req.authContext!;
-
-      const existing = await prisma.mediaItem.findUnique({ where: { id: req.params.id } });
-      if (!existing) {
-        return res.status(404).json({ error: 'Media item not found.' });
-      }
-
-      await prisma.mediaItem.delete({ where: { id: req.params.id } });
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Deleted Media Asset',
-          entityType: 'Setting',
-          entityId: req.params.id,
-          timestamp: new Date(),
-          details: `Deleted media item ${req.params.id}.`,
-        },
-      });
-
-      return res.json({ success: true, id: req.params.id });
-    })
-  );
-
   // Ad Slots API (Admin Only)
   app.put(
     '/api/ads/:id',
@@ -1883,17 +1832,48 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
         return res.status(404).json({ error: 'Ad slot not found.' });
       }
 
-      const adUpdates: Record<string, any> = req.body;
+      // PHASE F: only the editable fields, each type-checked. Slot identity,
+      // name, placement and dimensions are fixed by the layout.
+      const body: Record<string, unknown> = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+      const EDITABLE = ['enabled', 'sponsorName', 'bannerText', 'linkUrl', 'provider', 'providerSlotId', 'creativeId', 'creativeAlt', 'creativeFit'];
+      const unknownField = Object.keys(body).find((k) => !EDITABLE.includes(k));
+      if (unknownField) return res.status(400).json({ error: `${unknownField} cannot be changed.` });
+      const optionalText = (v: unknown) => (v === null || v === undefined || v === '' ? null : String(v).trim() || null);
       const adValidationError = firstError(
-        validateText(adUpdates.sponsorName, 'sponsorName', 150, false),
-        validateText(adUpdates.bannerText, 'bannerText', 300, false),
-        validateSafeUrl(adUpdates.linkUrl, 'linkUrl', { required: false })
+        'enabled' in body && typeof body.enabled !== 'boolean' ? { valid: false, error: 'enabled must be true or false.' } : { valid: true },
+        validateText(body.sponsorName, 'sponsorName', 150, false),
+        validateText(body.bannerText, 'bannerText', 300, false),
+        validateText(body.creativeId, 'creativeId', 100, false),
+        validateText(body.creativeAlt, 'creativeAlt', 300, false),
+        'creativeFit' in body && !['contain', 'cover'].includes(String(body.creativeFit)) ? { valid: false, error: 'creativeFit must be contain or cover.' } : { valid: true },
+        validateSafeUrl(body.linkUrl, 'linkUrl', { required: false }),
+        'provider' in body && !(AD_PROVIDERS as readonly unknown[]).includes(body.provider) ? { valid: false, error: `provider must be one of ${AD_PROVIDERS.join(', ')}.` } : { valid: true },
+        body.providerSlotId !== undefined && body.providerSlotId !== null && body.providerSlotId !== '' && !/^\d{6,20}$/.test(String(body.providerSlotId)) ? { valid: false, error: 'providerSlotId must be the numeric ad unit ID (6–20 digits).' } : { valid: true }
       );
       if (adValidationError) {
         return res.status(400).json({ error: adValidationError });
       }
+      const nextProvider = (body.provider as string | undefined) ?? existing.provider;
+      const nextSlotId = 'providerSlotId' in body ? optionalText(body.providerSlotId) : existing.providerSlotId;
+      if (nextProvider === 'adsense' && !nextSlotId) {
+        return res.status(400).json({ error: 'An AdSense slot needs its ad unit ID (providerSlotId).' });
+      }
 
-      const updated = await prisma.adSlotConfig.update({ where: { id: existing.id }, data: adUpdates });
+      const data: Record<string, unknown> = {};
+      const nextCreativeId = 'creativeId' in body ? optionalText(body.creativeId) : existing.creativeId;
+      const nextCreativeAlt = 'creativeAlt' in body ? optionalText(body.creativeAlt) : existing.creativeAlt;
+      if (nextCreativeId) {
+        if (!nextCreativeAlt) return res.status(400).json({ error: 'Describe the ad media in its alt text.' });
+        if (!await prisma.adCreative.findUnique({ where: { id: nextCreativeId } })) return res.status(400).json({ error: 'Choose existing ad media from the library.' });
+      }
+      if ('creativeId' in body) data.creativeId = nextCreativeId;
+      if ('creativeAlt' in body) data.creativeAlt = nextCreativeAlt;
+      if ('creativeFit' in body) data.creativeFit = body.creativeFit;
+      if ('enabled' in body) data.enabled = body.enabled;
+      for (const key of ['sponsorName', 'bannerText', 'linkUrl'] as const) if (key in body) data[key] = optionalText(body[key]);
+      if ('provider' in body) data.provider = body.provider;
+      if ('providerSlotId' in body) data.providerSlotId = nextSlotId;
+      const updated = await prisma.adSlotConfig.update({ where: { id: existing.id }, data, include: { creative: true } });
 
       await prisma.auditLog.create({
         data: {
@@ -1904,7 +1884,7 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
           entityType: 'Setting',
           entityId: req.params.id,
           timestamp: new Date(),
-          details: `Configured ad slot ${req.params.id} (enabled: ${updated.enabled}).`,
+          details: `Configured ad slot ${req.params.id} (enabled: ${updated.enabled}, provider: ${updated.provider}).`,
         },
       });
 
@@ -1922,27 +1902,41 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
     })
   );
 
-  // 7. Vite Dev Server / Static Hosting Integration
-  // API misses must never fall through to index.html (including non-GETs).
+  // 7. Next.js page rendering (PHASE B)
+  // API misses must never fall through to page rendering (including non-GETs).
   app.use('/api', (_req, res) => res.status(404).json({ error: 'API route not found.' }));
-  if (deployment.production) {
-    app.use(express.static('dist', { index: false, dotfiles: 'deny' }));
-    app.get('*', (req: Request, res: Response) => {
-      if (req.path.includes('.') || /^\/(?:src|node_modules|@vite|@id|@fs)(?:\/|$)/i.test(req.path)) {
-        return res.status(404).json({ error: 'Not found.' });
-      }
-      res.setHeader('Cache-Control', 'no-cache');
-      res.sendFile(path.resolve('dist/index.html'));
-    });
-  } else {
-    // Development mode: mount Vite middlewares
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
+
+  // Editorial images referenced by stored content as /src/assets/images/*.
+  // Only this one directory is exposed; the rest of /src stays private.
+  app.use('/src/assets/images', express.static(path.resolve('src/assets/images'), { index: false, dotfiles: 'deny', fallthrough: true }));
+
+  // PHASE C: processed Media Library files. Keys are unguessable and
+  // content-addressed per upload, so they are cached as immutable.
+  if (storage.localRoot) {
+    const mediaTypes: Record<string, string> = { '.jpg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.avif': 'image/avif', '.gif': 'image/gif', '.mp4': 'video/mp4', '.webm': 'video/webm' };
+    app.use('/media', express.static(storage.localRoot, {
+      index: false, dotfiles: 'deny', immutable: true, maxAge: '365d', fallthrough: true, redirect: false,
+      // Explicit types: the static server's MIME table has no entry for .avif.
+      setHeaders: (res, filePath) => res.setHeader('Content-Type', mediaTypes[path.extname(filePath).toLowerCase()] || 'application/octet-stream'),
+    }));
   }
+
+  const nextApp = next({ dev: !deployment.production, dir: process.cwd() });
+  const handleNext = nextApp.getRequestHandler();
+  await nextApp.prepare();
+
+  app.use((req: Request, res: Response, nextMiddleware: NextFunction) => {
+    // Source/tooling paths and unknown files are plain JSON 404s, never pages.
+    const isNextInternal = /^\/(?:_next|__next)(?:\/|$)/.test(req.path);
+    if (!isNextInternal && (/^\/(?:src|node_modules|@vite|@id|@fs)(?:\/|$)/i.test(req.path) || req.path.slice(req.path.lastIndexOf('/') + 1).includes('.'))) {
+      return res.status(404).json({ error: 'Not found.' });
+    }
+    // Next only renders pages; there are no Next API routes or server actions.
+    if (!isNextInternal && req.method !== 'GET' && req.method !== 'HEAD') {
+      return res.status(405).set('Allow', 'GET, HEAD').json({ error: 'Method not allowed.' });
+    }
+    Promise.resolve(handleNext(req, res)).catch(nextMiddleware);
+  });
 
   // 8. Central Error Handler — PHASE 2: ensures a failed Prisma/PostgreSQL
   // query (or any other unexpected error) never leaks a stack trace,
@@ -1956,7 +1950,12 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     // Prisma/parser errors can embed input values, including password hashes.
     // Never serialize request errors or bodies into logs or API responses.
-    console.error('[SportingSpy] Request failed:', err instanceof Error ? err.name : 'UnknownError');
+    // Logged: request ID, method, path WITHOUT query string, error class and
+    // (Prisma/Node) error code only. Never messages, bodies or query values.
+    const requestId = (_req as Request & { requestId?: string }).requestId;
+    const code = typeof (err as { code?: unknown } | null)?.code === 'string' ? (err as { code: string }).code : undefined;
+    const errorStatus = (err as { status?: number; statusCode?: number } | null)?.status ?? (err as { statusCode?: number } | null)?.statusCode;
+    console.error(`[SportingSpy] Request failed id=${requestId} ${_req.method} ${_req.path} status=${errorStatus ?? 500} error=${err instanceof Error ? err.name : 'UnknownError'}${code && /^[A-Z0-9_]{2,40}$/.test(code) ? ` code=${code}` : ''}`);
     if (res.headersSent) return;
 
     // PHASE 3: body-parser's "entity too large" (and similar well-known
@@ -1968,19 +1967,22 @@ Sitemap: ${deployment.origin || 'https://sportingspy.com'}/sitemap.xml
     const status = isKnownClientError ? errStatus! : 500;
     const genericMessage = status === 413 ? 'Request body too large.' : status === 400 ? 'Malformed request.' : 'Internal server error.';
 
-    res.status(status).json({ error: genericMessage });
+    res.status(status).json({ error: genericMessage, requestId });
   });
 
   const listener = app.listen(deployment.port, deployment.host, () => {
     console.log(`[SportingSpy] Server running at http://${deployment.host}:${deployment.port}`);
   });
   listener.on('error', () => { console.error('[SportingSpy] Cannot bind configured listening address.'); process.exit(1); });
+  // Next.js dev server hot reload uses a websocket on this same server.
+  if (!deployment.production) listener.on('upgrade', nextApp.getUpgradeHandler());
   setInterval(() => {
     publishScheduledArticles().catch(() => console.error('[Scheduler] Publication failed. Check database availability.'));
+    applyDueSchedules().catch(() => console.error('[Scheduler] Site Experience publication failed. Check database availability.'));
   }, 30000).unref();
 }
 
 startServer().catch((err) => {
-  console.error('[SportingSpy] Startup refused:', err instanceof DeploymentConfigError ? err.message : 'Database/schema or server initialization failed. Check configuration and applied migrations.');
+  console.error('[SportingSpy] Startup refused:', err instanceof DeploymentConfigError || err instanceof LaunchGuardError ? err.message : 'Database/schema or server initialization failed. Check configuration and applied migrations.');
   process.exit(1);
 });

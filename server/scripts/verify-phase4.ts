@@ -19,7 +19,7 @@ import { productionTransport } from './production-transport';
 import { verifyProductionBoot, verifyProductionHttp, verifyProductionBrowser } from './production-checks';
 
 assert(checkDatabaseUrlIsLocalDev(process.env.DATABASE_URL).safe, 'Verification requires a local, non-production database.');
-assert(fs.existsSync('dist/index.html'), 'Run npm run build first.');
+assert(fs.existsSync('.next/BUILD_ID'), 'Run npm run build first.');
 const fixture = `phase4-${crypto.randomUUID()}`;
 const roles = ['Reader', 'Author', 'Editor', 'Admin'] as const;
 const ids = roles.map(role => `${fixture}-${role}`);
@@ -51,7 +51,9 @@ const base = transport?.origin || `http://localhost:${port}`;
 const request = transport?.request || fetch;
 const child = spawn(process.execPath, ['--import', 'tsx', httpsMode ? 'server/start-production.ts' : 'server.ts'], {
   cwd: process.cwd(), windowsHide: true,
-  env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', TRUST_PROXY: transport ? '127.0.0.1/32' : 'false', NODE_ENV: 'production', AUTH_MODE: 'production', DEV_LOGIN_BYPASS: 'false', ALLOWED_ORIGIN: base },
+  // This pre-launch suite deliberately exercises Reader accounts/comments;
+  // Phase A separately verifies the current launch defaults keep both off.
+  env: { ...process.env, ENABLE_READER_ACCOUNTS: 'true', ENABLE_COMMENTS: 'true', PORT: String(port), HOST: '127.0.0.1', TRUST_PROXY: transport ? '127.0.0.1/32' : 'false', NODE_ENV: 'production', AUTH_MODE: 'production', DEV_LOGIN_BYPASS: 'false', ALLOWED_ORIGIN: base },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let serverOutput = '';
@@ -190,14 +192,16 @@ try {
   await status(inactive, '/api/auth/me', 401);
   await prisma.user.update({ where: { id: ids[0] }, data: { status: 'active' } });
   tested('expired sessions and inactive users cannot authenticate');
-  for (const client of [anon, author]) {
-    const data = (await status(client, '/api/data', 200)).data;
-    assert.equal(data.users.length, 0); assert.equal(data.auditLogs.length, 0);
-  }
-  const publicData = (await status(anon, '/api/data', 200)).data;
-  assert(publicData.articles.every((a: any) => a.status === 'published'));
-  assert(publicData.comments.every((c: any) => c.status === 'approved'));
-  assert((await status(admin, '/api/data', 200)).data.users.length >= 4);
+  // PHASE B: the public full-database /api/data is gone; the CMS dataset is staff-only.
+  await status(anon, '/api/data', 404);
+  await status(anon, '/api/cms/data', 401);
+  const readerBoundary = new Client(); assert.equal((await readerBoundary.login('Reader', newPassword)).status, 200);
+  await status(readerBoundary, '/api/cms/data', 403);
+  const authorData = (await status(author, '/api/cms/data', 200)).data;
+  assert.equal(authorData.users.length, 0); assert.equal(authorData.auditLogs.length, 0);
+  assert((await status(admin, '/api/cms/data', 200)).data.users.length >= 4);
+  const publicHtml = (await status(anon, '/latest/', 200)).text;
+  assert(!publicHtml.includes('passwordHash') && !publicHtml.includes('auditLogs'));
   await status(author, '/api/audit-logs', 403); await status(editor, '/api/audit-logs', 200);
   tested('public/staff data boundary and audit RBAC');
   const health = await anon.request('/api/health', 'GET', undefined, { Origin: base });

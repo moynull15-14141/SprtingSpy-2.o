@@ -3,15 +3,15 @@ import type { Request, Response, NextFunction } from 'express';
 // Public JSON is never a Prisma nested-write instruction. These are the
 // existing editor fields, not relation names or immutable primary keys.
 const fields: Record<string, string[]> = {
-  articles: ['slug', 'title', 'subtitle', 'sportSlug', 'eventSlug', 'editionYear', 'articleType', 'excerpt', 'content', 'featuredImage', 'authorId', 'publishedAt', 'updatedAt', 'scheduledFor', 'status', 'readingTimeMinutes', 'featured', 'tables', 'references', 'seo'],
-  sports: ['slug', 'name', 'tagline', 'description', 'order', 'isVisible', 'featuredEventIds', 'colorTheme', 'heroImage', 'seo'],
-  events: ['sportSlug', 'slug', 'name', 'shortName', 'description', 'history', 'frequency', 'defaultVenue', 'defaultLocation', 'currentEditionYear', 'allEditionYears', 'featured', 'isVisible', 'featuredImage', 'seo'],
+  articles: ['slug', 'title', 'subtitle', 'sportSlug', 'eventSlug', 'editionYear', 'articleType', 'excerpt', 'content', 'body', 'featuredImage', 'featuredMediaId', 'authorId', 'publishedAt', 'updatedAt', 'scheduledFor', 'status', 'readingTimeMinutes', 'featured', 'tables', 'references', 'seo'],
+  sports: ['slug', 'name', 'tagline', 'description', 'order', 'isVisible', 'featuredEventIds', 'colorTheme', 'heroImage', 'seo', 'icon'],
+  events: ['sportSlug', 'slug', 'name', 'shortName', 'description', 'history', 'frequency', 'defaultVenue', 'defaultLocation', 'currentEditionYear', 'allEditionYears', 'featured', 'isVisible', 'featuredImage', 'officialSourceUrl', 'eventType', 'seo'],
   editions: ['eventSlug', 'sportSlug', 'year', 'title', 'startDate', 'endDate', 'venue', 'location', 'status', 'quickFacts', 'prizeMoneyTotal', 'defendingChampions', 'qualificationInfo', 'participantsCount', 'officialSourceUrl', 'description', 'featuredImage', 'seo'],
   authors: ['slug', 'name', 'roleTitle', 'bio', 'avatar', 'twitter', 'email', 'articleCount', 'userId'],
   comments: ['status'],
-  redirects: ['sourceUrl', 'targetUrl', 'statusCode', 'isActive'],
-  media: ['title', 'url', 'altText', 'caption', 'credit', 'source', 'license', 'creationType', 'fileSize', 'dimensions'],
-  ads: ['name', 'placementDescription', 'enabled', 'sponsorName', 'bannerText', 'linkUrl', 'dimensions'],
+  redirects: ['sourceUrl', 'targetUrl', 'statusCode', 'isActive', 'notes'],
+  media: ['title', 'url', 'altText', 'caption', 'credit', 'source', 'license', 'creationType', 'aiTool', 'humanEditing', 'copyrightReview'],
+  ads: ['name', 'placementDescription', 'enabled', 'sponsorName', 'bannerText', 'linkUrl', 'dimensions', 'provider', 'providerSlotId', 'creativeId', 'creativeAlt', 'creativeFit'],
 };
 
 export function rejectNestedCmsWrites(req: Request, res: Response, next: NextFunction) {

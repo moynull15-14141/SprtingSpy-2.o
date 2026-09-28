@@ -6,13 +6,27 @@
  * Zone 3: 1-2 primary actions (Theme toggle + User/CMS quick access)
  */
 
+'use client';
+
 import React, { useState } from 'react';
-import { useApp } from '../../context/AppContext';
+import Link from 'next/link';
+import { useSite } from '../../context/SiteContext';
 import { BRANDING } from '../../config/branding';
 import { Button } from '../ui/Button';
+import { Avatar } from '../ui/Avatar';
+import { SportIcon } from '../ui/SportIcon';
+import { SiteLink } from '../site/SiteLink';
+import type { NavItem } from '../../lib/siteExperience/types';
 
-export const Header: React.FC = () => {
-  const { currentPath, navigate, theme, toggleTheme, sports, currentUser, isAuthenticated, login, logout } = useApp();
+interface HeaderProps {
+  /** Visible sports for the navigation menus, loaded on the server. */
+  sports: { id: string; slug: string; name: string; icon?: string | null }[];
+  /** PHASE F.1: navigation items from the Site Experience (published, or draft in preview). */
+  navigation: NavItem[];
+}
+
+export const Header: React.FC<HeaderProps> = ({ sports, navigation }) => {
+  const { currentPath, navigate, theme, toggleTheme, currentUser, isAuthenticated, login, logout } = useSite();
   const [isSportsMenuOpen, setIsSportsMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -44,13 +58,13 @@ export const Header: React.FC = () => {
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 dark:bg-[#0c0d0e]/95 backdrop-blur-md border-b border-stone-200 dark:border-stone-800 transition-colors">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="max-w-[120rem] mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* ZONE 1: Brand Zone - Single element wordmark */}
           <div className="flex items-center gap-2">
-            <button
+            <Link
+              href="/"
               onClick={() => {
-                navigate('/');
                 setIsSportsMenuOpen(false);
                 setIsMobileMenuOpen(false);
               }}
@@ -60,28 +74,32 @@ export const Header: React.FC = () => {
               <span className="font-display text-2xl font-bold tracking-tight text-stone-900 dark:text-stone-100 group-hover:text-amber-600 dark:group-hover:text-amber-500 transition-colors">
                 {BRANDING.shortName}
               </span>
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-600 dark:bg-amber-500 inline-block self-center mb-0.5"></span>
-            </button>
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-700 dark:bg-amber-500 inline-block self-center mb-0.5"></span>
+            </Link>
           </div>
 
           {/* ZONE 2: 4-6 clean text navigation links */}
-          <nav className="hidden md:flex items-center gap-8 text-sm font-medium">
-            <div className="relative">
+          <nav aria-label="Main" className="hidden min-w-0 flex-1 flex-wrap justify-center md:flex items-center gap-x-3 gap-y-1 mx-3 text-sm font-medium lg:gap-x-6">
+            {navigation.filter((item) => item.desktop).map((item) => item.kind === 'sportsMenu' ? (
+            <div key={item.id} className="relative">
               <button
                 type="button"
                 onClick={() => setIsSportsMenuOpen(!isSportsMenuOpen)}
+                aria-expanded={isSportsMenuOpen}
+                data-nav-item={item.id}
                 className={`flex items-center gap-1 transition-colors py-2 cursor-pointer ${
                   isActive('/sports') || isSportsMenuOpen
-                    ? 'text-amber-600 dark:text-amber-400 font-semibold'
+                    ? 'text-amber-700 dark:text-amber-400 font-semibold'
                     : 'text-stone-700 dark:text-stone-300 hover:text-stone-950 dark:hover:text-white'
                 }`}
               >
-                Sports
+                {item.label}
                 <svg
                   className={`w-3.5 h-3.5 transition-transform duration-150 ${isSportsMenuOpen ? 'rotate-180' : ''}`}
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
+                  aria-hidden="true"
                 >
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
@@ -93,83 +111,52 @@ export const Header: React.FC = () => {
                   className="absolute left-0 mt-2 w-96 rounded-xl bg-white dark:bg-stone-900 shadow-xl border border-stone-200 dark:border-stone-800 p-4 grid grid-cols-2 gap-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
                   onMouseLeave={() => setIsSportsMenuOpen(false)}
                 >
-                  <div className="col-span-2 pb-2 mb-2 border-b border-stone-100 dark:border-stone-800 flex justify-between items-center text-xs text-stone-500">
+                  <div className="col-span-2 pb-2 mb-2 border-b border-stone-100 dark:border-stone-800 flex justify-between items-center text-xs text-stone-500 dark:text-stone-400">
                     <span className="font-semibold uppercase tracking-wider">All Active Sports</span>
-                    <button
-                      onClick={() => {
-                        navigate('/sports');
-                        setIsSportsMenuOpen(false);
-                      }}
-                      className="text-amber-600 dark:text-amber-400 hover:underline"
+                    <Link
+                      href={item.href}
+                      onClick={() => setIsSportsMenuOpen(false)}
+                      className="text-amber-700 dark:text-amber-400 hover:underline"
                     >
                       View Directory &rarr;
-                    </button>
+                    </Link>
                   </div>
                   {sports
-                    .filter((s) => s.isVisible)
                     .map((sport) => (
-                      <button
+                      <Link
                         key={sport.id}
-                        type="button"
-                        onClick={() => {
-                          navigate(`/${sport.slug}`);
-                          setIsSportsMenuOpen(false);
-                        }}
-                        className="text-left px-3 py-2 rounded-lg text-sm text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-950 dark:hover:text-white transition-colors cursor-pointer flex items-center justify-between"
+                        href={`/${sport.slug}/`}
+                        onClick={() => setIsSportsMenuOpen(false)}
+                        className="text-left px-3 py-2 rounded-lg text-sm text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-950 dark:hover:text-white transition-colors cursor-pointer flex items-center gap-3"
                       >
+                        <SportIcon slug={sport.slug} name={sport.name} icon={sport.icon} />
                         <span className="font-medium">{sport.name}</span>
-                        <span className="text-[11px] text-stone-400">/{sport.slug}</span>
-                      </button>
+                      </Link>
                     ))}
                 </div>
               )}
             </div>
-
-            <button
-              onClick={() => {
-                navigate('/events');
-                setIsSportsMenuOpen(false);
-              }}
-              className={`transition-colors py-2 cursor-pointer ${
-                isActive('/events')
-                  ? 'text-amber-600 dark:text-amber-400 font-semibold'
+            ) : (
+            <SiteLink
+              key={item.id}
+              href={item.href}
+              newTab={item.newTab}
+              data-nav-item={item.id}
+              onClick={() => setIsSportsMenuOpen(false)}
+              className={`transition-colors py-2 cursor-pointer ${item.icon === 'search' ? 'flex items-center gap-1.5 ' : ''}${
+                item.href.startsWith('/') && isActive(item.href.replace(/\/$/, '') || '/')
+                  ? 'text-amber-700 dark:text-amber-400 font-semibold'
                   : 'text-stone-700 dark:text-stone-300 hover:text-stone-950 dark:hover:text-white'
               }`}
             >
-              Events
-            </button>
-
-            <button
-              onClick={() => {
-                navigate('/latest');
-                setIsSportsMenuOpen(false);
-              }}
-              className={`transition-colors py-2 cursor-pointer ${
-                isActive('/latest')
-                  ? 'text-amber-600 dark:text-amber-400 font-semibold'
-                  : 'text-stone-700 dark:text-stone-300 hover:text-stone-950 dark:hover:text-white'
-              }`}
-            >
-              Latest
-            </button>
-
-            <button
-              onClick={() => {
-                navigate('/search');
-                setIsSportsMenuOpen(false);
-              }}
-              className={`transition-colors py-2 cursor-pointer flex items-center gap-1.5 ${
-                isActive('/search')
-                  ? 'text-amber-600 dark:text-amber-400 font-semibold'
-                  : 'text-stone-700 dark:text-stone-300 hover:text-stone-950 dark:hover:text-white'
-              }`}
-            >
-              <svg className="w-4 h-4 text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              Search
-            </button>
-
+              {item.icon === 'search' && (
+                <svg className="w-4 h-4 text-stone-500 dark:text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              )}
+              {item.label}
+            </SiteLink>
+            ))}
           </nav>
 
           {/* ZONE 3: 1-2 primary actions */}
@@ -210,13 +197,13 @@ export const Header: React.FC = () => {
               >
                 {isAuthenticated ? (
                   <>
-                    <img src={currentUser.avatar} alt={currentUser.name} className="w-5 h-5 rounded-full object-cover" />
+                    <Avatar src={currentUser.avatar} name={currentUser.name} className="w-5 h-5 rounded-full object-cover" />
                     <span className="font-medium text-stone-800 dark:text-stone-200 hidden sm:inline">{currentUser.role}</span>
                   </>
                 ) : (
                   <span className="font-medium text-stone-800 dark:text-stone-200">Staff Login</span>
                 )}
-                <span className="text-[10px] text-stone-400">▼</span>
+                <span aria-hidden="true" className="text-[10px] text-stone-500 dark:text-stone-400">▼</span>
               </button>
 
               {isUserMenuOpen && (
@@ -228,8 +215,8 @@ export const Header: React.FC = () => {
                     <>
                       <div className="px-3 py-2 border-b border-stone-100 dark:border-stone-800">
                         <p className="text-xs font-semibold text-stone-900 dark:text-stone-100">{currentUser.name}</p>
-                        <p className="text-[11px] text-stone-500 truncate">{currentUser.email}</p>
-                        <div className="mt-1 text-[10px] uppercase font-bold text-amber-600 dark:text-amber-400">
+                        <p className="text-[11px] text-stone-500 truncate dark:text-stone-400">{currentUser.email}</p>
+                        <div className="mt-1 text-[10px] uppercase font-bold text-amber-700 dark:text-amber-400">
                           Role: {currentUser.role}
                         </div>
                       </div>
@@ -253,7 +240,7 @@ export const Header: React.FC = () => {
                     </>
                   ) : (
                     <form onSubmit={handleLogin} className="p-2 space-y-2">
-                      <p className="px-1 text-[11px] text-stone-500">Staff login for the Editorial CMS.</p>
+                      <p className="px-1 text-[11px] text-stone-500 dark:text-stone-400">Staff login for the Editorial CMS.</p>
                       <input
                         type="email"
                         required
@@ -300,60 +287,44 @@ export const Header: React.FC = () => {
 
         {/* Mobile Navigation Drawer */}
         {isMobileMenuOpen && (
-          <div className="md:hidden py-4 border-t border-stone-200 dark:border-stone-800 space-y-2">
-            <button
-              onClick={() => {
-                navigate('/sports');
-                setIsMobileMenuOpen(false);
-              }}
-              className="block w-full text-left px-3 py-2 text-base font-medium text-stone-800 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 rounded-md"
-            >
-              All Sports Directory
-            </button>
-            <div className="grid grid-cols-2 gap-1 pl-4 pr-2">
-              {sports.slice(0, 8).map((sp) => (
-                <button
-                  key={sp.id}
-                  onClick={() => {
-                    navigate(`/${sp.slug}`);
-                    setIsMobileMenuOpen(false);
-                  }}
-                  className="text-left text-xs py-1.5 px-2 text-stone-600 dark:text-stone-400 hover:text-amber-600"
+          <nav aria-label="Mobile" className="md:hidden py-4 border-t border-stone-200 dark:border-stone-800 space-y-2">
+            {navigation.filter((item) => item.mobile).map((item) => item.kind === 'sportsMenu' ? (
+              <div key={item.id}>
+                <Link
+                  href={item.href}
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="block w-full text-left px-3 py-2 text-base font-medium text-stone-800 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 rounded-md"
                 >
-                  {sp.name}
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={() => {
-                navigate('/events');
-                setIsMobileMenuOpen(false);
-              }}
-              className="block w-full text-left px-3 py-2 text-base font-medium text-stone-800 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 rounded-md"
-            >
-              Major Events
-            </button>
-            <button
-              onClick={() => {
-                navigate('/latest');
-                setIsMobileMenuOpen(false);
-              }}
-              className="block w-full text-left px-3 py-2 text-base font-medium text-stone-800 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 rounded-md"
-            >
-              Latest Articles
-            </button>
-            <button
-              onClick={() => {
-                navigate('/search');
-                setIsMobileMenuOpen(false);
-              }}
-              className="block w-full text-left px-3 py-2 text-base font-medium text-stone-800 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 rounded-md"
-            >
-              Search Database
-            </button>
+                  {item.mobileLabel || item.label}
+                </Link>
+                <div className="grid grid-cols-2 gap-1 pl-4 pr-2">
+                  {sports.slice(0, 8).map((sp) => (
+                    <Link
+                      key={sp.id}
+                      href={`/${sp.slug}/`}
+                      onClick={() => setIsMobileMenuOpen(false)}
+                      className="flex items-center gap-2 text-left text-xs py-1.5 px-2 text-stone-600 dark:text-stone-400 hover:text-amber-600"
+                    >
+                      <SportIcon slug={sp.slug} name={sp.name} icon={sp.icon} size="sm" />
+                      {sp.name}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <SiteLink
+                key={item.id}
+                href={item.href}
+                newTab={item.newTab}
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="block w-full text-left px-3 py-2 text-base font-medium text-stone-800 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 rounded-md"
+              >
+                {item.mobileLabel || item.label}
+              </SiteLink>
+            ))}
             {/* PHASE 3: no Admin/Editorial CMS entry in the mobile menu —
                 the public site must not expose a navigation path to /admin. */}
-          </div>
+          </nav>
         )}
       </div>
     </header>

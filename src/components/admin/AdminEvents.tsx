@@ -8,7 +8,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { Button } from '../ui/Button';
-import { EventEdition, SportEvent } from '../../types';
+import { EDITION_STATUSES, EditionStatus, EventEdition, SportEvent } from '../../types';
 
 export const AdminEvents: React.FC = () => {
   const {
@@ -38,6 +38,8 @@ export const AdminEvents: React.FC = () => {
   const [eventVenue, setEventVenue] = useState('');
   const [eventLocation, setEventLocation] = useState('');
   const [eventFreq, setEventFreq] = useState('Annual');
+  const [eventType, setEventType] = useState('');
+  const [eventOfficialSourceUrl, setEventOfficialSourceUrl] = useState('');
 
   // Edition form state
   const [isCreatingEdition, setIsCreatingEdition] = useState(false);
@@ -50,7 +52,8 @@ export const AdminEvents: React.FC = () => {
   const [editionVenue, setEditionVenue] = useState('');
   const [editionLocation, setEditionLocation] = useState('');
   const [editionPurse, setEditionPurse] = useState('');
-  const [editionStatus, setEditionStatus] = useState<'upcoming' | 'ongoing' | 'completed'>('upcoming');
+  const [editionStatus, setEditionStatus] = useState<EditionStatus>('upcoming');
+  const [editionStatusFilter, setEditionStatusFilter] = useState<EditionStatus | ''>('');
   const [editionDesc, setEditionDesc] = useState('');
 
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -67,6 +70,8 @@ export const AdminEvents: React.FC = () => {
     setEventVenue('');
     setEventLocation('');
     setEventFreq('Annual');
+    setEventType('');
+    setEventOfficialSourceUrl('');
   };
 
   const startEditEvent = (evt: SportEvent) => {
@@ -81,6 +86,8 @@ export const AdminEvents: React.FC = () => {
     setEventVenue(evt.defaultVenue);
     setEventLocation(evt.defaultLocation);
     setEventFreq(evt.frequency);
+    setEventType(evt.eventType || '');
+    setEventOfficialSourceUrl(evt.officialSourceUrl || '');
   };
 
   const handleSaveEvent = (e: React.FormEvent) => {
@@ -98,6 +105,8 @@ export const AdminEvents: React.FC = () => {
         defaultVenue: eventVenue || 'TBD',
         defaultLocation: eventLocation || 'TBD',
         frequency: eventFreq,
+        eventType: eventType.trim(),
+        officialSourceUrl: eventOfficialSourceUrl.trim(),
         seo: {
           metaTitle: `${eventName} Championship Guide | SportingSpy`,
           metaDescription: eventDesc,
@@ -115,6 +124,8 @@ export const AdminEvents: React.FC = () => {
         defaultVenue: eventVenue || 'TBD',
         defaultLocation: eventLocation || 'TBD',
         frequency: eventFreq,
+        eventType: eventType.trim() || undefined,
+        officialSourceUrl: eventOfficialSourceUrl.trim() || undefined,
         currentEditionYear: new Date().getFullYear(),
         allEditionYears: [new Date().getFullYear()],
         featured: true,
@@ -215,7 +226,7 @@ export const AdminEvents: React.FC = () => {
           <h2 className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">
             Championships & Yearly Editions
           </h2>
-          <p className="text-xs text-stone-500 mt-0.5">
+          <p className="text-xs text-stone-500 mt-0.5 dark:text-stone-400">
             Preserve permanent event heritage while staging annual tournament editions.
           </p>
         </div>
@@ -224,7 +235,7 @@ export const AdminEvents: React.FC = () => {
           <button
             onClick={() => setActiveSubTab('events')}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer ${
-              activeSubTab === 'events' ? 'bg-amber-600 text-white font-semibold' : 'bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300'
+              activeSubTab === 'events' ? 'bg-amber-700 text-white font-semibold' : 'bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300'
             }`}
           >
             Permanent Events ({events.length})
@@ -232,7 +243,7 @@ export const AdminEvents: React.FC = () => {
           <button
             onClick={() => setActiveSubTab('editions')}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer ${
-              activeSubTab === 'editions' ? 'bg-amber-600 text-white font-semibold' : 'bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300'
+              activeSubTab === 'editions' ? 'bg-amber-700 text-white font-semibold' : 'bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300'
             }`}
           >
             Staged Editions ({editions.length})
@@ -335,6 +346,33 @@ export const AdminEvents: React.FC = () => {
                     className="w-full p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"
                   />
                 </div>
+                <div>
+                  <label className="block font-semibold mb-1">Event Type</label>
+                  <input
+                    type="text"
+                    value={eventType}
+                    maxLength={80}
+                    list="event-type-suggestions"
+                    onChange={(e) => setEventType(e.target.value)}
+                    placeholder="e.g. Grand Slam, League, Major, Grand Prix"
+                    className="w-full p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"
+                  />
+                  <datalist id="event-type-suggestions">
+                    {Array.from(new Set(events.map((ev) => ev.eventType).filter(Boolean))).map((t) => (
+                      <option key={t} value={t} />
+                    ))}
+                  </datalist>
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Official Website / Source</label>
+                  <input
+                    type="url"
+                    value={eventOfficialSourceUrl}
+                    onChange={(e) => setEventOfficialSourceUrl(e.target.value)}
+                    placeholder="https://www.rolandgarros.com/"
+                    className="w-full p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"
+                  />
+                </div>
               </div>
 
               <div className="text-xs">
@@ -362,7 +400,7 @@ export const AdminEvents: React.FC = () => {
 
           <div className="overflow-x-auto rounded-xl border border-stone-200 dark:border-stone-800">
             <table className="w-full text-left text-xs">
-              <thead className="bg-stone-50 dark:bg-stone-900/60 uppercase text-stone-500 border-b border-stone-200 dark:border-stone-800">
+              <thead className="bg-stone-50 dark:bg-stone-900/60 uppercase text-stone-500 border-b border-stone-200 dark:border-stone-800 dark:text-stone-400">
                 <tr>
                   <th className="p-3">Event Name</th>
                   <th className="p-3">Sport</th>
@@ -378,11 +416,11 @@ export const AdminEvents: React.FC = () => {
                     <tr key={evt.id} className="hover:bg-stone-50 dark:hover:bg-stone-900/40">
                       <td className="p-3 font-semibold text-stone-900 dark:text-stone-100">
                         {evt.name}
-                        <span className="block text-[11px] font-mono text-stone-400">/{evt.sportSlug}/{evt.slug}</span>
+                        <span className="block text-[11px] font-mono text-stone-500 dark:text-stone-400">/{evt.sportSlug}/{evt.slug}</span>
                       </td>
                       <td className="p-3">{sp?.name}</td>
                       <td className="p-3 font-mono tabular-nums">{evt.currentEditionYear}</td>
-                      <td className="p-3 text-stone-500">{evt.defaultVenue}</td>
+                      <td className="p-3 text-stone-500 dark:text-stone-400">{evt.defaultVenue}</td>
                       <td className="p-3 text-right space-x-2">
                         <button
                           onClick={() => navigate(`/${evt.sportSlug}/${evt.slug}`)}
@@ -392,7 +430,7 @@ export const AdminEvents: React.FC = () => {
                         </button>
                         <button
                           onClick={() => startEditEvent(evt)}
-                          className="text-amber-600 dark:text-amber-400 font-semibold hover:underline cursor-pointer"
+                          className="text-amber-700 dark:text-amber-400 font-semibold hover:underline cursor-pointer"
                         >
                           Edit
                         </button>
@@ -477,8 +515,9 @@ export const AdminEvents: React.FC = () => {
                     className="w-full p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 font-semibold"
                   >
                     <option value="upcoming">Upcoming</option>
-                    <option value="ongoing">Ongoing</option>
+                    <option value="active">Active</option>
                     <option value="completed">Completed</option>
+                    <option value="archived">Archived</option>
                   </select>
                 </div>
               </div>
@@ -527,25 +566,37 @@ export const AdminEvents: React.FC = () => {
 
           <div className="overflow-x-auto rounded-xl border border-stone-200 dark:border-stone-800">
             <table className="w-full text-left text-xs">
-              <thead className="bg-stone-50 dark:bg-stone-900/60 uppercase text-stone-500 border-b border-stone-200 dark:border-stone-800">
+              <thead className="bg-stone-50 dark:bg-stone-900/60 uppercase text-stone-500 border-b border-stone-200 dark:border-stone-800 dark:text-stone-400">
                 <tr>
                   <th className="p-3">Edition Title</th>
                   <th className="p-3">Year</th>
                   <th className="p-3">Dates</th>
                   <th className="p-3">Venue</th>
-                  <th className="p-3">Status</th>
+                  <th className="p-3">
+                    <select
+                      aria-label="Filter editions by status"
+                      value={editionStatusFilter}
+                      onChange={(e) => setEditionStatusFilter(e.target.value as EditionStatus | '')}
+                      className="p-1 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 text-[10px] font-semibold uppercase"
+                    >
+                      <option value="">Status: All</option>
+                      {EDITION_STATUSES.map((st) => (
+                        <option key={st} value={st}>{st}</option>
+                      ))}
+                    </select>
+                  </th>
                   <th className="p-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100 dark:divide-stone-800">
-                {editions.map((ed) => (
+                {editions.filter((ed) => !editionStatusFilter || ed.status === editionStatusFilter).map((ed) => (
                   <tr key={ed.id} className="hover:bg-stone-50 dark:hover:bg-stone-900/40">
                     <td className="p-3 font-semibold text-stone-900 dark:text-stone-100">{ed.title}</td>
                     <td className="p-3 font-mono tabular-nums">{ed.year}</td>
-                    <td className="p-3 text-stone-500 tabular-nums">
+                    <td className="p-3 text-stone-500 tabular-nums dark:text-stone-400">
                       {ed.startDate} - {ed.endDate}
                     </td>
-                    <td className="p-3 text-stone-500">{ed.venue}</td>
+                    <td className="p-3 text-stone-500 dark:text-stone-400">{ed.venue}</td>
                     <td className="p-3">
                       <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400">
                         {ed.status}
@@ -560,7 +611,7 @@ export const AdminEvents: React.FC = () => {
                       </button>
                       <button
                         onClick={() => startEditEdition(ed)}
-                        className="text-amber-600 dark:text-amber-400 font-semibold hover:underline cursor-pointer"
+                        className="text-amber-700 dark:text-amber-400 font-semibold hover:underline cursor-pointer"
                       >
                         Edit
                       </button>

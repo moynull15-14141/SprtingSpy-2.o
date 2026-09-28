@@ -18,3 +18,14 @@ coverage/
 *.sql.gz
 *.pem
 *.key
+
+# Next.js build output
+/.next/
+next-env.d.ts
+*.tsbuildinfo
+
+# Uploaded media (local storage provider)
+/storage/
+
+# Local run artifacts (screenshots, logs, probe scripts)
+/.codex-runtime/

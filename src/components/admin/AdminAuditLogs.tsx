@@ -16,7 +16,7 @@ export const AdminAuditLogs: React.FC = () => {
           <h2 className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">
             System & Editorial Audit Logs
           </h2>
-          <p className="text-xs text-stone-500 mt-1">
+          <p className="text-xs text-stone-500 mt-1 dark:text-stone-400">
             Immutable chronological record of modifications, creations, and security events.
           </p>
         </div>
@@ -24,7 +24,7 @@ export const AdminAuditLogs: React.FC = () => {
 
       <div className="overflow-x-auto rounded-xl border border-stone-200 dark:border-stone-800">
         <table className="w-full text-left text-xs">
-          <thead className="bg-stone-50 dark:bg-stone-900/60 uppercase text-stone-500 border-b border-stone-200 dark:border-stone-800">
+          <thead className="bg-stone-50 dark:bg-stone-900/60 uppercase text-stone-500 border-b border-stone-200 dark:border-stone-800 dark:text-stone-400">
             <tr>
               <th className="p-3">Timestamp</th>
               <th className="p-3">User</th>
@@ -36,7 +36,7 @@ export const AdminAuditLogs: React.FC = () => {
           <tbody className="divide-y divide-stone-100 dark:divide-stone-800 font-mono">
             {auditLogs.map((log) => (
               <tr key={log.id} className="hover:bg-stone-50 dark:hover:bg-stone-900/40">
-                <td className="p-3 text-stone-500 tabular-nums whitespace-nowrap">
+                <td className="p-3 text-stone-500 tabular-nums whitespace-nowrap dark:text-stone-400">
                   {new Date(log.timestamp).toLocaleString()}
                 </td>
                 <td className="p-3 font-semibold text-stone-900 dark:text-stone-100 font-sans">

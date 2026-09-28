@@ -51,7 +51,7 @@ export const MetadataRow: React.FC<MetadataRowProps> = ({
                 isEmphasized ? 'text-amber-700 dark:text-amber-400 font-semibold' : ''
               }`}
             >
-              {label && <span className="text-stone-400 dark:text-stone-500 font-normal">{label}:</span>}
+              {label && <span className="text-stone-500 dark:text-stone-400 font-normal">{label}:</span>}
               <span className="tabular-nums">{value}</span>
             </span>
             {index < filteredItems.length - 1 && (

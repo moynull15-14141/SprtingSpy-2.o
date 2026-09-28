@@ -35,6 +35,13 @@ export interface RateLimiter {
 
 export function createRateLimiter(windowMs: number, maxAttempts: number): RateLimiter {
   const buckets = new Map<string, Bucket>();
+  // Expired buckets carry no state (check() already treats them as absent),
+  // so drop them once the map grows, instead of keeping every key ever seen.
+  const PRUNE_AT = 10_000;
+  const prune = (now: number) => {
+    if (buckets.size < PRUNE_AT) return;
+    for (const [key, bucket] of buckets) if (now - bucket.windowStart > windowMs) buckets.delete(key);
+  };
 
   return {
     check(key: string) {
@@ -53,6 +60,7 @@ export function createRateLimiter(windowMs: number, maxAttempts: number): RateLi
       const now = Date.now();
       const bucket = buckets.get(key);
       if (!bucket || now - bucket.windowStart > windowMs) {
+        prune(now);
         buckets.set(key, { count: 1, windowStart: now });
         return;
       }

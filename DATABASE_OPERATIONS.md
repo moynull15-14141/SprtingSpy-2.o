@@ -89,6 +89,20 @@ from the dump — appropriate for restoring onto a database you intend to
 fully replace with the dump's contents. Do not run this against a database
 holding work you haven't backed up first.
 
+**PHASE G — preferred, non-destructive restore:** restore into a *new*
+database, verify it, then point `DATABASE_URL` at it. The live database is
+never cleaned or overwritten, so a bad backup cannot make things worse:
+
+```bash
+createdb -h <host> -U <user> sportingspy_restored
+pg_restore -h <host> -U <user> -d sportingspy_restored --no-owner --exit-on-error "backups/<file>.dump"
+```
+
+`npm run db:backup-drill` performs this whole cycle against a local
+database (dump → new drill database → restore → compare every table →
+drop only the drill database) and is the verified reference for the steps.
+See PHASE_G_IMPLEMENTATION.md, "Recovery runbook".
+
 ## 7. About the Prisma "shadow database" (Phase 2.1 investigation)
 
 `prisma migrate dev` needs a **temporary, throwaway database** to safely

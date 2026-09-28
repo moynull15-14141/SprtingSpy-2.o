@@ -1,0 +1,18 @@
+.textAppearance[data-size='small'] { font-size: 0.875em; }
+.textAppearance[data-size='large'] { font-size: 1.25em; }
+.textAppearance[data-size='extraLarge'] { font-size: 1.5em; }
+.textAppearance[data-color='amber'], .dropCap[data-color='amber'] { --editorial-color: #92400e; }
+.textAppearance[data-color='blue'], .dropCap[data-color='blue'] { --editorial-color: #1d4ed8; }
+.textAppearance[data-color='green'], .dropCap[data-color='green'] { --editorial-color: #047857; }
+.textAppearance[data-color='red'], .dropCap[data-color='red'] { --editorial-color: #b91c1c; }
+.textAppearance[data-color='purple'], .dropCap[data-color='purple'] { --editorial-color: #7e22ce; }
+:global(.dark) .textAppearance[data-color='amber'], :global(.dark) .dropCap[data-color='amber'] { --editorial-color: #fbbf24; }
+:global(.dark) .textAppearance[data-color='blue'], :global(.dark) .dropCap[data-color='blue'] { --editorial-color: #93c5fd; }
+:global(.dark) .textAppearance[data-color='green'], :global(.dark) .dropCap[data-color='green'] { --editorial-color: #6ee7b7; }
+:global(.dark) .textAppearance[data-color='red'], :global(.dark) .dropCap[data-color='red'] { --editorial-color: #fca5a5; }
+:global(.dark) .textAppearance[data-color='purple'], :global(.dark) .dropCap[data-color='purple'] { --editorial-color: #d8b4fe; }
+.textAppearance { color: var(--editorial-color, inherit); }
+.dropCap { --drop-cap-color: var(--editorial-color, currentColor); }
+.dropCap::first-letter { float: left; font-family: Georgia, serif; font-weight: 700; line-height: 1; margin: 0.08em 0.18em 0 0; font-size: 3rem; color: var(--drop-cap-color, inherit); }
+.dropCap[data-size='small']::first-letter { font-size: 2.25rem; }
+.dropCap[data-size='large']::first-letter { font-size: 4rem; }

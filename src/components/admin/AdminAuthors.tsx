@@ -7,6 +7,7 @@ import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { Author } from '../../types';
 import { Button } from '../ui/Button';
+import { Avatar } from '../ui/Avatar';
 
 export const AdminAuthors: React.FC = () => {
   const { authors, articles, addAuthor, updateAuthor, navigate } = useApp();
@@ -85,7 +86,7 @@ export const AdminAuthors: React.FC = () => {
           <h2 className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">
             Editorial Staff & Byline Correspondents ({authors.length})
           </h2>
-          <p className="text-xs text-stone-500 mt-1">
+          <p className="text-xs text-stone-500 mt-1 dark:text-stone-400">
             Section 17: Maintain individual author profiles, beats, and bio credentials. Avoid universal admin attribution.
           </p>
         </div>
@@ -206,7 +207,7 @@ export const AdminAuthors: React.FC = () => {
       {/* AUTHORS LIST */}
       <div className="overflow-x-auto rounded-xl border border-stone-200 dark:border-stone-800">
         <table className="w-full text-left text-xs">
-          <thead className="bg-stone-50 dark:bg-stone-900/60 uppercase text-stone-500 border-b border-stone-200 dark:border-stone-800">
+          <thead className="bg-stone-50 dark:bg-stone-900/60 uppercase text-stone-500 border-b border-stone-200 dark:border-stone-800 dark:text-stone-400">
             <tr>
               <th className="p-3">Author</th>
               <th className="p-3">Beat Coverage</th>
@@ -222,16 +223,12 @@ export const AdminAuthors: React.FC = () => {
                 <tr key={author.id} className="hover:bg-stone-50 dark:hover:bg-stone-900/40">
                   <td className="p-3">
                     <div className="flex items-center gap-3">
-                      <img
-                        src={author.avatar}
-                        alt={author.name}
-                        className="w-8 h-8 rounded-full object-cover shrink-0"
-                      />
+                      <Avatar src={author.avatar} name={author.name} className="w-8 h-8 rounded-full object-cover shrink-0" />
                       <div>
                         <span className="font-semibold text-stone-900 dark:text-stone-100 block">
                           {author.name}
                         </span>
-                        <span className="font-mono text-stone-400 text-[10px]">
+                        <span className="font-mono text-stone-500 text-[10px] dark:text-stone-400">
                           /author/{author.slug}
                         </span>
                       </div>
@@ -240,7 +237,7 @@ export const AdminAuthors: React.FC = () => {
                   <td className="p-3 font-medium text-stone-700 dark:text-stone-300">
                     {author.roleTitle}
                   </td>
-                  <td className="p-3 text-stone-500">
+                  <td className="p-3 text-stone-500 dark:text-stone-400">
                     {author.twitter || author.email || '—'}
                   </td>
                   <td className="p-3 font-mono tabular-nums">
@@ -255,7 +252,7 @@ export const AdminAuthors: React.FC = () => {
                     </button>
                     <button
                       onClick={() => startEdit(author)}
-                      className="text-amber-600 dark:text-amber-400 font-semibold hover:underline cursor-pointer"
+                      className="text-amber-700 dark:text-amber-400 font-semibold hover:underline cursor-pointer"
                     >
                       Edit
                     </button>

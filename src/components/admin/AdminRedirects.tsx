@@ -15,9 +15,10 @@ export const AdminRedirects: React.FC = () => {
   const [sourceUrl, setSourceUrl] = useState('');
   const [targetUrl, setTargetUrl] = useState('');
   const [statusCode, setStatusCode] = useState<301 | 302>(301);
+  const [notes, setNotes] = useState('');
   const [feedback, setFeedback] = useState<string | null>(null);
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!sourceUrl.trim() || !targetUrl.trim()) return;
 
@@ -26,13 +27,17 @@ export const AdminRedirects: React.FC = () => {
     let dst = targetUrl.trim();
     if (!dst.startsWith('/') && !dst.startsWith('http')) dst = '/' + dst;
 
-    addRedirectRule({
+    // The server rejects duplicates, loops and self-redirects and flattens chains.
+    const ok = await addRedirectRule({
       sourceUrl: src,
       targetUrl: dst,
       statusCode,
       isActive: true,
+      notes: notes.trim() || null,
     });
+    if (!ok) return;
 
+    setNotes('');
     setFeedback(`Redirect ${src} -> ${dst} (${statusCode}) active.`);
     setSourceUrl('');
     setTargetUrl('');
@@ -59,7 +64,7 @@ export const AdminRedirects: React.FC = () => {
           <h2 className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">
             URL Redirects Engine ({redirectRules.length})
           </h2>
-          <p className="text-xs text-stone-500 mt-1">
+          <p className="text-xs text-stone-500 mt-1 dark:text-stone-400">
             Section 11: 301 Permanent and 302 Temporary redirects for URL migrations, event renaming, and canonical stability.
           </p>
         </div>
@@ -118,6 +123,16 @@ export const AdminRedirects: React.FC = () => {
           </div>
 
           <div className="flex justify-end gap-2 pt-1">
+            <label className="block text-xs">
+              <span className="block font-semibold mb-1">Notes (why this redirect exists)</span>
+              <input
+                type="text"
+                value={notes}
+                maxLength={1000}
+                onChange={(e) => setNotes(e.target.value)}
+                className="w-full p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"
+              />
+            </label>
             <Button type="button" variant="outline" size="sm" onClick={() => setIsCreating(false)}>
               Cancel
             </Button>
@@ -131,7 +146,7 @@ export const AdminRedirects: React.FC = () => {
       {/* RULES TABLE */}
       <div className="overflow-x-auto rounded-xl border border-stone-200 dark:border-stone-800">
         <table className="w-full text-left text-xs">
-          <thead className="bg-stone-50 dark:bg-stone-900/60 uppercase text-stone-500 border-b border-stone-200 dark:border-stone-800">
+          <thead className="bg-stone-50 dark:bg-stone-900/60 uppercase text-stone-500 border-b border-stone-200 dark:border-stone-800 dark:text-stone-400">
             <tr>
               <th className="p-3">Source URL</th>
               <th className="p-3">Target URL</th>
@@ -145,6 +160,11 @@ export const AdminRedirects: React.FC = () => {
               <tr key={rule.id} className="hover:bg-stone-50 dark:hover:bg-stone-900/40">
                 <td className="p-3 text-stone-900 dark:text-stone-100 font-semibold">
                   {rule.sourceUrl}
+                  <div className="font-sans font-normal text-[10px] text-stone-500 mt-0.5 dark:text-stone-400">
+                    {rule.origin === 'article-slug' ? 'Automatic: article URL changed' : 'Manual'}
+                    {rule.updatedAt ? ` · updated ${new Date(rule.updatedAt).toLocaleDateString('en-GB')}` : ''}
+                  </div>
+                  {rule.notes && <div className="font-sans font-normal text-[10px] text-stone-500 whitespace-pre-line dark:text-stone-400">{rule.notes}</div>}
                 </td>
                 <td className="p-3 text-amber-700 dark:text-amber-400">
                   &rarr; {rule.targetUrl}
@@ -189,7 +209,7 @@ export const AdminRedirects: React.FC = () => {
         <h4 className="font-semibold text-stone-900 dark:text-stone-100 uppercase tracking-wider text-[11px]">
           VPS / Nginx Configuration Export
         </h4>
-        <p className="text-stone-500">
+        <p className="text-stone-500 dark:text-stone-400">
           For edge performance on Ubuntu VPS deployments, copy these directives directly into your Nginx <code>/etc/nginx/sites-available/sportingspy</code> configuration block:
         </p>
         <pre className="p-3 rounded-lg bg-stone-950 text-amber-400 font-mono text-[11px] overflow-x-auto">

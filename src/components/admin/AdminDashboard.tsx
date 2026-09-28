@@ -12,7 +12,7 @@ interface AdminDashboardProps {
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ setActiveTab }) => {
-  const { sports, events, editions, articles, authors, users, comments, auditLogs, adSlots, redirectRules } = useApp();
+  const { sports, events, editions, articles, authors, users, comments, auditLogs, adSlots, redirectRules, features } = useApp();
 
   const publishedCount = articles.filter((a) => a.status === 'published').length;
   const draftCount = articles.filter((a) => a.status === 'draft').length;
@@ -25,7 +25,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ setActiveTab }) 
         <h2 className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">
           Editorial Overview & Health
         </h2>
-        <p className="text-xs text-stone-500 mt-1">
+        <p className="text-xs text-stone-500 mt-1 dark:text-stone-400">
           Real-time summary of sporting disciplines, tournament editions, and content workflow.
         </p>
       </div>
@@ -33,75 +33,77 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ setActiveTab }) 
       {/* METRIC CARDS */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <div className="p-3.5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-900/40">
-          <div className="text-[11px] text-stone-500 uppercase tracking-wider font-semibold">Sports</div>
+          <div className="text-[11px] text-stone-500 uppercase tracking-wider font-semibold dark:text-stone-400">Sports</div>
           <div className="mt-1 font-serif text-2xl font-bold text-stone-900 dark:text-stone-100 tabular-nums">
             {sports.filter((s) => s.isVisible).length}
           </div>
           <button
             onClick={() => setActiveTab('sports')}
-            className="mt-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:underline block"
+            className="mt-1 text-[11px] font-semibold text-amber-700 dark:text-amber-400 hover:underline block"
           >
             Manage &rarr;
           </button>
         </div>
 
         <div className="p-3.5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-900/40">
-          <div className="text-[11px] text-stone-500 uppercase tracking-wider font-semibold">Events / Editions</div>
+          <div className="text-[11px] text-stone-500 uppercase tracking-wider font-semibold dark:text-stone-400">Events / Editions</div>
           <div className="mt-1 font-serif text-2xl font-bold text-stone-900 dark:text-stone-100 tabular-nums">
-            {events.length} <span className="text-xs font-normal text-stone-400 font-sans">({editions.length} ed)</span>
+            {events.length} <span className="text-xs font-normal text-stone-500 font-sans dark:text-stone-400">({editions.length} ed)</span>
           </div>
           <button
             onClick={() => setActiveTab('events')}
-            className="mt-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:underline block"
+            className="mt-1 text-[11px] font-semibold text-amber-700 dark:text-amber-400 hover:underline block"
           >
             Manage &rarr;
           </button>
         </div>
 
         <div className="p-3.5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-900/40">
-          <div className="text-[11px] text-stone-500 uppercase tracking-wider font-semibold">Articles</div>
+          <div className="text-[11px] text-stone-500 uppercase tracking-wider font-semibold dark:text-stone-400">Articles</div>
           <div className="mt-1 font-serif text-2xl font-bold text-stone-900 dark:text-stone-100 tabular-nums">
             {publishedCount}
           </div>
-          <span className="text-[10px] text-stone-400 block font-mono mt-1">
+          <span className="text-[10px] text-stone-500 block font-mono mt-1 dark:text-stone-400">
             {draftCount} in draft
           </span>
         </div>
 
+        {features.comments && (
         <div className="p-3.5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-900/40">
-          <div className="text-[11px] text-stone-500 uppercase tracking-wider font-semibold">Pending Review</div>
-          <div className="mt-1 font-serif text-2xl font-bold text-amber-600 dark:text-amber-500 tabular-nums">
+          <div className="text-[11px] text-stone-500 uppercase tracking-wider font-semibold dark:text-stone-400">Pending Review</div>
+          <div className="mt-1 font-serif text-2xl font-bold text-amber-700 dark:text-amber-500 tabular-nums">
             {pendingComments.length}
           </div>
           <button
             onClick={() => setActiveTab('comments')}
-            className="mt-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:underline block"
+            className="mt-1 text-[11px] font-semibold text-amber-700 dark:text-amber-400 hover:underline block"
           >
             Moderate &rarr;
           </button>
         </div>
+        )}
 
         <div className="p-3.5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-900/40">
-          <div className="text-[11px] text-stone-500 uppercase tracking-wider font-semibold">Authors / Staff</div>
+          <div className="text-[11px] text-stone-500 uppercase tracking-wider font-semibold dark:text-stone-400">Authors / Staff</div>
           <div className="mt-1 font-serif text-2xl font-bold text-stone-900 dark:text-stone-100 tabular-nums">
             {authors.length}
           </div>
           <button
             onClick={() => setActiveTab('authors')}
-            className="mt-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:underline block"
+            className="mt-1 text-[11px] font-semibold text-amber-700 dark:text-amber-400 hover:underline block"
           >
             Staff ({users.length}) &rarr;
           </button>
         </div>
 
         <div className="p-3.5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-900/40">
-          <div className="text-[11px] text-stone-500 uppercase tracking-wider font-semibold">Redirects (301)</div>
+          <div className="text-[11px] text-stone-500 uppercase tracking-wider font-semibold dark:text-stone-400">Redirects (301)</div>
           <div className="mt-1 font-serif text-2xl font-bold text-stone-900 dark:text-stone-100 tabular-nums">
             {redirectRules.length}
           </div>
           <button
             onClick={() => setActiveTab('redirects')}
-            className="mt-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:underline block"
+            className="mt-1 text-[11px] font-semibold text-amber-700 dark:text-amber-400 hover:underline block"
           >
             Rules &rarr;
           </button>
@@ -121,7 +123,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ setActiveTab }) 
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setActiveTab('articles')}
-            className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold cursor-pointer"
+            className="px-3 py-1.5 rounded-lg bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold cursor-pointer"
           >
             + New Editorial Article
           </button>
@@ -160,7 +162,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ setActiveTab }) 
           </h3>
           <button
             onClick={() => setActiveTab('audit')}
-            className="text-xs text-amber-600 dark:text-amber-400 font-semibold hover:underline"
+            className="text-xs text-amber-700 dark:text-amber-400 font-semibold hover:underline"
           >
             View All Logs &rarr;
           </button>
@@ -172,7 +174,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ setActiveTab }) 
                 <span className="font-semibold text-stone-900 dark:text-stone-100 mr-2">{log.action}:</span>
                 <span className="text-stone-600 dark:text-stone-400">{log.details}</span>
               </div>
-              <span className="text-stone-400 font-mono text-[11px] tabular-nums whitespace-nowrap ml-4">
+              <span className="text-stone-500 font-mono text-[11px] tabular-nums whitespace-nowrap ml-4 dark:text-stone-400">
                 {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </span>
             </div>

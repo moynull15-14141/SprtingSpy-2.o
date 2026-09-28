@@ -15,9 +15,10 @@ import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { Role } from '../../types';
 import { Button } from '../ui/Button';
+import { Avatar } from '../ui/Avatar';
 
 export const AdminUsers: React.FC = () => {
-  const { users, currentUser, createStaffUser, updateUserRole, updateUserStatus, deleteStaffUser } = useApp();
+  const { users, currentUser, createStaffUser, updateUserRole, updateUserStatus, deleteStaffUser, features } = useApp();
   const [isCreating, setIsCreating] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -74,7 +75,7 @@ export const AdminUsers: React.FC = () => {
           <h2 className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">
             Staff Accounts & Roles ({users.length})
           </h2>
-          <p className="text-xs text-stone-500 mt-1">
+          <p className="text-xs text-stone-500 mt-1 dark:text-stone-400">
             Section 20: Role-Based Access Control (Admin, Editor, Author, Reader). Every action here is
             enforced by the server against the real logged-in session — see PROJECT_BRAIN.md Phase 1.
           </p>
@@ -130,7 +131,7 @@ export const AdminUsers: React.FC = () => {
                 <option value="Admin">Admin (Full Control)</option>
                 <option value="Editor">Editor (Publish / Moderate)</option>
                 <option value="Author">Author (Create / Edit Own)</option>
-                <option value="Reader">Reader (Discussion Only)</option>
+                {features.readerAccounts && <option value="Reader">Reader (Discussion Only)</option>}
               </select>
             </div>
             <div>
@@ -163,7 +164,7 @@ export const AdminUsers: React.FC = () => {
       {/* USERS TABLE */}
       <div className="overflow-x-auto rounded-xl border border-stone-200 dark:border-stone-800">
         <table className="w-full text-left text-xs">
-          <thead className="bg-stone-50 dark:bg-stone-900/60 uppercase text-stone-500 border-b border-stone-200 dark:border-stone-800">
+          <thead className="bg-stone-50 dark:bg-stone-900/60 uppercase text-stone-500 border-b border-stone-200 dark:border-stone-800 dark:text-stone-400">
             <tr>
               <th className="p-3">User</th>
               <th className="p-3">Email</th>
@@ -180,16 +181,16 @@ export const AdminUsers: React.FC = () => {
                 <tr key={u.id} className="hover:bg-stone-50 dark:hover:bg-stone-900/40">
                   <td className="p-3">
                     <div className="flex items-center gap-2.5">
-                      <img src={u.avatar} alt={u.name} className="w-7 h-7 rounded-full object-cover shrink-0" />
+                      <Avatar src={u.avatar} name={u.name} className="w-7 h-7 rounded-full object-cover shrink-0" />
                       <span className="font-semibold text-stone-900 dark:text-stone-100">
                         {u.name}
                         {u.id === currentUser.id && (
-                          <span className="ml-1.5 text-[10px] text-amber-600 font-normal">(You)</span>
+                          <span className="ml-1.5 text-[10px] text-amber-700 font-normal dark:text-amber-500">(You)</span>
                         )}
                       </span>
                     </div>
                   </td>
-                  <td className="p-3 text-stone-500 font-mono">{u.email}</td>
+                  <td className="p-3 text-stone-500 font-mono dark:text-stone-400">{u.email}</td>
                   <td className="p-3">
                     {currentUser.role === 'Admin' ? (
                       <select
@@ -200,7 +201,11 @@ export const AdminUsers: React.FC = () => {
                         <option value="Admin">Admin</option>
                         <option value="Editor">Editor</option>
                         <option value="Author">Author</option>
-                        <option value="Reader">Reader</option>
+                        {(features.readerAccounts || u.role === 'Reader') && (
+                          <option value="Reader" disabled={!features.readerAccounts}>
+                            {features.readerAccounts ? 'Reader' : 'Reader (disabled for launch)'}
+                          </option>
+                        )}
                       </select>
                     ) : (
                       <span className="font-semibold text-stone-800 dark:text-stone-200">{u.role}</span>
@@ -217,12 +222,12 @@ export const AdminUsers: React.FC = () => {
                       {status}
                     </span>
                   </td>
-                  <td className="p-3 text-stone-400 tabular-nums">{new Date(u.joinedAt).toLocaleDateString()}</td>
+                  <td className="p-3 text-stone-500 tabular-nums dark:text-stone-400">{new Date(u.joinedAt).toLocaleDateString()}</td>
                   {currentUser.role === 'Admin' && (
                     <td className="p-3 text-right space-x-3 whitespace-nowrap">
                       <button
                         onClick={() => handleToggleStatus(u.id, status)}
-                        className="text-amber-600 dark:text-amber-400 hover:underline font-semibold cursor-pointer"
+                        className="text-amber-700 dark:text-amber-400 hover:underline font-semibold cursor-pointer"
                       >
                         {status === 'active' ? 'Deactivate' : 'Reactivate'}
                       </button>

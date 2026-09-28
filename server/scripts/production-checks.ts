@@ -34,7 +34,7 @@ export async function verifyProductionBoot() {
       { env: { PORT: '3000oops' }, message: 'PORT' },
       { env: {}, message: 'Production build missing', cwd: temp },
     ]) {
-      const child = spawn(process.execPath, ['--import', loader, entry], { cwd: test.cwd || process.cwd(), env: { ...baseline, ...test.env }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      const child = spawn(process.execPath, ['--import', loader, entry], { cwd: test.cwd || process.cwd(), env: { ...baseline, ...test.env } as NodeJS.ProcessEnv, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
       let output = ''; child.stdout.on('data', chunk => { output += chunk; }); child.stderr.on('data', chunk => { output += chunk; });
       const timer = setTimeout(() => child.kill(), 12_000);
       const [code] = await once(child, 'exit'); clearTimeout(timer);
@@ -44,7 +44,7 @@ export async function verifyProductionBoot() {
       assert(!output.includes('Server running'));
     }
     const port = await freePort();
-    const child = spawn(process.execPath, ['--import', loader, entry], { cwd: process.cwd(), env: { ...baseline, PORT: String(port) }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, ['--import', loader, entry], { cwd: process.cwd(), env: { ...baseline, PORT: String(port) } as NodeJS.ProcessEnv, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     try {
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error('Untrusted-proxy test server did not start.')), 12_000);
@@ -88,27 +88,39 @@ export async function verifyProductionHttp({ base, request, anon, admin, reader,
   const html = await request(base + '/'); const htmlText = await html.text();
   assert.equal(html.status, 200); assert(html.headers.get('content-type')?.includes('text/html'));
   assert(!htmlText.includes('/@vite/client') && !htmlText.includes('/src/main.tsx'));
+  // Phase A: page URLs are canonical with a trailing slash; the bare form 301s.
   for (const route of ['/account', '/admin', '/sports', '/events']) {
-    const response = await request(base + route); assert.equal(response.status, 200); assert.equal(await response.text(), htmlText);
+    const bare = await request(base + route, { redirect: 'manual' });
+    assert.equal(bare.status, 301); assert.equal(new URL(bare.headers.get('location')!, base).pathname, `${route}/`);
+    // PHASE B: each page is server-rendered on its own (no shared SPA shell).
+    const response = await request(base + route + '/'); assert.equal(response.status, 200); assert(response.headers.get('content-type')?.includes('text/html'));
   }
   for (const route of ['/api/not-found', '/assets/not-found.js', '/src/main.tsx', '/.env', '/node_modules/tsx/package.json']) {
     const response = await request(base + route); assert.equal(response.status, 404); assert(!(await response.text()).includes('<html'));
   }
-  const scriptPaths = [...htmlText.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map(match => match[1]);
+  const scriptPaths = [...new Set([...htmlText.matchAll(/(?:src|href)="(\/_next\/static\/[^"]+)"/g)].map(match => match[1]))];
   assert(scriptPaths.some(asset => asset.endsWith('.js')) && scriptPaths.some(asset => asset.endsWith('.css')));
   for (const asset of scriptPaths) {
-    const response = await request(base + asset); assert.equal(response.status, 200);
+    const response = await request(base + asset); assert.equal(response.status, 200, `static asset ${asset}`);
     const content = await response.text();
     assert(!content.includes(process.env.DATABASE_URL!) && !content.includes('VITE_DEV_AUTH_TOKEN'));
     if (asset.endsWith('.js')) assert(!/fetch\(["'`]https?:\/\/(localhost|127\.0\.0\.1)/.test(content));
   }
-  const siteMap = await (await request(base + '/sitemap.xml')).text(); assert(siteMap.includes(`${base}/sports`));
-  tested('production assets and SPA deep links; API/static misses do not return HTML; canonical origin and no secret embedding');
+  // Phase D: /sitemap.xml is a sitemap index; page URLs live in the child sitemaps it lists.
+  const siteMapIndex = await (await request(base + '/sitemap.xml')).text();
+  const children = [...siteMapIndex.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
+  assert(children.length > 0 && children.every((loc) => loc.startsWith(`${base}/sitemaps/`)), 'sitemap index lists child sitemaps on the canonical origin');
+  const childTexts = await Promise.all(children.map(async (loc) => (await request(base + new URL(loc).pathname)).text()));
+  assert(childTexts.some((text) => text.includes(`<loc>${base}/sports/</loc>`)), 'child sitemaps list canonical page URLs');
+  tested('production assets and server-rendered deep links; API/static misses do not return HTML; canonical origin and no secret embedding');
 
   const malformed = await request(base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"password":"private-error-probe",' });
-  assert.equal(malformed.status, 400); assert.deepEqual(await malformed.json(), { error: 'Malformed request.' });
+  // PHASE G: error bodies add a requestId (the response's X-Request-Id) and nothing else.
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  const malformedBody = await malformed.json();
+  assert.equal(malformed.status, 400); assert.deepEqual(malformedBody, { error: 'Malformed request.', requestId: malformed.headers.get('x-request-id') }); assert.match(malformedBody.requestId, uuid);
   const failure = await admin.request(`/api/authors/${fixture}-author`, 'PUT', { bio: 42 });
-  assert.equal(failure.status, 500); assert.deepEqual(failure.data, { error: 'Internal server error.' });
+  assert.equal(failure.status, 500); assert.deepEqual(failure.data, { error: 'Internal server error.', requestId: failure.headers.get('x-request-id') }); assert.match(failure.data.requestId, uuid);
   const noAccount = await anon.request('/api/auth/login', 'POST', { email: `${fixture}-missing@example.test`, password: 'private-error-probe' });
   assert.equal(noAccount.status, 401); assert.deepEqual(noAccount.data, { error: 'Invalid email or password.' });
   const malformedCookie = await request(base + '/api/auth/me', { headers: { Cookie: 'sid=%E0%A4%A' } });
