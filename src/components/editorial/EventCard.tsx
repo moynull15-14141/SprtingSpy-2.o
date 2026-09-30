@@ -24,30 +24,28 @@ export const EventCard: React.FC<EventCardProps> = ({ event, className = '' }) =
       <div>
         <div className="flex items-center justify-between text-xs text-stone-500 dark:text-stone-400 mb-2">
           <span className="font-semibold text-amber-700 dark:text-amber-500 uppercase tracking-wider">{event.sportName}</span>
-          <span className="tabular-nums font-mono text-[11px] bg-stone-100 dark:bg-stone-800 px-2 py-0.5 rounded text-stone-700 dark:text-stone-300">
-            {event.currentEditionYear} Edition Active
-          </span>
+          {event.currentEditionUrl && <span className="tabular-nums font-mono text-[11px] bg-stone-100 dark:bg-stone-800 px-2 py-0.5 rounded text-stone-700 dark:text-stone-300">{event.currentEditionYear} Edition</span>}
         </div>
 
         <h3 className="font-serif text-xl font-bold text-stone-900 dark:text-stone-100 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors cursor-pointer">
           <Link href={href}>{event.name}</Link>
         </h3>
 
-        <p className="mt-2 text-xs text-stone-600 dark:text-stone-400 line-clamp-2 leading-relaxed">{event.description}</p>
+        {event.description && <p className="mt-2 text-xs text-stone-600 dark:text-stone-400 line-clamp-2 leading-relaxed">{event.description}</p>}
 
         <div className="mt-4 pt-3 border-t border-stone-100 dark:border-stone-800/80 space-y-1 text-xs text-stone-600 dark:text-stone-400">
-          <div className="flex items-center justify-between">
+          {event.defaultVenue && <div className="flex items-center justify-between">
             <span className="text-stone-500 dark:text-stone-400">Permanent Venue:</span>
             <span className="font-medium text-stone-800 dark:text-stone-200 truncate max-w-[200px]">{event.defaultVenue}</span>
-          </div>
-          <div className="flex items-center justify-between">
+          </div>}
+          {event.defaultLocation && <div className="flex items-center justify-between">
             <span className="text-stone-500 dark:text-stone-400">Location:</span>
             <span className="font-medium text-stone-800 dark:text-stone-200">{event.defaultLocation}</span>
-          </div>
-          <div className="flex items-center justify-between">
+          </div>}
+          {event.frequency && <div className="flex items-center justify-between">
             <span className="text-stone-500 dark:text-stone-400">Cadence:</span>
             <span className="font-medium text-stone-800 dark:text-stone-200">{event.frequency}</span>
-          </div>
+          </div>}
         </div>
       </div>
 

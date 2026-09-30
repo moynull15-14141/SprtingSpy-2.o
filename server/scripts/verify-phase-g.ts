@@ -30,7 +30,7 @@ async function snapshot() {
 }
 let checks = 0; const pass = (s: string) => { checks++; console.log(`PASS ${s}`); };
 const freePort = async () => { const p = createServer(); p.listen(0, '127.0.0.1'); await once(p, 'listening'); const port = (p.address() as { port: number }).port; await new Promise<void>((r) => p.close(() => r())); return port; };
-const serverEnv = (port: number, origin: string): NodeJS.ProcessEnv => ({ ...process.env, PORT: String(port), HOST: '127.0.0.1', NODE_ENV: 'production', AUTH_MODE: 'production', DEV_LOGIN_BYPASS: 'false', TRUST_PROXY: 'false', ALLOWED_ORIGIN: origin, GEMINI_API_KEY: '' });
+const serverEnv = (port: number, origin: string): NodeJS.ProcessEnv => ({ ...process.env, PORT: String(port), HOST: '127.0.0.1', NODE_ENV: 'production', APP_ENV: 'production', AUTH_MODE: 'production', DEV_LOGIN_BYPASS: 'false', TRUST_PROXY: 'false', ALLOWED_ORIGIN: origin, GEMINI_API_KEY: '' });
 const tsx = ['--import', 'tsx'];
 
 const before = await snapshot();

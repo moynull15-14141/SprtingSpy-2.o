@@ -53,7 +53,7 @@ const child = spawn(process.execPath, ['--import', 'tsx', httpsMode ? 'server/st
   cwd: process.cwd(), windowsHide: true,
   // This pre-launch suite deliberately exercises Reader accounts/comments;
   // Phase A separately verifies the current launch defaults keep both off.
-  env: { ...process.env, ENABLE_READER_ACCOUNTS: 'true', ENABLE_COMMENTS: 'true', PORT: String(port), HOST: '127.0.0.1', TRUST_PROXY: transport ? '127.0.0.1/32' : 'false', NODE_ENV: 'production', AUTH_MODE: 'production', DEV_LOGIN_BYPASS: 'false', ALLOWED_ORIGIN: base },
+  env: { ...process.env, ENABLE_READER_ACCOUNTS: 'true', ENABLE_COMMENTS: 'true', PORT: String(port), HOST: '127.0.0.1', TRUST_PROXY: transport ? '127.0.0.1/32' : 'false', NODE_ENV: 'production', APP_ENV: 'production', AUTH_MODE: 'production', DEV_LOGIN_BYPASS: 'false', ALLOWED_ORIGIN: base },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let serverOutput = '';
@@ -230,8 +230,8 @@ try {
   assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: ids[1] } })).role, 'Author');
   tested('nested CMS relation writes cannot change account privileges');
   await status(inactive, `/api/articles/${article.data.id}`, 403, 'PUT', { title: 'Reader cannot edit' });
-  const published = (await status(anon, '/api/articles', 200)).data;
-  assert(!published.some((a: any) => a.id === article.data.id));
+  // PHASE H: the article list API is staff-only, so anonymous visitors cannot list anything (drafts included).
+  await status(anon, '/api/articles', 401);
   await status(admin, `/api/articles/${article.data.id}`, 200, 'DELETE', {});
   tested('author article create/edit, Reader RBAC, draft privacy and Admin deletion');
   for (const [resource, table, field] of [

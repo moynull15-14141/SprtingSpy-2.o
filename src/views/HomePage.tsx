@@ -22,6 +22,7 @@ import { BRANDING } from '../config/branding';
 import { absoluteUrl } from '../lib/paths';
 import type { ResolvedSection } from '../../server/services/public/siteLayout';
 import type { HomeSection } from '../lib/siteExperience/types';
+import { HOMEPAGE_H1 } from '../lib/siteExperience/defaults';
 
 const eyebrowClass = 'text-xs uppercase tracking-wider font-bold text-amber-700 dark:text-amber-500';
 const titleClass = 'font-serif text-2xl sm:text-3xl font-bold text-stone-900 dark:text-stone-100';
@@ -180,8 +181,8 @@ function Section({ section, firstHeading }: { section: ResolvedSection; firstHea
                   </div>
                   <h3 className="font-serif text-lg font-bold text-stone-900 dark:text-stone-100 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">{ed.title}</h3>
                   <div className="mt-3 space-y-1 text-xs text-stone-600 dark:text-stone-400">
-                    <p className="tabular-nums"><strong className="text-stone-800 dark:text-stone-200">Dates:</strong> {ed.startDate} to {ed.endDate}</p>
-                    <p><strong className="text-stone-800 dark:text-stone-200">Venue:</strong> {ed.venue}</p>
+                    {(ed.startDate || ed.endDate) && <p className="tabular-nums"><strong className="text-stone-800 dark:text-stone-200">{ed.startDate && ed.endDate ? 'Dates:' : ed.startDate ? 'Start:' : 'End:'}</strong> {ed.startDate && ed.endDate ? `${ed.startDate} to ${ed.endDate}` : ed.startDate || ed.endDate}</p>}
+                    {ed.venue && <p><strong className="text-stone-800 dark:text-stone-200">Venue:</strong> {ed.venue}</p>}
                     {ed.prizeMoneyTotal && <p className="tabular-nums"><strong className="text-stone-800 dark:text-stone-200">Purse:</strong> {ed.prizeMoneyTotal}</p>}
                   </div>
                 </div>
@@ -198,11 +199,11 @@ function Section({ section, firstHeading }: { section: ResolvedSection; firstHea
   }
 }
 
-export const HomePage: React.FC<{ sections: ResolvedSection[] }> = ({ sections }) => {
-  // Schema.org Organization + WebSite (Spec §15)
+export const HomePage: React.FC<{ sections: ResolvedSection[]; identity?: { name: string; description: string } }> = ({ sections, identity = { name: BRANDING.name, description: BRANDING.description } }) => {
+  // Schema.org Organization + WebSite (Spec §15); name/description from Admin → Settings (PHASE H).
   const structuredData = [
-    { '@context': 'https://schema.org', '@type': 'Organization', name: BRANDING.name, url: absoluteUrl('/'), description: BRANDING.description },
-    { '@context': 'https://schema.org', '@type': 'WebSite', name: BRANDING.name, url: absoluteUrl('/') },
+    { '@context': 'https://schema.org', '@type': 'Organization', name: identity.name, url: absoluteUrl('/'), description: identity.description },
+    { '@context': 'https://schema.org', '@type': 'WebSite', name: identity.name, url: absoluteUrl('/') },
   ];
   const firstIntro = sections.find((s) => s.type === 'intro')?.id;
   const hasH1 = !!firstIntro;
@@ -210,8 +211,8 @@ export const HomePage: React.FC<{ sections: ResolvedSection[] }> = ({ sections }
   return (
     <div className="space-y-12">
       <JsonLd data={structuredData} />
-      {/* Without an intro section the page still has exactly one <h1>. */}
-      {!hasH1 && <h1 className="sr-only">{BRANDING.name} — sports guides, schedules and analysis</h1>}
+      {/* Without an intro section the page still has exactly one <h1> (Spec v1.1 §7.1 wording). */}
+      {!hasH1 && <h1 className="sr-only">{HOMEPAGE_H1}</h1>}
       {sections.map((s) => <Section key={s.id} section={s} firstHeading={s.id === firstIntro} />)}
     </div>
   );

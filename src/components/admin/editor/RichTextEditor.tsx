@@ -97,7 +97,7 @@ function ToolButton({ label, description, active = false, disabled = false, onCl
 const Divider = () => <span aria-hidden="true" className="mx-1 hidden h-6 w-px bg-stone-300 dark:bg-stone-700 sm:block" />;
 const dialogBtn = (primary = false) => `rounded-md border px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ${primary ? 'border-amber-600 bg-amber-700 text-white' : 'border-stone-300 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-800'}`;
 
-export default function RichTextEditor({ initialDoc, onChange }: { initialDoc: RichDoc; onChange: (doc: RichDoc) => void }) {
+export default function RichTextEditor({ initialDoc, onChange, firstParagraphFocusRequest = 0, editable = true }: { initialDoc: RichDoc; onChange: (doc: RichDoc) => void; firstParagraphFocusRequest?: number; editable?: boolean }) {
   const [doc, setDoc] = useState<RichDoc>(initialDoc);
   const [linkOpen, setLinkOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -138,6 +138,22 @@ export default function RichTextEditor({ initialDoc, onChange }: { initialDoc: R
 
   const warnings = useMemo(() => headingWarnings(doc), [doc]);
   const validity = useMemo(() => validateRichDoc(doc), [doc]);
+  useEffect(() => { editor?.setEditable(editable); }, [editor, editable]);
+
+  useEffect(() => {
+    if (!editor || !firstParagraphFocusRequest) return;
+    let paragraphPosition: number | undefined;
+    editor.state.doc.forEach((node, offset) => {
+      if (paragraphPosition === undefined && node.type.name === 'paragraph') paragraphPosition = offset + 1;
+    });
+    // Headings, tables and other blocks keep their positions. If the article
+    // has no top-level paragraph, add one for its opening text.
+    if (paragraphPosition === undefined) {
+      editor.commands.insertContentAt(0, { type: 'paragraph' });
+      paragraphPosition = 1;
+    }
+    editor.chain().focus().setTextSelection(paragraphPosition).scrollIntoView().run();
+  }, [editor, firstParagraphFocusRequest]);
 
   if (!editor) return <div className="min-h-[420px] rounded-lg border border-stone-300 dark:border-stone-700 p-4 text-xs text-stone-500 dark:text-stone-400">Loading editor…</div>;
 
@@ -308,7 +324,7 @@ function LinkDialog({ editor, onClose }: { editor: Editor; onClose: () => void }
   const [error, setError] = useState('');
   useEffect(() => setError(''), [href]);
   // Internal links point at published articles only (server-side search).
-  const found = useArticleSearch({ q: articleQuery.trim(), status: 'published', limit: 6 }, { enabled: articleQuery.trim().length > 0 });
+  const found = useArticleSearch({ q: articleQuery.trim(), publicOnly: true, limit: 6 }, { enabled: articleQuery.trim().length > 0 });
 
   const apply = () => {
     const url = href.trim();
@@ -384,7 +400,7 @@ function EmbedDialog({ onInsert, onClose }: { onInsert: (attrs: Record<string, u
 function RelatedDialog({ onInsert, onClose }: { onInsert: (attrs: Record<string, unknown>) => void; onClose: () => void }) {
   const [query, setQuery] = useState('');
   // Ranked server-side search; with no query it lists the latest published articles.
-  const found = useArticleSearch({ q: query.trim(), status: 'published', limit: 10 });
+  const found = useArticleSearch({ q: query.trim(), publicOnly: true, limit: 10 });
   const matches = found.data?.items ?? [];
   return <Modal title="Insert related story" onClose={onClose}><input autoFocus className="mb-3 w-full rounded border p-2 text-xs dark:bg-stone-950" placeholder="Search article title or type…" value={query} onChange={(e) => setQuery(e.target.value)}/><div className="space-y-2">{matches.map((a) => <button key={a.id} type="button" className="flex w-full gap-3 rounded-lg border p-2 text-left hover:border-amber-500 dark:border-stone-700" onClick={() => onInsert({ articleId: a.id, href: a.url, title: a.title, category: a.articleType, date: a.publishedAt, image: a.featuredImage || '' })}>{a.featuredImage && <img src={a.featuredImage} alt="" className="h-12 w-20 rounded object-cover"/>}<span><strong className="block text-xs">{a.title}</strong><span className="text-[10px] text-stone-500 dark:text-stone-400">{a.sportName} · {a.articleType} · {new Date(a.publishedAt).toLocaleDateString()}</span></span></button>)}{found.data && !found.loading && !matches.length && <p className="text-xs text-stone-500 dark:text-stone-400">No published article matches.</p>}</div></Modal>;
 }

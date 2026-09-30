@@ -32,7 +32,7 @@ const assets: string[] = [];
 const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening');
 const port = (probe.address() as { port: number }).port; await new Promise<void>(resolve => probe.close(() => resolve()));
 const base = `http://127.0.0.1:${port}`;
-const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], { windowsHide: true, env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', NODE_ENV: 'production', AUTH_MODE: 'production', DEV_LOGIN_BYPASS: 'false', ALLOWED_ORIGIN: base }, stdio: ['ignore', 'pipe', 'pipe'] });
+const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], { windowsHide: true, env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', NODE_ENV: 'production', APP_ENV: 'production', AUTH_MODE: 'production', DEV_LOGIN_BYPASS: 'false', ALLOWED_ORIGIN: base }, stdio: ['ignore', 'pipe', 'pipe'] });
 let output = ''; child.stdout.on('data', b => output += b); child.stderr.on('data', b => output += b);
 const ready = new Promise<void>((resolve, reject) => {
   const timer = setTimeout(() => reject(new Error('Test server did not start. ' + output.slice(-2000))), 60000);

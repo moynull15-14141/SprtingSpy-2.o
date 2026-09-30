@@ -28,7 +28,9 @@ import { accountRouter } from './server/account';
 import { rejectNestedCmsWrites } from './server/cmsFields';
 import { deploymentConfig, DeploymentConfigError, enforceProductionTransport } from './server/deployment';
 import { prisma } from './server/db';
-import { Role, ARTICLE_TYPES, EDITION_STATUSES, AD_PROVIDERS } from './src/types';
+import { articleReadWhere, authorWriteGuard, editorialWorkflowRouter, WorkflowError } from './server/editorialWorkflow';
+import { Prisma } from './server/generated/prisma/client';
+import { Role, ARTICLE_TYPES, EDITION_STATUSES, AD_PROVIDERS, UNPLACED_AD_SLOTS } from './src/types';
 import { isSportIcon } from './src/config/sportIcons';
 
 /** A sport icon must come from the curated set (or be cleared). */
@@ -55,7 +57,11 @@ import { applyDueSchedules } from './server/siteExperience';
 import { ensureSeoRules } from './server/seo/engine';
 import { indexNowKey, notifyIndexNow } from './server/seo/indexnow';
 import { assertSafeAuthBoot, getAuthContext, requireAuth, requireRole, AuthLookup } from './server/auth';
-import { validateSlug, validateText, validateSafeUrl, validateRedirectSource, validateEmail, validateOneOf, validateSeo, firstError } from './server/validation';
+import { validateSlug, validateText, validateSafeUrl, validateRedirectSource, validateEmail, validateOneOf, validateSeo, firstError, validateRecordList, validateIsoDate, parseScheduledFor, ARTICLE_STATUSES } from './server/validation';
+import { faqRouter } from './server/faq';
+import { contactRouter } from './server/contact';
+import { sportEventConfigurationRouter } from './server/sportEventConfigurationRoutes';
+import { parseSportEventValues, resolveSportEventConfiguration } from './server/sportEventConfiguration';
 import { hashPassword, verifyPassword, validatePasswordStrength } from './server/password';
 import {
   generateSessionId,
@@ -112,6 +118,38 @@ async function isLastActiveAdmin(candidateUserId: string): Promise<boolean> {
   return otherActiveAdmins === 0;
 }
 
+/**
+ * PHASE H: validation for the sport-specific edition details editors can now
+ * manage (quick facts, defending champions, qualification, participants) and
+ * the edition dates. `existing` supplies the other date on partial updates.
+ */
+function editionDetailChecks(body: Record<string, any>, existing?: { startDate: string | null; endDate: string | null }) {
+  const start = 'startDate' in body ? body.startDate : existing?.startDate;
+  const end = 'endDate' in body ? body.endDate : existing?.endDate;
+  const count = body.participantsCount;
+  return [
+    validateIsoDate(body.startDate, 'startDate'),
+    validateIsoDate(body.endDate, 'endDate'),
+    start && end && /^\d{4}-\d{2}-\d{2}$/.test(start) && /^\d{4}-\d{2}-\d{2}$/.test(end) && end < start ? { valid: false, error: 'endDate cannot be before startDate.' } : { valid: true },
+    validateRecordList(body.quickFacts, 'quickFacts', { label: 80, value: 300 }, 20),
+    validateRecordList(body.defendingChampions, 'defendingChampions', { category: 80, name: 150 }, 20),
+    validateText(body.qualificationInfo, 'qualificationInfo', 3000, false),
+    validateText(body.prizeMoneyTotal, 'prizeMoneyTotal', 120, false),
+    count === undefined || count === null || (Number.isInteger(count) && count >= 0 && count <= 100000) ? { valid: true } : { valid: false, error: 'participantsCount must be a whole number from 0 to 100000.' },
+  ];
+}
+
+/** Missing facts stay missing; an empty form value explicitly clears a nullable field. */
+const optionalFact = (value: unknown): string | null => typeof value === 'string' && value.trim() ? value.trim() : null;
+const validEditionYear = (value: unknown): boolean => typeof value === 'number' && Number.isInteger(value) && value >= 1900 && value <= 2200;
+
+/** Event/Edition images are existing Media Library assets, never arbitrary remote URLs. */
+async function imageIsManaged(value: unknown): Promise<boolean> {
+  if (value === undefined || value === null || value === '') return true;
+  if (typeof value !== 'string' || !value.trim()) return false;
+  return (await prisma.mediaItem.findFirst({ where: { url: value.trim() }, select: { id: true } })) !== null;
+}
+
 /** Wraps an async Express handler so a rejected promise reaches the error-handling middleware instead of crashing the process or hanging the request. */
 function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) {
   return (req: Request, res: Response, next: NextFunction) => {
@@ -126,12 +164,17 @@ async function publishScheduledArticles(): Promise<number> {
     where: { status: 'scheduled', scheduledFor: { lte: now } },
   });
 
+  let published = 0;
   for (const art of due) {
-    await prisma.article.update({
-      where: { id: art.id },
+    // PHASE H: conditional update, so overlapping ticks (timer, sitemap, CMS
+    // load) or a concurrent reschedule/cancel never publish or log twice.
+    const result = await prisma.article.updateMany({
+      where: { id: art.id, status: 'scheduled', scheduledFor: art.scheduledFor },
       // PHASE D: publishing is not a content change, so updatedAt is left alone.
       data: { status: 'published', publishedAt: art.scheduledFor || now },
     });
+    if (!result.count) continue;
+    published++;
     notifyIndexNow(siteOrigin(), [articlePath(art)], 'scheduled article published');
     await prisma.auditLog.create({
       data: {
@@ -147,26 +190,28 @@ async function publishScheduledArticles(): Promise<number> {
     });
   }
 
-  if (due.length > 0) {
-    console.log(`[Scheduler] Auto-published ${due.length} scheduled article(s).`);
+  if (published > 0) {
+    console.log(`[Scheduler] Auto-published ${published} scheduled article(s).`);
   }
-  return due.length;
+  return published;
 }
 
 async function startServer() {
   const deployment = deploymentConfig();
   const features = featureFlags();
-  // Fail fast on a misconfigured media storage provider.
-  const storage = mediaStorage();
+  // Fail fast on a misconfigured media storage provider (with a readable reason).
+  let storage: ReturnType<typeof mediaStorage>;
+  try { storage = mediaStorage(); } catch (err) { throw new DeploymentConfigError(err instanceof Error ? err.message : 'Media storage is misconfigured.'); }
   // PHASE D: make sure every SEO rule has a stored, editable settings row.
   await ensureSeoRules();
   const allowedRoles: Role[] = features.readerAccounts ? ['Admin', 'Editor', 'Author', 'Reader'] : ['Admin', 'Editor', 'Author'];
   assertSafeAuthBoot();
   // Read-only connection/schema check. Startup never runs migrations or imports.
-  await prisma.user.count();
+  await Promise.all([prisma.user.count(), prisma.faqEntry.count(), prisma.contactMessage.count(), prisma.article.findFirst({ select: { reviewStatus: true, reviewVersion: true } })]);
   // PHASE G: a real production site must not start with documented default passwords.
   await assertProductionLaunchSafe(deployment);
   const app = express();
+  let stopping = false;
   app.disable('x-powered-by');
   // PHASE G: every response carries a request ID; error logs and error
   // responses quote it so a visitor's report can be matched to a log line.
@@ -184,6 +229,8 @@ async function startServer() {
   // PHASE F: the CSP needs the configured providers synchronously; load them once before serving.
   await trackingConfig().catch(() => undefined);
   app.use(securityHeaders);
+  // PHASE J: nothing served by a staging copy may be indexed.
+  if (deployment.appEnv === 'staging') app.use((_req, res, next) => { res.setHeader('X-Robots-Tag', 'noindex, nofollow'); next(); });
   app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
   app.use(enforceProductionTransport);
   app.use(corsPolicy);
@@ -193,10 +240,16 @@ async function startServer() {
   // database (SELECT 1, 2 s timeout) and that media storage is writable.
   // Reports only ok/fail per dependency — never hosts, URLs or error text.
   app.get('/api/health/ready', async (_req, res) => {
-    const withTimeout = <T,>(p: Promise<T>) => Promise.race([p, new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))]);
+    if (stopping) return res.status(503).json({ status: 'not_ready', checks: { database: 'fail', storage: 'fail' } });
+    const withTimeout = async <T,>(p: Promise<T>) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try { return await Promise.race([p, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), 2000); })]); }
+      finally { if (timer) clearTimeout(timer); }
+    };
     const [database, storageCheck] = await Promise.all([
       withTimeout(prisma.$queryRaw`SELECT 1`).then(() => 'ok' as const, () => 'fail' as const),
-      storage.localRoot ? fs.promises.access(storage.localRoot, fs.constants.W_OK).then(() => 'ok' as const, () => 'fail' as const) : Promise.resolve('ok' as const),
+      // PHASE J: each storage provider checks itself (local: writable dir; S3: bucket reachable).
+      withTimeout(storage.healthCheck()).then(() => 'ok' as const, () => 'fail' as const),
     ]);
     const ready = database === 'ok' && storageCheck === 'ok';
     res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'not_ready', checks: { database, storage: storageCheck } });
@@ -302,7 +355,7 @@ async function startServer() {
   }));
   app.get('/robots.txt', (_req: Request, res: Response) => {
     res.header('Content-Type', 'text/plain; charset=utf-8');
-    return res.send(robotsTxt(seoOrigin()));
+    return res.send(robotsTxt(seoOrigin(), deployment.appEnv));
   });
   // IndexNow key file (only when a key is configured).
   app.get(/^\/([A-Za-z0-9-]{8,128})\.txt$/, asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
@@ -468,7 +521,7 @@ async function startServer() {
           prisma.sportEvent.findMany(),
           prisma.eventEdition.findMany(),
           prisma.article.findMany({
-            where: previewAllowed ? undefined : { status: 'published' },
+            where: articleReadWhere(req.authContext!),
             orderBy: { publishedAt: 'desc' },
           }),
           prisma.author.findMany(),
@@ -497,17 +550,20 @@ async function startServer() {
         auditLogs,
         redirectRules,
         features,
-        mediaUsage: await mediaUsageMap(),
+        mediaUsage: await mediaUsageMap(role === 'Author' ? {articleWhere: articleReadWhere(req.authContext!), publicSiteOnly: true} : {}),
       });
     })
   );
 
   // Articles API
+  // PHASE H: staff only. Spec §2.2 has no public API at launch; public pages
+  // are server-rendered from server/services/public and never call this.
   app.get(
     '/api/articles',
+    requireRole(getAuthLookup, ['Admin', 'Editor', 'Author']),
     asyncHandler(async (req: Request, res: Response) => {
       await publishScheduledArticles();
-      const { role } = await getAuthContext(req, authLookup);
+      const { role } = req.authContext!;
       const previewAllowed = ['Admin', 'Editor', 'Author'].includes(role);
 
       // PHASE 3: defensively reject malformed query params instead of
@@ -528,7 +584,7 @@ async function startServer() {
         parsedYear = parseInt(req.query.year, 10);
       }
 
-      const where: Record<string, unknown> = previewAllowed ? {} : { status: 'published' };
+      const where: Record<string, unknown> = articleReadWhere(req.authContext!);
       if (req.query.sport) where.sportSlug = req.query.sport as string;
       if (req.query.event) where.eventSlug = req.query.event as string;
       if (parsedYear !== undefined) where.editionYear = parsedYear;
@@ -552,11 +608,13 @@ async function startServer() {
       const { userId, userName, role } = req.authContext!;
       const body: Record<string, any> = req.body;
 
+      const authorizedByline = await authorWriteGuard(req.authContext!, body);
+
       if (!body.title || !body.sportSlug || (!body.content && !body.body)) {
         return res.status(400).json({ error: 'Missing required article fields: title, sportSlug, body.' });
       }
 
-      const slug = body.slug || body.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+      const slug = body.slug || (typeof body.title === 'string' ? body.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '') : '');
 
       const validationError = firstError(
         validateText(body.title, 'title', 300),
@@ -567,10 +625,20 @@ async function startServer() {
         validateText(body.excerpt, 'excerpt', 1000, false),
         validateSafeUrl(body.featuredImage, 'featuredImage', { required: false }),
         validateOneOf(body.articleType, 'articleType', ARTICLE_TYPES),
+        validateOneOf(body.status, 'status', ARTICLE_STATUSES),
+        validateRecordList(body.references, 'references', { title: 200, url: 2048 }, 30),
         validateSeo(body.seo)
       );
       if (validationError) {
         return res.status(400).json({ error: validationError });
+      }
+      // PHASE H: a scheduled article needs a future publication time; any
+      // other status never carries one.
+      let scheduledFor: Date | null = null;
+      if (body.status === 'scheduled') {
+        const schedule = parseScheduledFor(body.scheduledFor);
+        if (!schedule.ok) return res.status(400).json({ error: (schedule as { error: string }).error });
+        scheduledFor = schedule.date;
       }
 
       const eventSlug = body.eventSlug ?? null;
@@ -590,7 +658,7 @@ async function startServer() {
       // User's id — these are different namespaces (e.g. 'auth-elena' vs
       // 'user-editor-1'). Default to the Author profile linked to the
       // acting user's account (via Author.userId).
-      let authorId: string | undefined = body.authorId;
+      let authorId: string | undefined = role === 'Author' ? authorizedByline : body.authorId;
       if (!authorId) {
         const linkedAuthor = await prisma.author.findFirst({ where: { userId } });
         authorId = linkedAuthor?.id;
@@ -614,7 +682,7 @@ async function startServer() {
       const newArticle = await prisma.$transaction(async (tx) => {
         const created = await tx.article.create({
         data: {
-          id: `art-${Date.now()}`,
+          id: `art-${crypto.randomUUID()}`,
           slug,
           title: body.title,
           subtitle: body.subtitle || '',
@@ -628,8 +696,9 @@ async function startServer() {
           authorId,
           publishedAt: body.publishedAt ? new Date(body.publishedAt) : now,
           updatedAt: now,
-          scheduledFor: body.scheduledFor ? new Date(body.scheduledFor) : null,
+          scheduledFor,
           status: body.status || 'draft',
+          reviewStatus: role === 'Author' ? 'draft' : 'not_required',
           readingTimeMinutes: body.readingTimeMinutes || Math.max(1, Math.ceil((body.content || '').split(' ').length / 200)),
           featured: body.featured || false,
           tables: body.tables ?? undefined,
@@ -691,6 +760,8 @@ async function startServer() {
 
       const updates: Record<string, any> = req.body;
 
+      await authorWriteGuard(req.authContext!, updates, existing);
+
       const validationError = firstError(
         validateText(updates.title, 'title', 300, false),
         validateText(updates.content, 'content', 200000, false),
@@ -700,10 +771,25 @@ async function startServer() {
         validateText(updates.excerpt, 'excerpt', 1000, false),
         validateSafeUrl(updates.featuredImage, 'featuredImage', { required: false }),
         'articleType' in updates ? validateOneOf(updates.articleType, 'articleType', ARTICLE_TYPES, true) : { valid: true },
+        'status' in updates ? validateOneOf(updates.status, 'status', ARTICLE_STATUSES, true) : { valid: true },
+        validateRecordList(updates.references, 'references', { title: 200, url: 2048 }, 30),
         validateSeo(updates.seo)
       );
       if (validationError) {
         return res.status(400).json({ error: validationError });
+      }
+      // PHASE H scheduling: status "scheduled" requires a future time
+      // (new or rescheduled); leaving "scheduled" cancels the schedule.
+      const nextStatus: string = updates.status ?? existing.status;
+      let nextScheduledFor: Date | null | undefined; // undefined = unchanged
+      if (nextStatus === 'scheduled') {
+        if ('scheduledFor' in updates || existing.status !== 'scheduled') {
+          const schedule = parseScheduledFor('scheduledFor' in updates ? updates.scheduledFor : existing.scheduledFor?.toISOString());
+          if (!schedule.ok) return res.status(400).json({ error: (schedule as { error: string }).error });
+          nextScheduledFor = schedule.date;
+        }
+      } else if (existing.scheduledFor || updates.scheduledFor) {
+        nextScheduledFor = null;
       }
 
       const prepared = await prepareArticleContent(updates);
@@ -713,6 +799,10 @@ async function startServer() {
 
       const { body: _body, featuredMediaId: _featuredMediaId, ...plainUpdates } = updates;
       const data: Record<string, any> = { ...plainUpdates, ...prepared.data };
+      data.reviewVersion = { increment: 1 };
+      // Any Author edit after approval must go through review again. Keep
+      // decision context/history visible while the correction is drafted.
+      if (role === 'Author' && existing.reviewStatus !== 'changes_requested') data.reviewStatus = 'draft';
       // PHASE D (Spec §30): updatedAt records meaningful content changes only —
       // not SEO-field edits, status changes or saves that change nothing.
       const CONTENT_FIELDS = ['title', 'subtitle', 'excerpt', 'content', 'body', 'tables', 'references', 'featuredMediaId', 'featuredImage', 'articleType', 'sportSlug', 'eventSlug', 'editionYear', 'slug'];
@@ -722,7 +812,8 @@ async function startServer() {
       if (contentChanged) data.updatedAt = new Date();
       if ('publishedAt' in updates) data.publishedAt = updates.publishedAt ? new Date(updates.publishedAt) : existing.publishedAt;
       else if (data.status === 'published' && existing.status !== 'published') data.publishedAt = new Date(); // first publication
-      if ('scheduledFor' in updates) data.scheduledFor = updates.scheduledFor ? new Date(updates.scheduledFor) : null;
+      if (nextScheduledFor !== undefined) data.scheduledFor = nextScheduledFor;
+      else delete data.scheduledFor;
       if ('eventSlug' in updates) data.eventSlug = updates.eventSlug ?? null;
       if ('editionYear' in updates) data.editionYear = updates.editionYear ?? null;
 
@@ -747,7 +838,8 @@ async function startServer() {
       let updated;
       try {
         updated = await prisma.$transaction(async (tx) => {
-          const saved = await tx.article.update({ where: { id: existing.id }, data });
+          const saved = await tx.article.update({ where: { id: existing.id, reviewVersion: existing.reviewVersion, status: existing.status, authorId: existing.authorId, ...(role === 'Author' ? { author: { userId } } : {}) }, data });
+          if (role === 'Author' && existing.reviewStatus === 'approved') await tx.auditLog.create({ data: { id: `log-${crypto.randomUUID()}`, userId, userName, action: 'Invalidated Article Approval', entityType: 'Article', entityId: existing.id, timestamp: new Date(), details: `${userName} edited an approved article; a new review is required.` } });
           if (prepared.bodyMediaIds) await syncBodyMedia(tx, saved.id, prepared.bodyMediaIds);
           // A published article that moves keeps its old URL alive: old → 301 → new.
           if (existing.status === 'published' && oldPath !== newPath) {
@@ -759,6 +851,7 @@ async function startServer() {
         });
       } catch (err) {
         if (err instanceof RedirectConflict) return res.status(409).json({ error: `URL change blocked: ${err.message}` });
+        if ((err as {code?:string}).code === 'P2025') return res.status(409).json({error:'The article changed. Reload before saving again.'});
         throw err;
       }
 
@@ -779,7 +872,7 @@ async function startServer() {
           entityType: 'Article',
           entityId: updated.id,
           timestamp: new Date(),
-          details: `Updated article "${updated.title}" (status: ${updated.status}) by ${userName}.`,
+          details: `Updated article "${updated.title}" (status: ${updated.status}${updated.scheduledFor ? `, publishes ${updated.scheduledFor.toISOString()}` : existing.status === 'scheduled' && updated.status !== 'scheduled' ? ', schedule cancelled' : ''}) by ${userName}.`,
         },
       });
 
@@ -981,47 +1074,59 @@ async function startServer() {
         validateText(body.name, 'name', 200),
         validateSlug(body.slug, 'slug'),
         validateSlug(body.sportSlug, 'sportSlug'),
+        validateText(body.shortName, 'shortName', 200, false),
         validateText(body.description, 'description', 5000, false),
+        validateText(body.history, 'history', 10000, false),
+        validateText(body.frequency, 'frequency', 200, false),
         validateText(body.defaultVenue, 'defaultVenue', 200, false),
         validateText(body.defaultLocation, 'defaultLocation', 200, false),
         validateSafeUrl(body.featuredImage, 'featuredImage', { required: false }),
         validateSafeUrl(body.officialSourceUrl, 'officialSourceUrl', { required: false, allowRelative: false }),
         validateText(body.eventType, 'eventType', 80, false),
+        body.currentEditionYear == null ? { valid: true } : { valid: false, error: 'Create the edition first, then explicitly select currentEditionYear on the event.' },
         validateSeo(body.seo)
       );
       if (validationError) {
         return res.status(400).json({ error: validationError });
       }
+      if (!(await imageIsManaged(body.featuredImage))) return res.status(400).json({ error: 'featuredImage must reference a Media Library item.' });
+      if (body.allEditionYears?.length) return res.status(400).json({ error: 'Edition years are recorded by creating editions, not by pre-populating allEditionYears.' });
 
-      const collision = await prisma.sportEvent.findUnique({
-        where: { sportSlug_slug: { sportSlug: body.sportSlug, slug: body.slug } },
-      });
-      if (collision) {
-        return res.status(409).json({ error: `Event '${body.slug}' already exists under sport '${body.sportSlug}'.` });
-      }
-
-      const newEvent = await prisma.sportEvent.create({
-        data: {
+      const result = await prisma.$transaction(async (tx) => {
+        // Configuration PUT locks this same Sport row FOR UPDATE. Hold a shared
+        // lock while resolving definitions and writing values so they cannot race.
+        const locked = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Sport" WHERE "slug" = ${body.sportSlug} FOR SHARE`;
+        if (!locked.length) return { status: 400 as const, error: 'sportSlug must identify an existing sport.' };
+        const sport = await tx.sport.findUniqueOrThrow({ where: { slug: body.sportSlug }, select: { eventConfiguration: true } });
+        const eventValues = parseSportEventValues(body.sportSpecificValues, resolveSportEventConfiguration(sport.eventConfiguration), { newEvent: true });
+        if ('error' in eventValues) return { status: 400 as const, error: eventValues.error };
+        const collision = await tx.sportEvent.findUnique({ where: { sportSlug_slug: { sportSlug: body.sportSlug, slug: body.slug } }, select: { id: true } });
+        if (collision) return { status: 409 as const, error: `Event '${body.slug}' already exists under sport '${body.sportSlug}'.` };
+        const newEvent = await tx.sportEvent.create({ data: {
           id: `event-${body.slug}-${Date.now()}`,
           sportSlug: body.sportSlug,
           slug: body.slug,
           name: body.name,
-          shortName: body.shortName || body.name,
-          description: body.description || '',
-          history: body.history,
-          frequency: body.frequency || 'Annual',
-          defaultVenue: body.defaultVenue || 'Championship Venue',
-          defaultLocation: body.defaultLocation || 'Championship Host City',
-          currentEditionYear: body.currentEditionYear || new Date().getFullYear(),
-          allEditionYears: body.allEditionYears || [new Date().getFullYear()],
+          shortName: optionalFact(body.shortName) || body.name.trim(),
+          description: optionalFact(body.description) || '',
+          history: optionalFact(body.history),
+          frequency: optionalFact(body.frequency),
+          defaultVenue: optionalFact(body.defaultVenue),
+          defaultLocation: optionalFact(body.defaultLocation),
+          currentEditionYear: null,
+          allEditionYears: [],
           featured: body.featured || false,
           isVisible: body.isVisible !== false,
-          featuredImage: body.featuredImage || 'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?auto=format&fit=crop&w=1200&q=80',
+          featuredImage: optionalFact(body.featuredImage),
           officialSourceUrl: body.officialSourceUrl?.trim() || null,
           eventType: body.eventType?.trim() || null,
-          seo: body.seo || { metaTitle: `${body.name} Guide | SportingSpy`, metaDescription: body.description },
-        },
+          seo: body.seo || {},
+          sportSpecificValues: Object.keys(eventValues.value).length ? eventValues.value : Prisma.DbNull,
+        } });
+        return { status: 201 as const, newEvent };
       });
+      if ('error' in result) return res.status(result.status).json({ error: result.error });
+      const { newEvent } = result;
 
       await prisma.auditLog.create({
         data: {
@@ -1053,25 +1158,63 @@ async function startServer() {
 
       const updates: Record<string, any> = req.body;
       const validationError = firstError(
-        validateText(updates.name, 'name', 200, false),
+        'name' in updates ? validateText(updates.name, 'name', 200) : { valid: true },
         updates.slug !== undefined ? validateSlug(updates.slug, 'slug') : { valid: true },
         updates.sportSlug !== undefined ? validateSlug(updates.sportSlug, 'sportSlug') : { valid: true },
+        validateText(updates.shortName, 'shortName', 200, false),
         validateText(updates.description, 'description', 5000, false),
+        validateText(updates.history, 'history', 10000, false),
+        validateText(updates.frequency, 'frequency', 200, false),
         validateText(updates.defaultVenue, 'defaultVenue', 200, false),
         validateText(updates.defaultLocation, 'defaultLocation', 200, false),
         validateSafeUrl(updates.featuredImage, 'featuredImage', { required: false }),
         validateSafeUrl(updates.officialSourceUrl, 'officialSourceUrl', { required: false, allowRelative: false }),
         validateText(updates.eventType, 'eventType', 80, false),
+        !('currentEditionYear' in updates) || updates.currentEditionYear === null || validEditionYear(updates.currentEditionYear)
+          ? { valid: true } : { valid: false, error: 'currentEditionYear must be null or an edition year between 1900 and 2200.' },
         validateSeo(updates.seo)
       );
       if (validationError) {
         return res.status(400).json({ error: validationError });
       }
-      const data: Record<string, any> = { ...updates };
-      if ('officialSourceUrl' in updates) data.officialSourceUrl = updates.officialSourceUrl?.trim() || null;
-      if ('eventType' in updates) data.eventType = updates.eventType?.trim() || null;
-
-      const updated = await prisma.sportEvent.update({ where: { id: existing.id }, data });
+      if ('featuredImage' in updates && !(await imageIsManaged(updates.featuredImage))) return res.status(400).json({ error: 'featuredImage must reference a Media Library item.' });
+      const targetSport = await prisma.sport.findUnique({ where: { slug: updates.sportSlug ?? existing.sportSlug }, select: { id: true } });
+      if (!targetSport) {
+        return res.status(400).json({ error: 'sportSlug must identify an existing sport.' });
+      }
+      if (updates.sportSlug !== undefined && updates.sportSlug !== existing.sportSlug && !('sportSpecificValues' in updates) && existing.sportSpecificValues && Object.keys(existing.sportSpecificValues as object).length) {
+        return res.status(400).json({ error: 'Clear sportSpecificValues before moving this event to another sport.' });
+      }
+      if (updates.currentEditionYear != null) {
+        const edition = await prisma.eventEdition.findFirst({ where: { sportSlug: existing.sportSlug, eventSlug: existing.slug, year: updates.currentEditionYear }, select: { id: true } });
+        if (!edition) return res.status(400).json({ error: 'currentEditionYear must identify an existing edition of this event.' });
+      }
+      const allowed = ['name', 'slug', 'sportSlug', 'shortName', 'description', 'history', 'frequency', 'defaultVenue', 'defaultLocation', 'currentEditionYear', 'featured', 'isVisible', 'featuredImage', 'officialSourceUrl', 'eventType', 'seo', 'sportSpecificValues'] as const;
+      const data: Record<string, unknown> = {};
+      for (const key of allowed) if (key in updates) data[key] = updates[key];
+      for (const key of ['history', 'frequency', 'defaultVenue', 'defaultLocation', 'featuredImage', 'officialSourceUrl', 'eventType'] as const) {
+        if (key in updates) data[key] = optionalFact(updates[key]);
+      }
+      if ('description' in updates) data.description = optionalFact(updates.description) || '';
+      if ('shortName' in updates) data.shortName = optionalFact(updates.shortName) || (updates.name ?? existing.name);
+      const updateResult = 'sportSpecificValues' in updates
+        ? await prisma.$transaction(async (tx) => {
+            const sportSlug = updates.sportSlug ?? existing.sportSlug;
+            const locked = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Sport" WHERE "slug" = ${sportSlug} FOR SHARE`;
+            if (!locked.length) return { error: 'sportSlug must identify an existing sport.' };
+            const [sport, latestEvent] = await Promise.all([
+              tx.sport.findUniqueOrThrow({ where: { slug: sportSlug }, select: { eventConfiguration: true } }),
+              tx.sportEvent.findUniqueOrThrow({ where: { id: existing.id }, select: { sportSpecificValues: true } }),
+            ]);
+            const previous = sportSlug === existing.sportSlug ? latestEvent.sportSpecificValues : null;
+            const values = parseSportEventValues(updates.sportSpecificValues, resolveSportEventConfiguration(sport.eventConfiguration), { newEvent: false, previous });
+            if ('error' in values) return { error: values.error };
+            data.sportSpecificValues = Object.keys(values.value).length ? values.value : Prisma.DbNull;
+            return { updated: await tx.sportEvent.update({ where: { id: existing.id }, data }) };
+          })
+        : { updated: await prisma.sportEvent.update({ where: { id: existing.id }, data }) };
+      if ('error' in updateResult) return res.status(400).json({ error: updateResult.error });
+      const { updated } = updateResult;
 
       await prisma.auditLog.create({
         data: {
@@ -1145,7 +1288,7 @@ async function startServer() {
       const validationError = firstError(
         validateSlug(body.eventSlug, 'eventSlug'),
         validateSlug(body.sportSlug, 'sportSlug'),
-        typeof body.year === 'number' && Number.isInteger(body.year) && body.year >= 1900 && body.year <= 2200
+        validEditionYear(body.year)
           ? { valid: true }
           : { valid: false, error: 'year must be an integer between 1900 and 2200.' },
         validateText(body.venue, 'venue', 200, false),
@@ -1153,11 +1296,17 @@ async function startServer() {
         validateText(body.description, 'description', 5000, false),
         validateSafeUrl(body.officialSourceUrl, 'officialSourceUrl', { required: false }),
         validateSafeUrl(body.featuredImage, 'featuredImage', { required: false }),
-        validateOneOf(body.status, 'status', EDITION_STATUSES),
+        validateOneOf(body.status, 'status', EDITION_STATUSES, true),
+        validateText(body.title, 'title', 300),
+        ...editionDetailChecks(body),
         validateSeo(body.seo)
       );
       if (validationError) {
         return res.status(400).json({ error: validationError });
+      }
+      if (!(await imageIsManaged(body.featuredImage))) return res.status(400).json({ error: 'featuredImage must reference a Media Library item.' });
+      if (!(await prisma.sportEvent.findFirst({ where: { sportSlug: body.sportSlug, slug: body.eventSlug }, select: { id: true } }))) {
+        return res.status(400).json({ error: 'sportSlug and eventSlug must identify an existing event.' });
       }
 
       const collision = await prisma.eventEdition.findUnique({
@@ -1173,21 +1322,21 @@ async function startServer() {
           eventSlug: body.eventSlug,
           sportSlug: body.sportSlug,
           year: body.year,
-          title: body.title || `${body.year} ${body.eventSlug.replace(/-/g, ' ')}`,
-          startDate: body.startDate || `${body.year}-05-01`,
-          endDate: body.endDate || `${body.year}-05-15`,
-          venue: body.venue || 'Championship Venue',
-          location: body.location || 'Official Location',
-          status: body.status || 'upcoming',
+          title: body.title.trim(),
+          startDate: optionalFact(body.startDate),
+          endDate: optionalFact(body.endDate),
+          venue: optionalFact(body.venue),
+          location: optionalFact(body.location),
+          status: body.status,
           quickFacts: body.quickFacts || [],
           prizeMoneyTotal: body.prizeMoneyTotal,
           defendingChampions: body.defendingChampions ?? undefined,
-          qualificationInfo: body.qualificationInfo,
-          participantsCount: body.participantsCount,
-          officialSourceUrl: body.officialSourceUrl,
-          description: body.description || '',
-          featuredImage: body.featuredImage || 'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?auto=format&fit=crop&w=1200&q=80',
-          seo: body.seo || { metaTitle: `${body.year} Edition Guide | SportingSpy`, metaDescription: body.description },
+          qualificationInfo: body.qualificationInfo?.trim() || null,
+          participantsCount: body.participantsCount ?? null,
+          officialSourceUrl: optionalFact(body.officialSourceUrl),
+          description: optionalFact(body.description) || '',
+          featuredImage: optionalFact(body.featuredImage),
+          seo: body.seo || {},
         },
       });
 
@@ -1222,19 +1371,34 @@ async function startServer() {
       const updates: Record<string, any> = req.body;
       const validationError = firstError(
         'status' in updates ? validateOneOf(updates.status, 'status', EDITION_STATUSES, true) : { valid: true },
-        validateText(updates.title, 'title', 300, false),
+        'title' in updates ? validateText(updates.title, 'title', 300) : { valid: true },
         validateText(updates.venue, 'venue', 200, false),
         validateText(updates.location, 'location', 200, false),
         validateText(updates.description, 'description', 5000, false),
         validateSafeUrl(updates.officialSourceUrl, 'officialSourceUrl', { required: false }),
         validateSafeUrl(updates.featuredImage, 'featuredImage', { required: false }),
+        ...editionDetailChecks(updates, existing),
         validateSeo(updates.seo)
       );
       if (validationError) {
         return res.status(400).json({ error: validationError });
       }
+      if ('featuredImage' in updates && !(await imageIsManaged(updates.featuredImage))) return res.status(400).json({ error: 'featuredImage must reference a Media Library item.' });
+      const allowed = ['title', 'startDate', 'endDate', 'venue', 'location', 'status', 'quickFacts', 'prizeMoneyTotal', 'defendingChampions', 'qualificationInfo', 'participantsCount', 'officialSourceUrl', 'description', 'featuredImage', 'seo'] as const;
+      const editionData: Record<string, unknown> = {};
+      for (const key of allowed) if (key in updates) editionData[key] = updates[key];
+      for (const key of ['startDate', 'endDate', 'venue', 'location', 'featuredImage'] as const) {
+        if (key in updates) editionData[key] = optionalFact(updates[key]);
+      }
+      if ('description' in updates) editionData.description = optionalFact(updates.description) || '';
+      if ('title' in updates) editionData.title = updates.title.trim();
+      if ('qualificationInfo' in updates) editionData.qualificationInfo = updates.qualificationInfo?.trim() || null;
+      if ('defendingChampions' in updates) editionData.defendingChampions = updates.defendingChampions?.length ? updates.defendingChampions : Prisma.DbNull;
+      if ('participantsCount' in updates) editionData.participantsCount = updates.participantsCount ?? null;
+      if ('officialSourceUrl' in updates) editionData.officialSourceUrl = updates.officialSourceUrl?.trim() || null;
+      if ('prizeMoneyTotal' in updates) editionData.prizeMoneyTotal = updates.prizeMoneyTotal?.trim() || null;
 
-      const updated = await prisma.eventEdition.update({ where: { id: existing.id }, data: updates });
+      const updated = await prisma.eventEdition.update({ where: { id: existing.id }, data: editionData });
 
       await prisma.auditLog.create({
         data: {
@@ -1454,6 +1618,11 @@ async function startServer() {
   app.use('/api/redirects', redirectRouter(getAuthLookup));
   // PHASE F.1: Site Experience (homepage, navigation, footer, announcements, blocks).
   app.use('/api/site-experience', siteExperienceRouter(getAuthLookup));
+  // PHASE H: editor-managed FAQ and the stored contact-form inbox.
+  app.use('/api/faq', faqRouter(getAuthLookup));
+  app.use(contactRouter(getAuthLookup));
+  app.use('/api/sports', sportEventConfigurationRouter(getAuthLookup));
+  app.use(editorialWorkflowRouter(getAuthLookup));
   app.use('/api/media', mediaRouter(getAuthLookup));
   app.use('/api/ad-creatives', adCreativesRouter(getAuthLookup));
   app.use('/api/settings', settingsRouter(getAuthLookup));
@@ -1831,6 +2000,10 @@ async function startServer() {
       if (!existing) {
         return res.status(404).json({ error: 'Ad slot not found.' });
       }
+      // PHASE H: no public template renders the sidebar slots; refuse configuration so nothing is set up that can never appear.
+      if ((UNPLACED_AD_SLOTS as readonly string[]).includes(existing.id)) {
+        return res.status(409).json({ error: 'This ad slot is not placed on any page (the site has no sidebar) and cannot be configured.' });
+      }
 
       // PHASE F: only the editable fields, each type-checked. Slot identity,
       // name, placement and dimensions are fixed by the layout.
@@ -1957,6 +2130,7 @@ async function startServer() {
     const errorStatus = (err as { status?: number; statusCode?: number } | null)?.status ?? (err as { statusCode?: number } | null)?.statusCode;
     console.error(`[SportingSpy] Request failed id=${requestId} ${_req.method} ${_req.path} status=${errorStatus ?? 500} error=${err instanceof Error ? err.name : 'UnknownError'}${code && /^[A-Z0-9_]{2,40}$/.test(code) ? ` code=${code}` : ''}`);
     if (res.headersSent) return;
+    if (err instanceof WorkflowError) return res.status(err.status).json({error:err.message,requestId});
 
     // PHASE 3: body-parser's "entity too large" (and similar well-known
     // client errors) carry their own correct 4xx status — surface that
@@ -1971,15 +2145,38 @@ async function startServer() {
   });
 
   const listener = app.listen(deployment.port, deployment.host, () => {
-    console.log(`[SportingSpy] Server running at http://${deployment.host}:${deployment.port}`);
+    console.log(`[SportingSpy] Server running at http://${deployment.host}:${deployment.port} (environment: ${deployment.appEnv}, media storage: ${storage.name})`);
   });
   listener.on('error', () => { console.error('[SportingSpy] Cannot bind configured listening address.'); process.exit(1); });
   // Next.js dev server hot reload uses a websocket on this same server.
   if (!deployment.production) listener.on('upgrade', nextApp.getUpgradeHandler());
-  setInterval(() => {
-    publishScheduledArticles().catch(() => console.error('[Scheduler] Publication failed. Check database availability.'));
-    applyDueSchedules().catch(() => console.error('[Scheduler] Site Experience publication failed. Check database availability.'));
-  }, 30000).unref();
+  let schedulerWork: Promise<unknown> | undefined;
+  const scheduler = setInterval(() => {
+    if (stopping || schedulerWork) return;
+    schedulerWork = Promise.all([
+      publishScheduledArticles().catch(() => console.error('[Scheduler] Publication failed. Check database availability.')),
+      applyDueSchedules().catch(() => console.error('[Scheduler] Site Experience publication failed. Check database availability.')),
+    ]).finally(() => { schedulerWork = undefined; });
+  }, 30000);
+  scheduler.unref();
+
+  // PHASE J: graceful shutdown. On SIGTERM/SIGINT (platform deploys, restarts,
+  // Ctrl+C) stop accepting connections and the scheduler, let in-flight
+  // requests finish (at most 10 s), then close the database pool.
+  const shutdown = (signal: string) => {
+    if (stopping) return;
+    stopping = true;
+    console.log(`[SportingSpy] ${signal} received; shutting down gracefully.`);
+    clearInterval(scheduler);
+    const force = setTimeout(() => { console.error('[SportingSpy] Shutdown timed out; exiting.'); process.exit(1); }, 10_000);
+    force.unref();
+    listener.close(() => {
+      Promise.resolve(schedulerWork).then(() => prisma.$disconnect()).catch(() => undefined).finally(() => { console.log('[SportingSpy] Shutdown complete.'); process.exit(0); });
+    });
+    listener.closeIdleConnections?.();
+  };
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
 }
 
 startServer().catch((err) => {

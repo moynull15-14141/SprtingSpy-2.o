@@ -10,12 +10,13 @@ type Validator = (value: string) => ValidationResult;
 const pattern = (re: RegExp, message: string): Validator => (v) => (re.test(v) ? { valid: true } : { valid: false, error: message });
 
 export const SETTINGS = {
-  // Site identity
-  siteName: { group: 'Site identity', label: 'Site name', public: false, validate: (v: string) => validateText(v, 'siteName', 80) },
-  siteDescription: { group: 'Site identity', label: 'Site description', public: false, validate: (v: string) => validateText(v, 'siteDescription', 300) },
-  // SEO / social defaults
-  defaultOgImage: { group: 'SEO & social defaults', label: 'Default social image URL', public: false, validate: (v: string) => validateSafeUrl(v, 'defaultOgImage') },
-  twitterHandle: { group: 'SEO & social defaults', label: 'X/Twitter handle', public: false, validate: pattern(/^@[A-Za-z0-9_]{1,15}$/, 'twitterHandle must look like @SportingSpy.') },
+  // Site identity (PHASE H: rendered publicly — site name in titles, header,
+  // footer, Open Graph and JSON-LD; description as the default meta description)
+  siteName: { group: 'Site identity', label: 'Site name', public: true, validate: (v: string) => validateText(v, 'siteName', 80) },
+  siteDescription: { group: 'Site identity', label: 'Site description', public: true, validate: (v: string) => validateText(v, 'siteDescription', 300) },
+  // SEO / social defaults (PHASE H: rendered publicly as og:image / twitter:site fallbacks)
+  defaultOgImage: { group: 'SEO & social defaults', label: 'Default social image URL', public: true, validate: (v: string) => validateSafeUrl(v, 'defaultOgImage') },
+  twitterHandle: { group: 'SEO & social defaults', label: 'X/Twitter handle', public: true, validate: pattern(/^@[A-Za-z0-9_]{1,15}$/, 'twitterHandle must look like @SportingSpy.') },
   // Search engine verification (rendered into public <head>)
   googleSiteVerification: { group: 'Search engine verification', label: 'Google Search Console verification token', public: true, validate: pattern(/^[A-Za-z0-9_-]{10,100}$/, 'Enter only the token from the google-site-verification tag.') },
   bingSiteVerification: { group: 'Search engine verification', label: 'Bing Webmaster verification token', public: true, validate: pattern(/^[A-Za-z0-9]{10,64}$/, 'Enter only the token from the msvalidate.01 tag.') },

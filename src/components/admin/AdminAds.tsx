@@ -6,11 +6,14 @@
 
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { AdSlotId, AdProvider, type AdCreative } from '../../types';
+import { AdSlotId, AdProvider, UNPLACED_AD_SLOTS, type AdCreative } from '../../types';
 import { AdMediaEditor } from './AdMediaEditor';
 
 export const AdminAds: React.FC = () => {
-  const { adSlots, toggleAdSlot, updateAdSlot, currentUser } = useApp();
+  const { adSlots: allSlots, toggleAdSlot, updateAdSlot, currentUser } = useApp();
+  // PHASE H: slots with no public placement (sidebar) are not configurable.
+  const adSlots = allSlots.filter((s) => !UNPLACED_AD_SLOTS.includes(s.id));
+  const retiredCount = allSlots.length - adSlots.length;
   // The ads API is Admin-only; other staff see the configuration read-only.
   const canManage = currentUser.role === 'Admin';
   const [editingSlotId, setEditingSlotId] = useState<AdSlotId | null>(null);
@@ -84,6 +87,7 @@ export const AdminAds: React.FC = () => {
       <div className="p-4 rounded-xl border border-sky-200 bg-sky-50 text-xs text-sky-900 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-200 space-y-1">
         <p><strong>Providers:</strong> <em>House / sponsor</em> shows the slot's own partner banner, labelled “Sponsored”, with no third-party code. <em>Google AdSense</em> shows an AdSense unit labelled “Advertisement”, only after the AdSense publisher ID is set in Settings and only to visitors who allowed advertising in their privacy choices.</p>
         {!canManage && <p><strong>Read-only:</strong> only Admins can change ad placements.</p>}
+        {retiredCount > 0 && <p><strong>Sidebar slots retired:</strong> the site has no sidebar, so SIDEBAR_TOP and SIDEBAR_MIDDLE are hidden here and cannot be configured. Their stored settings are kept.</p>}
       </div>
 
       {/* EDIT MODAL / FORM */}

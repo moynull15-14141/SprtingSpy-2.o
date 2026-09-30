@@ -54,7 +54,7 @@ const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
   cwd: process.cwd(),
   windowsHide: true,
   env: {
-    ...process.env, PORT: String(port), HOST: '127.0.0.1', TRUST_PROXY: 'false', NODE_ENV: 'production', AUTH_MODE: 'production',
+    ...process.env, PORT: String(port), HOST: '127.0.0.1', TRUST_PROXY: 'false', NODE_ENV: 'production', APP_ENV: 'production', AUTH_MODE: 'production',
     DEV_LOGIN_BYPASS: 'false', ALLOWED_ORIGIN: base, ENABLE_READER_ACCOUNTS: 'false', ENABLE_COMMENTS: 'false',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -155,10 +155,12 @@ try {
   tested(`trailing-slash policy: ${pagePaths.length} representative page URLs 301 once to the slash form (GET and HEAD), slash form 200, query preserved`);
 
   // Exceptions: API, files, sitemap, robots, non-GET methods.
-  const apiArticles = await status(anon, '/api/articles', 200);
+  // PHASE H: /api/articles is staff-only (Spec §2.2: no public API) — still never redirected.
+  await status(anon, '/api/articles', 401);
+  const apiArticles = await status(editor, '/api/articles', 200);
   assert(Array.isArray(apiArticles.data));
   await status(anon, '/api/health', 200);
-  await status(anon, '/api/articles/', 200);
+  await status(editor, '/api/articles/', 200);
   await status(anon, '/api/does-not-exist', 404);
   const sitemap = await status(anon, '/sitemap.xml', 200);
   assert(sitemap.headers.get('content-type')?.includes('application/xml'));
@@ -199,7 +201,7 @@ try {
   const howToWatch = published.find((a: any) => a.articleType === 'How to Watch');
   const howToWatchHtml = (await status(anon, `/${howToWatch.sportSlug}/${howToWatch.eventSlug}/${howToWatch.editionYear}/${howToWatch.slug}/`, 200)).text;
   assert(howToWatchHtml.includes('How to Watch') && !howToWatchHtml.includes('Sports Viewing Guide'));
-  const byType = await status(anon, `/api/articles?type=${encodeURIComponent('How to Watch')}`, 200);
+  const byType = await status(editor, `/api/articles?type=${encodeURIComponent('How to Watch')}`, 200);
   assert(byType.data.length >= 1 && byType.data.every((a: any) => a.articleType === 'How to Watch'));
   tested('article type: no "Sports Viewing Guide" rows; migrated article served and filterable as "How to Watch"; 19 spec types');
 
@@ -256,7 +258,7 @@ try {
   const dbStatuses = await prisma.$queryRawUnsafe<{ v: string }[]>(`SELECT unnest(enum_range(NULL::"EditionStatus"))::text AS v`);
   assert.deepEqual(dbStatuses.map((r) => r.v), ['upcoming', 'active', 'completed', 'archived']);
   assert.equal((await prisma.$queryRawUnsafe<{ n: number }[]>(`SELECT COUNT(*)::int AS n FROM "EventEdition" WHERE status::text = 'ongoing'`))[0].n, 0);
-  const editionBase = { sportSlug: sport.slug, eventSlug: `${fixture}-e`, description: 'Fixture edition.' };
+  const editionBase = { sportSlug: sport.slug, eventSlug: `${fixture}-e`, title: `${fixture} Edition`, description: 'Fixture edition.' };
   await status(editor, '/api/editions', 400, 'POST', { ...editionBase, year: 2031, status: 'ongoing' });
   await status(editor, '/api/editions', 400, 'POST', { ...editionBase, year: 2031, status: 'live' });
   for (const [i, st] of EDITION_STATUSES.entries()) {

@@ -8,7 +8,7 @@ import { articlePath } from './paths';
 
 type ArticleData = NonNullable<Awaited<ReturnType<typeof getArticlePage>>>;
 
-export function articleMetadata({ article, sport, author }: ArticleData): Metadata {
+export function articleMetadata({ article, sport, author }: ArticleData): Promise<Metadata> {
   return pageMetadata({
     title: `${article.title} | SportingSpy`,
     description: article.excerpt,

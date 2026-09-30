@@ -52,7 +52,7 @@ const fixtureValues: Record<string, string> = {
 };
 try {
   for (const role of ['admin', 'editor'] as const) await prisma.user.create({ data: { id: ids[role], name: `Settings UI ${role}`, email: `${ids[role]}@example.test`, role: role === 'admin' ? 'Admin' : 'Editor', avatar: '', joinedAt: new Date(), passwordHash: hashPassword(password) } });
-  child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], { windowsHide: true, env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', NODE_ENV: 'production', AUTH_MODE: 'production', DEV_LOGIN_BYPASS: 'false', ALLOWED_ORIGIN: base, TRUST_PROXY: 'false', GEMINI_API_KEY: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], { windowsHide: true, env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', NODE_ENV: 'production', APP_ENV: 'production', AUTH_MODE: 'production', DEV_LOGIN_BYPASS: 'false', ALLOWED_ORIGIN: base, TRUST_PROXY: 'false', GEMINI_API_KEY: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout?.on('data', (c) => output += c); child.stderr?.on('data', (c) => output += c);
   for (let i = 0; i < 160; i++) { if (child.exitCode !== null) throw new Error(output); try { if ((await fetch(base + '/api/health')).status === 200) break; } catch {} await new Promise((r) => setTimeout(r, 250)); }
   browser = await chromium.launch({ executablePath, headless: true });

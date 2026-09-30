@@ -151,9 +151,9 @@ export const SportPage: React.FC<{ data: SportHubData }> = ({ data }) => {
                   >
                     <div>
                       <h3 className="font-serif text-base font-bold text-stone-900 dark:text-stone-100">{ed.title}</h3>
-                      <p className="text-xs text-stone-500 tabular-nums dark:text-stone-400">
-                        {ed.startDate} to {ed.endDate} · {ed.venue}
-                      </p>
+                      {(ed.startDate || ed.endDate || ed.venue) && <p className="text-xs text-stone-500 tabular-nums dark:text-stone-400">
+                        {[ed.startDate && ed.endDate ? `${ed.startDate} to ${ed.endDate}` : ed.startDate || ed.endDate, ed.venue].filter(Boolean).join(' · ')}
+                      </p>}
                     </div>
                     <span className="text-xs font-semibold text-amber-700 dark:text-amber-400 whitespace-nowrap ml-4">View Dossier &rarr;</span>
                   </Link>

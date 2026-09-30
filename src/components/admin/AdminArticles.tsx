@@ -10,6 +10,8 @@ import dynamic from 'next/dynamic';
 import { legacyToDoc, validateRichDoc, type RichDoc } from '../../lib/richText';
 import { MediaPicker, ReviewBadge, thumbnailUrl } from './media/MediaShared';
 import { ArticleAppearanceEditor } from './editor/ArticleAppearanceEditor';
+import { ArticleReviewPanel } from './editor/ArticleReviewPanel';
+import { REVIEW_LABELS } from '../../lib/editorialWorkflow';
 
 // The rich-text editor (TipTap) is loaded on demand, only inside the CMS.
 const RichTextEditor = dynamic(() => import('./editor/RichTextEditor'), {
@@ -37,6 +39,18 @@ interface AssistantResult {
   suggestions: { missingTopics: string[]; missingEntities: string[]; factsToVerify: string[]; sectionIdeas: string[] };
 }
 
+/** ISO instant → value for <input type="datetime-local"> in the editor's own time zone. */
+const toLocalInput = (iso?: string | null) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+const editorTimeZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'local time'; } catch { return 'local time'; } };
+const formatWhen = (d: Date) => d.toLocaleString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
+type Reference = { title: string; url: string };
+
 const SuggestionList: React.FC<{ title: string; empty: string; items: React.ReactNode[] }> = ({ title, empty, items }) => (
   <section className="rounded border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 p-2">
     <h5 className="font-semibold mb-1">{title}</h5>
@@ -47,8 +61,13 @@ const SuggestionList: React.FC<{ title: string; empty: string; items: React.Reac
 export const AdminArticles: React.FC = () => {
   const { articles, sports, events, editions, authors, addArticle, updateArticle, deleteArticle, navigate, mediaItems, apiCall, refreshData } =
     useApp();
+  const { currentUser } = useApp();
+  const isAuthor = currentUser.role === 'Author';
+  const ownByline = authors.find(author => author.userId === currentUser.id);
   const [isCreating, setIsCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const editingArticleForPermissions = articles.find(article => article.id === editingId);
+  const authorLocked = isAuthor && !!editingArticleForPermissions && (editingArticleForPermissions.reviewStatus === 'in_review' || ['published','scheduled','archived'].includes(editingArticleForPermissions.status));
 
   // Workflow Form State
   const [sportSlug, setSportSlug] = useState<string>(sports[0]?.slug || 'tennis');
@@ -63,6 +82,7 @@ export const AdminArticles: React.FC = () => {
   // PHASE C: rich body (editor document) + featured image from the Media Library.
   const [bodyDoc, setBodyDoc] = useState<RichDoc>(EMPTY_DOC);
   const [editorKey, setEditorKey] = useState(0);
+  const [firstParagraphFocusRequest, setFirstParagraphFocusRequest] = useState(0);
   const [featuredImage, setFeaturedImage] = useState('');
   const [featuredMediaId, setFeaturedMediaId] = useState<string | null>(null);
   const [pickingFeatured, setPickingFeatured] = useState(false);
@@ -78,6 +98,10 @@ export const AdminArticles: React.FC = () => {
   const [otherSeo, setOtherSeo] = useState<SeoMetadata>({});
   // New articles start as drafts so nothing goes live by accident (PHASE C).
   const [status, setStatus] = useState<'draft' | 'preview' | 'scheduled' | 'published' | 'archived'>('draft');
+  // PHASE H: scheduled publication time as typed (editor's local time zone) and source references.
+  const [scheduledLocal, setScheduledLocal] = useState('');
+  const [references, setReferences] = useState<Reference[]>([]);
+  const [formError, setFormError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [seoCheck, setSeoCheck] = useState<SeoCheckResult | null>(null);
   const [checkingSeo, setCheckingSeo] = useState(false);
@@ -101,6 +125,7 @@ export const AdminArticles: React.FC = () => {
   };
 
   const resetForm = () => {
+    setFirstParagraphFocusRequest(0);
     setTitle('');
     setSubtitle('');
     setSlug('');
@@ -116,6 +141,9 @@ export const AdminArticles: React.FC = () => {
     setOgImage('');
     setOtherSeo({});
     setStatus('draft');
+    setScheduledLocal('');
+    setReferences([]);
+    setFormError(null);
     setSeoCheck(null);
     setAssistantResult(null);
     setIsCreating(false);
@@ -123,10 +151,12 @@ export const AdminArticles: React.FC = () => {
   };
 
   const startCreate = () => {
+    setFirstParagraphFocusRequest(0);
     // The CMS dataset may finish loading after this component's first render,
     // so initialise required relationships at the moment the editor opens.
     if (!sportSlug && sports[0]) setSportSlug(sports[0].slug);
     if (!authorId && authors[0]) setAuthorId(authors[0].id);
+    if (isAuthor) setAuthorId(ownByline?.id || '');
     setFeedback(null);
     setEditingId(null);
     setIsCreating(true);
@@ -139,8 +169,24 @@ export const AdminArticles: React.FC = () => {
     editionYear: isAboutEvent && eventSlug && editionYear ? editionYear : null,
     excerpt, body: bodyDoc, featuredMediaId, featuredImage, authorId,
     seo: { ...otherSeo, metaTitle: metaTitle || title, metaDescription: metaDescription || excerpt, ogTitle, ogDescription, ogImage },
-    references: [],
+    references: cleanReferences(),
   });
+
+  /** References with both fields filled (empty rows are ignored). */
+  const cleanReferences = () => references.map((r) => ({ title: r.title.trim(), url: r.url.trim() })).filter((r) => r.title || r.url);
+
+  /** PHASE H: client-side checks mirroring the server; returns an error message or null. */
+  const scheduleProblem = (nextStatus: string): string | null => {
+    if (nextStatus !== 'scheduled') return null;
+    if (!scheduledLocal) return 'Choose the date and time this article should be published.';
+    const when = new Date(scheduledLocal);
+    if (Number.isNaN(when.getTime())) return 'The scheduled time is not a valid date.';
+    // A clock change can skip a local time; Date silently moves it forward.
+    if (toLocalInput(when.toISOString()) !== scheduledLocal.slice(0, 16)) return 'This local time does not exist in your time zone. Choose another time.';
+    if (when.getTime() <= Date.now()) return 'The scheduled time must be in the future.';
+    if (when.getTime() > Date.now() + 2 * 366 * 86_400_000) return 'Schedule publication at most two years ahead.';
+    return null;
+  };
 
   const runSeoCheck = async () => {
     setCheckingSeo(true);
@@ -166,10 +212,28 @@ export const AdminArticles: React.FC = () => {
 
   /** Saves the form; returns the saved article id, or null on failure (the form keeps its content). */
   const saveArticle = async (statusOverride = status): Promise<string | null> => {
-    if (!title.trim() || !slug.trim()) return null;
+    if (saving) return null;
+    if (authorLocked) { setFormError('This article is read-only until an Admin/Editor returns it for changes.'); return null; }
+    setFormError(null);
+    if (!title.trim() || !slug.trim()) {
+      setFormError('Add a title and URL slug before saving.');
+      return null;
+    }
     const bodyCheck = validateRichDoc(bodyDoc);
     if (!bodyCheck.ok) {
-      setFeedback(`Body: ${(bodyCheck as { error: string }).error}`);
+      setFormError(`Body: ${(bodyCheck as { error: string }).error}`);
+      return null;
+    }
+    const scheduleError = scheduleProblem(statusOverride);
+    if (scheduleError) {
+      setFormError(scheduleError);
+      requestAnimationFrame(() => document.getElementById('article-scheduled-for')?.focus());
+      return null;
+    }
+    const refs = cleanReferences();
+    const badRef = refs.findIndex((r) => !r.title || !r.url || !(/^https?:\/\//i.test(r.url) || (r.url.startsWith('/') && !r.url.startsWith('//'))));
+    if (badRef !== -1) {
+      setFormError(`Reference ${badRef + 1} needs a title and a link starting with https:// (or a site path starting with /).`);
       return null;
     }
 
@@ -186,8 +250,11 @@ export const AdminArticles: React.FC = () => {
       featuredMediaId,
       // Legacy URL fallback only when no library image is chosen.
       ...(featuredMediaId ? {} : { featuredImage: featuredImage || 'https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?auto=format&fit=crop&w=1200&q=80' }),
-      authorId,
+      authorId: isAuthor ? ownByline?.id : authorId,
       status: statusOverride,
+      // PHASE H: an unambiguous UTC instant; any other status clears the schedule on the server.
+      scheduledFor: statusOverride === 'scheduled' ? new Date(scheduledLocal).toISOString() : null,
+      references: refs,
       seo: {
         ...otherSeo,
         metaTitle: metaTitle || title,
@@ -201,10 +268,13 @@ export const AdminArticles: React.FC = () => {
     setSaving(true);
     try {
       if (editingId) {
-        return (await updateArticle(editingId, articlePayload as never)) ? editingId : null;
+        const updated = await updateArticle(editingId, articlePayload as never);
+        if (!updated) setFormError('The article was not saved. Check the server message and try again; your changes are still in the editor.');
+        return updated ? editingId : null;
       }
       const created = await addArticle(articlePayload as never);
       if (created) setEditingId(created.id); // further saves/previews update the same article
+      else setFormError('The article was not saved. Check the server message and try again; your changes are still in the editor.');
       return created?.id ?? null;
     } finally {
       setSaving(false);
@@ -215,15 +285,19 @@ export const AdminArticles: React.FC = () => {
     e.preventDefault();
     const id = await saveArticle();
     if (!id) return; // errors are shown; nothing is lost
-    setFeedback(`Article "${title}" saved (${status}).`);
+    setFeedback(status === 'scheduled' ? `Article "${title}" scheduled for ${formatWhen(new Date(scheduledLocal))}.` : `Article "${title}" saved (${status}).`);
     resetForm();
     setTimeout(() => setFeedback(null), 5000);
   };
 
   const saveAs = async (nextStatus: typeof status) => {
-    setStatus(nextStatus);
+    const wasScheduled = editingArticle?.status === 'scheduled';
     const id = await saveArticle(nextStatus);
-    if (id) setFeedback(`Article “${title}” saved as ${nextStatus}.`);
+    if (!id) return;
+    setStatus(nextStatus);
+    if (nextStatus === 'scheduled') setFeedback(`Article “${title}” scheduled for ${formatWhen(new Date(scheduledLocal))}. It stays unpublished until then.`);
+    else setFeedback(`Article “${title}” saved as ${nextStatus}.${wasScheduled && nextStatus !== 'published' ? ' The scheduled publication was cancelled.' : ''}`);
+    if (nextStatus !== 'scheduled') setScheduledLocal('');
   };
 
   /**
@@ -233,6 +307,7 @@ export const AdminArticles: React.FC = () => {
    */
   const willBeLive = status === 'published';
   const handlePreview = async () => {
+    if (authorLocked && editingId) { window.open(`/admin/preview/${editingId}/`, '_blank', 'noopener,noreferrer'); return; }
     const tab = window.open('', '_blank');
     const id = willBeLive ? editingId : await saveArticle();
     if (!id) {
@@ -255,6 +330,7 @@ export const AdminArticles: React.FC = () => {
   const focusField = (id: string) => document.getElementById(id)?.focus();
 
   const startEdit = (art: Article) => {
+    setFirstParagraphFocusRequest(0);
     setEditingId(art.id);
     setIsCreating(true);
     setSportSlug(art.sportSlug);
@@ -279,6 +355,9 @@ export const AdminArticles: React.FC = () => {
     setOgImage(savedOgImage || '');
     setOtherSeo(rest);
     setStatus(art.status);
+    setScheduledLocal(art.status === 'scheduled' ? toLocalInput(art.scheduledFor) : '');
+    setReferences(art.references ?? []);
+    setFormError(null);
   };
 
   return (
@@ -320,9 +399,12 @@ export const AdminArticles: React.FC = () => {
               &larr; Back to articles
             </button>
           </div>
+          {formError && (
+            <p role="alert" className="mx-3 mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200 sm:mx-4">{formError}</p>
+          )}
 
           <div className="cms-article-grid grid min-w-0 grid-cols-1 gap-5 p-3 sm:p-4">
-          <div className="cms-editor-column min-w-0 space-y-5">
+          <fieldset disabled={authorLocked} className="cms-editor-column min-w-0 space-y-5">
           <section className="cms-title-hierarchy space-y-2 rounded-xl border border-amber-300 bg-white px-4 py-3 shadow-sm dark:border-amber-800 dark:bg-stone-950" aria-labelledby="title-hierarchy-heading">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h4 id="title-hierarchy-heading" className="text-[11px] font-bold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-400">Title &amp; hierarchy</h4>
@@ -460,10 +542,12 @@ export const AdminArticles: React.FC = () => {
               </label>
               <select
                 value={authorId}
+                aria-label="Byline Author"
+                disabled={isAuthor}
                 onChange={(e) => setAuthorId(e.target.value)}
                 className="w-full text-xs p-2 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"
               >
-                {authors.map((a) => (
+                {(isAuthor ? authors.filter(a => a.userId === currentUser.id) : authors).map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name} ({a.roleTitle})
                   </option>
@@ -525,7 +609,7 @@ export const AdminArticles: React.FC = () => {
             <div>
               <span className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">Article body *</span>
               <p className="mb-2 text-[11px] text-stone-500 dark:text-stone-400">Select text, then choose Text size or Text color in the toolbar. First-letter and featured-image controls are below.</p>
-              <RichTextEditor key={editorKey} initialDoc={bodyDoc} onChange={doc => setBodyDoc(previous => ({ ...doc, ...(previous.attrs ? { attrs: previous.attrs } : {}) }))} />
+              <RichTextEditor key={editorKey} initialDoc={bodyDoc} editable={!authorLocked} firstParagraphFocusRequest={firstParagraphFocusRequest} onChange={doc => setBodyDoc(previous => ({ ...doc, ...(previous.attrs ? { attrs: previous.attrs } : {}) }))} />
             </div>
 
             <div>
@@ -556,11 +640,44 @@ export const AdminArticles: React.FC = () => {
                 />
               )}
             </div>
-            <ArticleAppearanceEditor value={bodyDoc.attrs || {}} caption={featuredMedia?.caption} credit={featuredMedia?.credit} onChange={attrs => setBodyDoc(previous => ({ ...previous, attrs }))}/>
+            <ArticleAppearanceEditor value={bodyDoc.attrs || {}} caption={featuredMedia?.caption} credit={featuredMedia?.credit} firstParagraph={bodyDoc.content.find(node => node.type === 'paragraph')} onEditFirstParagraph={() => setFirstParagraphFocusRequest(request => request + 1)} onChange={attrs => setBodyDoc(previous => ({ ...previous, attrs }))}/>
           </section>
-          </div>
+
+          {/* PHASE H: sources / references shown under the article (Spec §7.5, §13). */}
+          <section className="space-y-3 rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-950" aria-labelledby="references-heading">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <h4 id="references-heading" className="text-xs font-bold uppercase tracking-[0.16em] text-stone-700 dark:text-stone-200">Sources &amp; references</h4>
+                <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400">Official and primary sources for readers. Shown at the end of the article; leave empty when not needed.</p>
+              </div>
+              <Button type="button" size="sm" variant="outline" disabled={references.length >= 30} onClick={() => setReferences((r) => [...r, { title: '', url: '' }])}>+ Add reference</Button>
+            </div>
+            {references.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-stone-300 p-3 text-center text-[11px] text-stone-500 dark:border-stone-700 dark:text-stone-400">No references yet.</p>
+            ) : (
+              <ol className="space-y-2">
+                {references.map((ref, i) => (
+                  <li key={i} className="grid min-w-0 grid-cols-1 gap-2 rounded-lg border border-stone-200 p-2 dark:border-stone-800 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                    <label className="min-w-0 text-[11px] font-semibold text-stone-600 dark:text-stone-300">Title {i + 1}
+                      <input type="text" maxLength={200} value={ref.title} onChange={(e) => setReferences((r) => r.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))} placeholder="e.g. Roland-Garros official schedule" className="mt-1 w-full rounded border border-stone-300 bg-white p-2 text-xs font-normal dark:border-stone-700 dark:bg-stone-900" />
+                    </label>
+                    <label className="min-w-0 text-[11px] font-semibold text-stone-600 dark:text-stone-300">Link {i + 1}
+                      <input type="url" maxLength={2048} value={ref.url} onChange={(e) => setReferences((r) => r.map((x, j) => (j === i ? { ...x, url: e.target.value } : x)))} placeholder="https://" className="mt-1 w-full rounded border border-stone-300 bg-white p-2 font-mono text-xs font-normal dark:border-stone-700 dark:bg-stone-900" />
+                    </label>
+                    <div className="flex items-end gap-1">
+                      <button type="button" aria-label={`Move reference ${i + 1} up`} disabled={i === 0} onClick={() => setReferences((r) => { const n = [...r]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; return n; })} className="h-9 w-9 rounded border border-stone-300 text-xs disabled:opacity-40 dark:border-stone-700">↑</button>
+                      <button type="button" aria-label={`Move reference ${i + 1} down`} disabled={i === references.length - 1} onClick={() => setReferences((r) => { const n = [...r]; [n[i + 1], n[i]] = [n[i], n[i + 1]]; return n; })} className="h-9 w-9 rounded border border-stone-300 text-xs disabled:opacity-40 dark:border-stone-700">↓</button>
+                      <button type="button" aria-label={`Remove reference ${i + 1}`} onClick={() => setReferences((r) => r.filter((_, j) => j !== i))} className="h-9 rounded border border-rose-300 px-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 dark:border-rose-900 dark:text-rose-300 dark:hover:bg-rose-950/40">Remove</button>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+          </fieldset>
 
           <aside className="cms-seo-sidebar min-w-0 space-y-4 break-words" aria-label="Publishing and SEO sidebar">
+          <ArticleReviewPanel article={editingArticle} saveDraft={() => saveArticle('draft')} />
 
           {/* WORKFLOW STEP 7: SEO CHECK */}
           <section className="space-y-4 rounded-xl border border-amber-300 bg-white p-4 shadow-sm dark:border-amber-800 dark:bg-stone-950" aria-labelledby="seo-intelligence-heading">
@@ -711,16 +828,49 @@ export const AdminArticles: React.FC = () => {
             <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-300">Publishing state
               <select
                 value={status}
+                disabled={isAuthor}
                 onChange={(e) => setStatus(e.target.value as any)}
                 className="mt-1 w-full text-xs p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 font-semibold"
               >
-                <option value="published">Published (Live)</option>
+                {!isAuthor && <option value="published">Published (Live)</option>}
                 <option value="draft">Draft (Private)</option>
                 <option value="preview">Preview Only</option>
-                <option value="scheduled">Scheduled</option>
-                <option value="archived">Archived</option>
+                {!isAuthor && <option value="scheduled">Scheduled</option>}
+                {!isAuthor && <option value="archived">Archived</option>}
               </select>
             </label>
+
+            {/* PHASE H: scheduled publication (entered in the editor's time zone, stored as UTC). */}
+            {!isAuthor && status === 'scheduled' && (
+              <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50/70 p-3 dark:border-amber-800 dark:bg-amber-950/30">
+                <label htmlFor="article-scheduled-for" className="block text-[11px] font-semibold text-stone-700 dark:text-stone-200">Publish on *</label>
+                <input
+                  id="article-scheduled-for"
+                  type="datetime-local"
+                  required
+                  value={scheduledLocal}
+                  min={toLocalInput(new Date(Date.now() + 60_000).toISOString())}
+                  onChange={(e) => setScheduledLocal(e.target.value)}
+                  aria-describedby="article-scheduled-help"
+                  className="w-full rounded border border-stone-300 bg-white p-2 text-xs dark:border-stone-700 dark:bg-stone-900"
+                />
+                <p id="article-scheduled-help" className="text-[11px] text-stone-600 dark:text-stone-300">
+                  Time zone: <strong>{editorTimeZone()}</strong>.{' '}
+                  {scheduledLocal && !Number.isNaN(new Date(scheduledLocal).getTime())
+                    ? <>Goes live {formatWhen(new Date(scheduledLocal))} ({new Date(scheduledLocal).toISOString().replace('T', ' ').slice(0, 16)} UTC). It stays private until then.</>
+                    : 'Choose when the article goes live. It stays private until then.'}
+                </p>
+                <Button type="button" size="sm" className="w-full" onClick={() => saveAs('scheduled')} isLoading={saving}>
+                  {editingArticle?.status === 'scheduled' ? 'Save new schedule' : 'Schedule publication'}
+                </Button>
+              </div>
+            )}
+            {!isAuthor && editingArticle?.status === 'scheduled' && editingArticle.scheduledFor && (
+              <div className="rounded-lg border border-stone-200 p-3 text-[11px] text-stone-600 dark:border-stone-800 dark:text-stone-300">
+                <p>Currently scheduled for <strong>{formatWhen(new Date(editingArticle.scheduledFor))}</strong>.</p>
+                <Button type="button" size="sm" variant="outline" className="mt-2 w-full" disabled={saving} onClick={() => saveAs('draft')}>Cancel schedule (keep as draft)</Button>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-2">
               <Button type="button" variant="ghost" size="sm" onClick={resetForm}>
@@ -729,14 +879,14 @@ export const AdminArticles: React.FC = () => {
               <Button type="button" variant="outline" size="sm" onClick={handlePreview} disabled={saving || (willBeLive && !editingId)} title={willBeLive ? 'Shows the last saved version; does not save or publish.' : 'Saves as ' + status + ' and opens the preview.'}>
                 Preview
               </Button>
-              <Button type="button" variant="outline" size="sm" onClick={() => saveAs('draft')} disabled={saving}>
+              <Button type="button" variant="outline" size="sm" onClick={() => saveAs('draft')} disabled={saving || authorLocked}>
                 Save draft
               </Button>
-              <Button type="button" size="sm" onClick={() => saveAs('published')} isLoading={saving}>
+              {!isAuthor && <Button type="button" size="sm" onClick={() => saveAs('published')} isLoading={saving}>
                 Publish
-              </Button>
+              </Button>}
             </div>
-            <button type="submit" className="w-full text-center text-[11px] font-semibold text-stone-500 hover:text-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:text-stone-400">Save using selected state ({status})</button>
+            <button type="submit" disabled={authorLocked} className="w-full text-center text-[11px] font-semibold text-stone-500 hover:text-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:text-stone-400">Save using selected state ({status})</button>
           </section>
           </aside>
           </div>
@@ -779,6 +929,8 @@ function ArticleRepository({ reloadKey, sports, authors, onView, onEdit, onRevie
   onDelete: (id: string, title: string) => void;
 }) {
   const [q, setQ] = useState('');
+  const { currentUser } = useApp();
+  const [queue, setQueue] = useState('');
   const [status, setStatus] = useState('');
   const [sport, setSport] = useState('');
   const [type, setType] = useState('');
@@ -786,12 +938,15 @@ function ArticleRepository({ reloadKey, sports, authors, onView, onEdit, onRevie
   const [date, setDate] = useState('');
   const [sort, setSort] = useState('relevance');
   const [page, setPage] = useState(1);
-  const { data, loading, error } = useArticleSearch({ q, status, sport, type, author, date, sort, page, limit: 25 }, { reloadKey });
+  const { data, loading, error } = useArticleSearch({ q, status, sport, type, author, date, sort, page, limit: 25, reviewStatus: ['in_review','changes_requested','approved'].includes(queue) ? queue : undefined, myDrafts: queue === 'my_drafts' ? true : undefined }, { reloadKey });
   const set = (setter: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => { setter(e.target.value); setPage(1); };
   const filtered = !!(q || status || sport || type || author || date);
 
   return (
     <div className="space-y-3">
+      <nav aria-label="Article review queues" className="flex flex-wrap gap-2">
+        {([['','All articles'],['my_drafts',currentUser.role === 'Author' ? 'My Drafts' : 'Drafts'],['in_review','Needs Review'],['changes_requested','Changes Requested'],['approved','Approved']] as const).map(([value,label]) => <button key={value} type="button" aria-pressed={queue===value} onClick={()=>{setQueue(value);setStatus('');setPage(1);}} className={`min-h-9 rounded border px-3 py-1 text-xs font-semibold focus-visible:ring-2 focus-visible:ring-amber-500 ${queue===value?'border-amber-700 bg-amber-700 text-white':'border-stone-300 dark:border-stone-700'}`}>{label}</button>)}
+      </nav>
       <div className="flex flex-wrap items-end gap-2" role="search" aria-label="Search articles">
         <label className="min-w-[14rem] flex-1 text-[11px] font-semibold text-stone-500 dark:text-stone-400">Search
           <input type="search" value={q} onChange={set(setQ)} placeholder="Title, text, slug or article ID…" className={`mt-1 block w-full ${filterClass}`} />
@@ -854,7 +1009,7 @@ function ArticleRepository({ reloadKey, sports, authors, onView, onEdit, onRevie
           </thead>
           <tbody className="divide-y divide-stone-100 dark:divide-stone-800/80">
             {data && data.items.length === 0 && (
-              <tr><td colSpan={6} className="p-6 text-center text-stone-500 dark:text-stone-400">{filtered ? 'No articles match this search.' : 'No articles yet.'}</td></tr>
+              <tr><td colSpan={6} className="p-6 text-center text-stone-500 dark:text-stone-400">{filtered ? 'No articles match this search.' : queue ? 'No articles in this queue.' : 'No articles yet.'}</td></tr>
             )}
             {data?.items.map((art) => (
               <tr key={art.id} className="hover:bg-stone-50 dark:hover:bg-stone-900/40">
@@ -866,16 +1021,18 @@ function ArticleRepository({ reloadKey, sports, authors, onView, onEdit, onRevie
                 </td>
                 <td className="p-3 font-medium text-stone-800 dark:text-stone-200">{art.sportName}</td>
                 <td className="p-3 text-stone-500 dark:text-stone-400">{art.articleType}</td>
-                <td className="p-3"><span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${STATUS_BADGE[art.status]}`}>{art.status}</span></td>
+                <td className="p-3"><span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${STATUS_BADGE[art.status]}`}>{art.status}</span>{art.reviewStatus && art.reviewStatus!=='not_required' && <span className="mt-1 block text-[10px] font-semibold">{REVIEW_LABELS[art.reviewStatus]}</span>}</td>
                 <td className="p-3 text-stone-500 tabular-nums dark:text-stone-400">
-                  <span className="block">Published {new Date(art.publishedAt).toLocaleDateString()}</span>
+                  {art.status === 'scheduled' && art.scheduledFor
+                    ? <span className="block font-semibold text-amber-800 dark:text-amber-300" title={new Date(art.scheduledFor).toISOString()}>Publishes {new Date(art.scheduledFor).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                    : <span className="block">Published {new Date(art.publishedAt).toLocaleDateString()}</span>}
                   <span className="block text-[10px]">Reviewed {art.reviewedAt ? new Date(art.reviewedAt).toLocaleDateString() : 'never'}</span>
                 </td>
                 <td className="p-3 text-right space-x-2 whitespace-nowrap">
                   <button onClick={() => onView(art.url)} className="text-stone-600 hover:text-amber-600 dark:text-stone-400 font-semibold">View</button>
                   <button onClick={() => onEdit(art.id)} className="text-amber-700 dark:text-amber-400 font-semibold hover:underline">Edit</button>
                   <button type="button" onClick={() => onReview(art.id)} className="text-sky-700 dark:text-sky-400 font-semibold hover:underline" title="Confirm that time-sensitive facts were checked; does not change updatedAt">Mark reviewed</button>
-                  <button onClick={() => onDelete(art.id, art.title)} className="text-rose-600 dark:text-rose-400 hover:underline">Delete</button>
+                  {currentUser.role!=='Author' && <button onClick={() => onDelete(art.id, art.title)} className="text-rose-600 dark:text-rose-400 hover:underline">Delete</button>}
                 </td>
               </tr>
             ))}

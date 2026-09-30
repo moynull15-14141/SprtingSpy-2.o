@@ -11,6 +11,7 @@ import { canonicalPagePath, stripTrailingSlash } from '../../src/config/urls';
 import {
   STATIC_INDEXABLE_PATHS,
   STATIC_NON_INDEXABLE_PATHS,
+  FAQ_PATH,
   articleIndexability,
   authorIndexability,
   editionIndexability,
@@ -33,13 +34,14 @@ export interface IndexedPage {
 }
 
 export async function loadSiteIndex(origin: string) {
-  const [sports, events, editions, articles, authors, redirects] = await Promise.all([
+  const [sports, events, editions, articles, authors, redirects, publishedFaqs] = await Promise.all([
     prisma.sport.findMany(),
     prisma.sportEvent.findMany(),
     prisma.eventEdition.findMany(),
     prisma.article.findMany({ where: { status: 'published' }, select: { id: true, slug: true, title: true, sportSlug: true, eventSlug: true, editionYear: true, status: true, seo: true, authorId: true, publishedAt: true, updatedAt: true } }),
     prisma.author.findMany({ select: { id: true, slug: true, name: true } }),
     prisma.redirectRule.findMany({ where: { isActive: true } }),
+    prisma.faqEntry.count({ where: { status: 'published' } }),
   ]);
 
   const sportBySlug = new Map(sports.map((s) => [s.slug, s]));
@@ -54,6 +56,8 @@ export async function loadSiteIndex(origin: string) {
   const pages: IndexedPage[] = [];
   for (const path of STATIC_INDEXABLE_PATHS) pages.push({ path, kind: 'static', id: path, title: path, status: { indexable: true } });
   for (const [path, reason] of Object.entries(STATIC_NON_INDEXABLE_PATHS)) pages.push({ path, kind: 'static', id: path, title: path, status: { indexable: false, reason } });
+  // PHASE H: the FAQ is indexable once it has published questions (an empty page is thin).
+  pages.push({ path: FAQ_PATH, kind: 'static', id: FAQ_PATH, title: 'FAQ', status: publishedFaqs > 0 ? { indexable: true } : { indexable: false, reason: 'no published questions yet' } });
 
   const visibleArticles = articles.filter(articleVisible);
   for (const s of sports) {

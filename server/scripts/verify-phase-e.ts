@@ -48,7 +48,7 @@ const port = (probe.address() as { port: number }).port; await new Promise<void>
 const base = `http://127.0.0.1:${port}`;
 const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
   cwd: process.cwd(), windowsHide: true,
-  env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', NODE_ENV: 'production', AUTH_MODE: 'production', DEV_LOGIN_BYPASS: 'false', TRUST_PROXY: 'false', ALLOWED_ORIGIN: base, GEMINI_API_KEY: '' },
+  env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', NODE_ENV: 'production', APP_ENV: 'production', AUTH_MODE: 'production', DEV_LOGIN_BYPASS: 'false', TRUST_PROXY: 'false', ALLOWED_ORIGIN: base, GEMINI_API_KEY: '' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let output = ''; child.stdout.on('data', (c) => { output += c; }); child.stderr.on('data', (c) => { output += c; });
@@ -99,7 +99,7 @@ try {
 
   for (const [role, id] of Object.entries(userIds)) await prisma.user.create({ data: { id, name: `Phase E ${role}`, email: `${fixture}-${role}@example.test`, role: role === 'admin' ? 'Admin' : 'Author', avatar: '', joinedAt: new Date(), passwordHash: hashPassword(password) } });
   await prisma.sport.create({ data: { id: hiddenSport, slug: hiddenSport, name: 'Hidden fixture sport', tagline: '', description: '', order: 9999, isVisible: false, seo: {} } });
-  await prisma.author.create({ data: { id: A('writer'), slug: authorSlug, name: 'Phase E Writer', roleTitle: 'Tester', bio: '', avatar: '' } });
+  await prisma.author.create({ data: { id: A('writer'), slug: authorSlug, name: 'Phase E Writer', roleTitle: 'Tester', bio: '', avatar: '', userId: userIds.author } });
   await prisma.article.createMany({
     data: [
       article('title', { title: `${KW} final preview`, articleType: 'Analysis', authorId: A('writer'), publishedAt: new Date('2026-01-01T00:00:00Z') }),

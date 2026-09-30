@@ -17,6 +17,8 @@ import type { FooterConfig, SocialPlatform } from '../../lib/siteExperience/type
 interface FooterProps {
   sports: { id: string; slug: string; name: string }[];
   config: FooterConfig;
+  /** PHASE H: site name from Admin → Settings. */
+  siteName?: string;
 }
 
 const SOCIAL: Record<SocialPlatform, { label: string; icon: LucideIcon }> = {
@@ -26,7 +28,7 @@ const SOCIAL: Record<SocialPlatform, { label: string; icon: LucideIcon }> = {
 
 const linkClass = 'hover:text-amber-600 dark:hover:text-amber-400 transition-colors';
 
-export const Footer: React.FC<FooterProps> = ({ sports, config }) => {
+export const Footer: React.FC<FooterProps> = ({ sports, config, siteName = BRANDING.name }) => {
   const columns = config.columns.filter((c) => c.enabled);
   const social = config.social.filter((s) => s.enabled);
 
@@ -38,7 +40,7 @@ export const Footer: React.FC<FooterProps> = ({ sports, config }) => {
           <div className="md:col-span-2 space-y-4">
             <div className="flex items-center gap-2">
               <span className="font-display text-2xl font-bold tracking-tight text-stone-900 dark:text-stone-100">
-                {BRANDING.name}
+                {siteName}
               </span>
               <span className="h-1.5 w-1.5 rounded-full bg-amber-700 dark:bg-amber-500 inline-block self-center mb-0.5"></span>
             </div>
@@ -56,7 +58,7 @@ export const Footer: React.FC<FooterProps> = ({ sports, config }) => {
                   const { label, icon: Icon } = SOCIAL[s.platform];
                   return (
                     <li key={s.platform}>
-                      <a href={s.url} target="_blank" rel="noopener noreferrer me" aria-label={`${BRANDING.name} on ${label}`} title={label} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-stone-300 text-stone-600 hover:border-amber-500 hover:text-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:border-stone-700 dark:text-stone-300 dark:hover:text-amber-400">
+                      <a href={s.url} target="_blank" rel="noopener noreferrer me" aria-label={`${siteName} on ${label}`} title={label} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-stone-300 text-stone-600 hover:border-amber-500 hover:text-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:border-stone-700 dark:text-stone-300 dark:hover:text-amber-400">
                         <Icon size={16} aria-hidden="true" />
                       </a>
                     </li>

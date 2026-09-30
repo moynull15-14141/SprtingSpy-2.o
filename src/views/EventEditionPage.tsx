@@ -19,26 +19,26 @@ type EditionPageData = NonNullable<Awaited<ReturnType<typeof getEditionPage>>>;
 export const EventEditionPage: React.FC<{ data: EditionPageData }> = ({ data }) => {
   const { sport, event, edition, articles: editionArticles, otherEditions } = data;
 
-  const structuredData = {
+  const structuredData = edition.startDate ? {
     '@context': 'https://schema.org',
     '@type': 'SportsEvent',
     name: edition.title,
     startDate: edition.startDate,
-    endDate: edition.endDate,
-    location: {
+    ...(edition.endDate ? { endDate: edition.endDate } : {}),
+    ...((edition.venue || edition.location) ? { location: {
       '@type': 'Place',
-      name: edition.venue,
-      address: edition.location,
-    },
+      ...(edition.venue ? { name: edition.venue } : {}),
+      ...(edition.location ? { address: edition.location } : {}),
+    } } : {}),
     sport: sport.name,
-    description: edition.description,
+    ...(edition.description ? { description: edition.description } : {}),
     url: absoluteUrl(editionPath(sport.slug, event.slug, edition.year)),
     ...(edition.officialSourceUrl ? { sameAs: edition.officialSourceUrl } : {}),
-  };
+  } : null;
 
   return (
     <div className="space-y-10">
-      <JsonLd data={structuredData} />
+      {structuredData && <JsonLd data={structuredData} />}
 
       <Breadcrumbs
         items={[
@@ -63,20 +63,17 @@ export const EventEditionPage: React.FC<{ data: EditionPageData }> = ({ data }) 
             {edition.title}
           </h1>
 
-          <p className="mt-4 text-base sm:text-lg text-stone-700 dark:text-stone-300 leading-relaxed font-sans">
-            {edition.description}
-          </p>
+          {edition.description && <p className="mt-4 text-base sm:text-lg text-stone-700 dark:text-stone-300 leading-relaxed font-sans">{edition.description}</p>}
 
           <div className="mt-6 flex flex-wrap items-center gap-4 text-xs sm:text-sm text-stone-600 dark:text-stone-400">
-            <span className="inline-flex items-center gap-1.5 font-medium text-stone-900 dark:text-stone-100">
+            {(edition.startDate || edition.endDate) && <span className="inline-flex items-center gap-1.5 font-medium text-stone-900 dark:text-stone-100">
               <span className="text-amber-700 dark:text-amber-500">📅</span>
-              <span className="tabular-nums">{edition.startDate} to {edition.endDate}</span>
-            </span>
-            <span aria-hidden="true" className="text-stone-300 dark:text-stone-700">·</span>
-            <span className="inline-flex items-center gap-1.5 font-medium text-stone-900 dark:text-stone-100">
+              <span className="tabular-nums">{edition.startDate && edition.endDate ? `${edition.startDate} to ${edition.endDate}` : edition.startDate || edition.endDate}</span>
+            </span>}
+            {(edition.venue || edition.location) && <span className="inline-flex items-center gap-1.5 font-medium text-stone-900 dark:text-stone-100">
               <span className="text-amber-700 dark:text-amber-500">📍</span>
-              <span>{edition.venue}, {edition.location}</span>
-            </span>
+              <span>{[edition.venue, edition.location].filter(Boolean).join(', ')}</span>
+            </span>}
             {edition.prizeMoneyTotal && (
               <>
                 <span aria-hidden="true" className="text-stone-300 dark:text-stone-700">·</span>
@@ -131,7 +128,7 @@ export const EventEditionPage: React.FC<{ data: EditionPageData }> = ({ data }) 
       <AdSlot id="EVENT_TOP" />
 
       {/* QUICK FACTS GRID (SPORT-SPECIFIC) */}
-      <section aria-labelledby="quick-facts-heading">
+      <section aria-labelledby="quick-facts-heading" className="min-w-0 break-words">
         <div className="mb-4">
           <span className="text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-500">
             Dossier Specifications
@@ -157,12 +154,19 @@ export const EventEditionPage: React.FC<{ data: EditionPageData }> = ({ data }) 
             </div>
           ))}
 
+          {edition.participantsCount != null && (
+            <div className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-[#121417] shadow-sm">
+              <div className="text-xs text-stone-500 font-medium mb-1 dark:text-stone-400">Participants</div>
+              <div className="text-sm font-semibold text-stone-900 dark:text-stone-100 tabular-nums">{edition.participantsCount}</div>
+            </div>
+          )}
+
           {edition.defendingChampions && edition.defendingChampions.length > 0 && (
             <div className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-[#121417] shadow-sm sm:col-span-2 lg:col-span-1">
               <div className="text-xs text-stone-500 font-medium mb-1 dark:text-stone-400">Defending Champion(s)</div>
               <div className="text-sm font-semibold text-stone-900 dark:text-stone-100 space-y-0.5">
                 {edition.defendingChampions.map((c, i) => (
-                  <div key={i} className="flex justify-between">
+                  <div key={i} className="flex min-w-0 flex-wrap justify-between gap-2 break-words">
                     <span className="text-stone-500 text-xs dark:text-stone-400">{c.category}:</span>
                     <span className="text-amber-700 dark:text-amber-400 font-medium">{c.name}</span>
                   </div>

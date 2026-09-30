@@ -8,7 +8,7 @@ import type { SearchParams } from '../../lib/params';
 import { parseSearchQuery } from '../../../server/services/search/params';
 import { SEARCH_PAGE_SIZE, type PublicSearchInput } from '../../../server/services/public/search';
 
-export function generateMetadata(): Metadata {
+export function generateMetadata(): Promise<Metadata> {
   return pageMetadata({
     title: 'Search Sports Intelligence, Events & Schedules | SportingSpy',
     description:

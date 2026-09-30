@@ -11,7 +11,7 @@ import { Header } from '../components/layout/Header';
 import { Footer } from '../components/layout/Footer';
 import { SiteProvider } from '../context/SiteContext';
 import { BRANDING } from '../config/branding';
-import { getFeatures, getNavSports, getSiteLayoutForRequest } from '../lib/data';
+import { getFeatures, getNavSports, getSiteIdentity, getSiteLayoutForRequest } from '../lib/data';
 import { AnnouncementBar } from '../components/site/AnnouncementBar';
 import { GlobalBlocks } from '../components/site/GlobalBlocks';
 import { PreviewBanner } from '../components/site/PreviewBanner';
@@ -28,18 +28,20 @@ export const dynamic = 'force-dynamic';
 export async function generateMetadata(): Promise<Metadata> {
   // PHASE C: CMS settings that are public by design (verification tokens).
   const { publicSettings } = await import('../../server/settingsRegistry');
-  const settings = await publicSettings();
+  const [settings, identity] = await Promise.all([publicSettings().catch(() => ({} as Awaited<ReturnType<typeof publicSettings>>)), getSiteIdentity()]);
   const verification: Metadata['verification'] = {
     ...(settings.googleSiteVerification ? { google: settings.googleSiteVerification } : {}),
     ...(settings.bingSiteVerification ? { other: { 'msvalidate.01': settings.bingSiteVerification } } : {}),
   };
+  // PHASE H: site name, description, default social image and X handle from Admin → Settings.
+  const images = identity.defaultOgImage ? [new URL(identity.defaultOgImage, siteOrigin()).toString()] : undefined;
   return {
     metadataBase: new URL(siteOrigin()),
     ...(Object.keys(verification).length ? { verification } : {}),
-    title: { default: `${BRANDING.name} – Multi-Sport Editorial & Event Guides`, template: '%s' },
-    description: BRANDING.description,
-    openGraph: { siteName: BRANDING.name, type: 'website' },
-    twitter: { card: 'summary_large_image' },
+    title: { default: `${identity.name} – Multi-Sport Editorial & Event Guides`, template: '%s' },
+    description: identity.description,
+    openGraph: { siteName: identity.name, type: 'website', ...(images ? { images } : {}) },
+    twitter: { card: 'summary_large_image', ...(identity.twitterHandle ? { site: identity.twitterHandle } : {}), ...(images ? { images } : {}) },
   };
 }
 
@@ -48,7 +50,7 @@ export const viewport: Viewport = { width: 'device-width', initialScale: 1 };
 const THEME_SCRIPT = `try{var t=localStorage.getItem('sportingspy_theme');if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.classList.toggle('dark',t==='dark')}catch(e){}`;
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const [sports, privacyConfig, cookieStore, requestHeaders, site] = await Promise.all([getNavSports(), trackingConfig(), cookies(), headers(), getSiteLayoutForRequest()]);
+  const [sports, privacyConfig, cookieStore, requestHeaders, site, identity] = await Promise.all([getNavSports(), trackingConfig(), cookies(), headers(), getSiteLayoutForRequest(), getSiteIdentity()]);
   // The production CSP allows inline scripts only with this request's nonce.
   const nonce = requestHeaders.get('content-security-policy')?.match(/'nonce-([^']+)'/)?.[1];
   // PHASE F: the visitor's privacy choice is known on the server, so the
@@ -72,11 +74,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <PrivacyProvider config={privacyConfig} initialConsent={initialConsent}>
           <div className="site-shell min-h-screen flex flex-col bg-stone-50 dark:bg-[#0c0d0e] text-stone-900 dark:text-stone-100 font-sans selection:bg-amber-500 selection:text-white transition-colors relative">
             {site.preview && <PreviewBanner />}
-            <Header sports={sports} navigation={site.docs.navigation.items} />
+            <Header sports={sports} navigation={site.docs.navigation.items} siteName={identity.name} />
             <AnnouncementBar items={site.announcements} />
             <main className="site-main flex-1 max-w-[98rem] w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">{children}</main>
             <GlobalBlocks blocks={blocksFor(site, 'footer_top')} className="site-footer-blocks mx-auto w-full max-w-[98rem] px-4 sm:px-6 lg:px-8" />
-            <Footer sports={sports} config={site.docs.footer} />
+            <Footer sports={sports} config={site.docs.footer} siteName={identity.name} />
           </div>
           </PrivacyProvider>
         </SiteProvider>

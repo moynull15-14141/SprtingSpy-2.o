@@ -49,7 +49,7 @@ export async function aiSuggestions(s: ArticleSubject, ctx: SeoContext): Promise
     `Article type: ${s.articleType}`,
     `Sport: ${ctx.sports.get(s.sportSlug)?.name || s.sportSlug}`,
     event ? `Event: ${event.name}` : '',
-    edition ? `Edition: ${edition.title} (${edition.startDate} – ${edition.endDate}, ${edition.venue}, ${edition.location})` : '',
+    edition ? `Edition: ${edition.title}; dates: ${[edition.startDate, edition.endDate].filter(Boolean).join(' – ') || 'not provided'}; venue: ${edition.venue || 'not provided'}; location: ${edition.location || 'not provided'}` : '',
     `Title: ${s.title}`,
     `Excerpt: ${s.excerpt}`,
     `Body:\n${s.a.text.slice(0, 12000)}`,

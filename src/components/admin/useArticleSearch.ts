@@ -15,6 +15,8 @@ export interface CmsArticleHit {
   title: string;
   slug: string;
   status: 'draft' | 'preview' | 'scheduled' | 'published' | 'archived';
+  reviewStatus?: import('../../lib/editorialWorkflow').ReviewStatus;
+  reviewerId?: string | null;
   sportSlug: string;
   sportName: string;
   eventSlug: string | null;
@@ -23,6 +25,8 @@ export interface CmsArticleHit {
   excerpt: string;
   publishedAt: string;
   reviewedAt: string | null;
+  /** PHASE H: when a scheduled article goes live (null otherwise). */
+  scheduledFor?: string | null;
   authorId: string;
   authorName: string;
   featuredImage: string;
@@ -41,6 +45,8 @@ export interface CmsArticleSearchParams {
   limit?: number;
   exclude?: string;
   publicOnly?: boolean;
+  reviewStatus?: string;
+  myDrafts?: boolean;
 }
 
 interface Response { items: CmsArticleHit[]; total: number; page: number; pageSize: number; totalPages: number; mode: string }

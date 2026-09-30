@@ -6,7 +6,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   PanelLeftClose, PanelLeftOpen, LayoutDashboard, FileText, Trophy, CalendarDays, UserSquare2, ShieldCheck,
-  MessageSquare, Image, Megaphone, SearchCheck, ArrowLeftRight, ScrollText, Settings, PanelsTopLeft, type LucideIcon,
+  MessageSquare, Image, Megaphone, SearchCheck, ArrowLeftRight, ScrollText, Settings, PanelsTopLeft, HelpCircle, Inbox, type LucideIcon,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
@@ -24,6 +24,8 @@ export type AdminTab =
   | 'redirects'
   | 'audit'
   | 'site'
+  | 'faq'
+  | 'inbox'
   | 'settings';
 
 interface AdminLayoutProps {
@@ -51,6 +53,8 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'articles', label: 'Articles', icon: FileText },
     ...(['Admin', 'Editor'].includes(currentUser.role) ? [{ id: 'site' as AdminTab, label: 'Site Experience', icon: PanelsTopLeft }] : []),
+    // PHASE H: FAQ content and the contact-form inbox (APIs are Admin/Editor only).
+    ...(['Admin', 'Editor'].includes(currentUser.role) ? [{ id: 'faq' as AdminTab, label: 'FAQ', icon: HelpCircle }, { id: 'inbox' as AdminTab, label: 'Contact Inbox', icon: Inbox }] : []),
     { id: 'sports', label: 'Sports', icon: Trophy },
     { id: 'events', label: 'Events & Editions', icon: CalendarDays },
     { id: 'authors', label: 'Authors / Beats', icon: UserSquare2 },
@@ -83,8 +87,9 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
         </div>
 
         <div className="flex items-center gap-2">
-          <button onClick={() => navigate('/account')} className="px-3 py-1.5 rounded-lg border border-stone-300 dark:border-stone-700 text-xs font-medium text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors">My account</button>
+          <button data-cms-navigation onClick={() => navigate('/account')} className="px-3 py-1.5 rounded-lg border border-stone-300 dark:border-stone-700 text-xs font-medium text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors">My account</button>
           <button
+            data-cms-navigation
             onClick={() => navigate('/')}
             className="px-3 py-1.5 rounded-lg border border-stone-300 dark:border-stone-700 text-xs font-medium text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors"
           >
@@ -115,6 +120,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
           {NAV_ITEMS.map((item) => (
             <button
               key={item.id}
+              data-cms-navigation
               onClick={() => setActiveTab(item.id)}
               aria-current={activeTab === item.id ? 'page' : undefined}
               aria-label={navCollapsed ? item.label : undefined}

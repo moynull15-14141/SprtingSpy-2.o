@@ -4,8 +4,8 @@
  *   GET /api/search/suggestions     public autocomplete (titles + sports)     anyone, rate limited
  *   GET /api/cms/articles/search    CMS article search, every status          Admin, Editor, Author
  *
- * CMS visibility matches /api/cms/data: every staff role can read every
- * article. Query parameters are validated by services/search/params.ts;
+ * Authors only search their own CMS articles. Public-only editor link pickers
+ * use published projections. Query parameters are validated by services/search/params.ts;
  * unknown or malformed parameters are rejected with 400.
  */
 
@@ -72,9 +72,14 @@ export function searchRouter(getAuthLookup: () => AuthLookup) {
     if (!parsed.ok) return res.status(400).json({ error: (parsed as { error: string }).error });
     const p = parsed.value;
     const author = p.author ? await prisma.author.findUnique({ where: { slug: p.author }, select: { id: true } }) : null;
+    const ctx = req.authContext!;
     const found = await searchArticleIds({
       scope: p.publicOnly ? 'public' : 'staff', q: p.q, sport: p.sport || undefined, type: p.type || undefined, status: p.status || undefined,
       authorId: p.author ? author?.id ?? '__none__' : undefined, from: p.from, to: p.to, sort: p.sort,
+      ownerUserId: ctx.role === 'Author' && !p.publicOnly ? ctx.userId : undefined,
+      reviewStatus: p.publicOnly ? undefined : p.reviewStatus,
+      draftsOnly: p.myDrafts,
+      myDraftsUserId: p.myDrafts && ctx.role === 'Author' ? ctx.userId : undefined,
       page: p.page, limit: p.limit, excludeId: idParam(req.query.exclude),
     });
     const rows = found.ids.length
@@ -82,7 +87,8 @@ export function searchRouter(getAuthLookup: () => AuthLookup) {
           where: { id: { in: found.ids } },
           select: {
             id: true, title: true, slug: true, status: true, sportSlug: true, eventSlug: true, editionYear: true, articleType: true,
-            excerpt: true, publishedAt: true, reviewedAt: true, authorId: true, featuredImage: true,
+            excerpt: true, publishedAt: true, reviewedAt: true, scheduledFor: true, authorId: true, featuredImage: true,
+            ...(!p.publicOnly ? {reviewStatus:true,reviewerId:true} as const : {}),
             sport: { select: { name: true } }, author: { select: { name: true } },
           },
         })

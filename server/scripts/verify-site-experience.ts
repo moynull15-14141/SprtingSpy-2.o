@@ -14,7 +14,7 @@ import { prisma } from '../db';
 import { Prisma } from '../generated/prisma/client';
 import { checkDatabaseUrlIsLocalDev } from '../dbSafety';
 import { hashPassword } from '../password';
-import { DEFAULT_SITE_EXPERIENCE } from '../../src/lib/siteExperience/defaults';
+import { DEFAULT_SITE_EXPERIENCE, HOMEPAGE_H1, HOMEPAGE_INTRO, LEGACY_HOMEPAGE_INTRO } from '../../src/lib/siteExperience/defaults';
 import { SITE_AREAS, INTRO_STYLES, inWindow, type HomepageConfig, type SiteArea } from '../../src/lib/siteExperience/types';
 import { DEFAULT_INTRO_APPEARANCE, INTRO_PRESETS } from '../../src/lib/siteExperience/intro';
 import { deleteMedia, mediaUsageMap } from '../media/service';
@@ -72,6 +72,38 @@ const expect = async (c: Client, path: string, status = 200, method = 'GET', bod
 };
 const api = (area: SiteArea, action: string) => `/api/site-experience/${area}/${action}`;
 try {
+  const legacyDocs = clone(DEFAULT_SITE_EXPERIENCE);
+  const legacyIntro = legacyDocs.homepage.sections.find((s) => s.type === 'intro');
+  assert(legacyIntro?.type === 'intro');
+  legacyIntro.title = LEGACY_HOMEPAGE_INTRO.title;
+  legacyIntro.text = LEGACY_HOMEPAGE_INTRO.text;
+  legacyIntro.secondaryCta = { label: LEGACY_HOMEPAGE_INTRO.secondaryCtaLabel, href: '/sports/' };
+  const selectedArticle = await prisma.article.findFirstOrThrow({ where: { status: 'published', sport: { isVisible: true }, OR: [{ eventSlug: null }, { edition: { event: { isVisible: true } } }] } });
+  const selectedSection = legacyDocs.homepage.sections.find((s) => s.type === 'articles');
+  assert(selectedSection?.type === 'articles');
+  selectedSection.source = { mode: 'manual', auto: { kind: 'latest' }, articleIds: [selectedArticle.id] };
+  const storedLegacy = clone(legacyDocs);
+  const legacyLayout = await getSiteLayout({ preview: false });
+  const upgradedSections = await getHomepageSections(legacyDocs, legacyLayout);
+  const upgradedIntro = upgradedSections.find((s) => s.type === 'intro');
+  assert(upgradedIntro?.type === 'intro');
+  assert.equal(upgradedIntro.section.title, HOMEPAGE_H1);
+  assert.equal(upgradedIntro.section.text, HOMEPAGE_INTRO);
+  assert.deepEqual(upgradedIntro.section.secondaryCta, { label: 'Browse All Sports', href: '/sports/' });
+  const resolvedSelection = upgradedSections.find((s) => s.id === selectedSection.id);
+  assert(resolvedSelection?.type === 'articles' && resolvedSelection.articles[0]?.id === selectedArticle.id);
+  assert.deepEqual(legacyDocs, storedLegacy, 'Render-time upgrade must not mutate saved documents or manual article selections.');
+  const manualDocs = clone(legacyDocs);
+  const manualIntro = manualDocs.homepage.sections.find((s) => s.type === 'intro');
+  assert(manualIntro?.type === 'intro');
+  manualIntro.title = 'Editorially chosen homepage heading';
+  manualIntro.text = 'Editorially chosen introduction.';
+  manualIntro.secondaryCta = { label: 'Editorially chosen action', href: '/latest/' };
+  const manualSections = await getHomepageSections(manualDocs, legacyLayout);
+  const resolvedManualIntro = manualSections.find((s) => s.type === 'intro');
+  assert(resolvedManualIntro?.type === 'intro');
+  assert.deepEqual(resolvedManualIntro.section, manualIntro);
+  pass('untouched legacy homepage intro upgrades at render time; manual wording, CTA and article selections are preserved without writes');
   for (const area of SITE_AREAS) assert(checkDocument(area, DEFAULT_SITE_EXPERIENCE[area]).ok);
   pass('all built-in documents validate');
   for (const href of ['javascript:alert(1)', 'data:text/html,x', '//evil.test', '/\\evil.test', '/%2fevil.test', '/%5cevil.test', '/%00', '/admin/', '/api/data', 'https://u:p@evil.test', '/bad%zz']) assert.throws(() => checkHref(href, 'link'));
@@ -96,7 +128,7 @@ try {
   for (const role of Object.keys(ids) as (keyof typeof ids)[]) await prisma.user.create({ data: { id: ids[role], name: `F1 ${role}`, email: `${ids[role]}@example.test`, role: role === 'admin' ? 'Admin' : role === 'editor' ? 'Editor' : 'Author', avatar: '', joinedAt: new Date(), passwordHash: hashPassword(password) } });
   // Test only known documents so pre-existing editorial content does not affect results.
   for (const area of SITE_AREAS) await prisma.siteExperience.upsert({ where: { area }, create: { area, draft: DEFAULT_SITE_EXPERIENCE[area] as object, draftUpdatedAt: new Date(), draftUpdatedBy: prefix }, update: { draft: DEFAULT_SITE_EXPERIENCE[area] as object, published: Prisma.DbNull, scheduled: Prisma.DbNull, scheduledFor: null, version: 0, publishedAt: null, publishedBy: null, draftUpdatedAt: new Date(), draftUpdatedBy: prefix } });
-  child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], { windowsHide: true, env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', NODE_ENV: 'production', AUTH_MODE: 'production', DEV_LOGIN_BYPASS: 'false', ALLOWED_ORIGIN: base, TRUST_PROXY: 'false', GEMINI_API_KEY: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], { windowsHide: true, env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', NODE_ENV: 'production', APP_ENV: 'production', AUTH_MODE: 'production', DEV_LOGIN_BYPASS: 'false', ALLOWED_ORIGIN: base, TRUST_PROXY: 'false', GEMINI_API_KEY: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout?.on('data', (c) => output += c); child.stderr?.on('data', (c) => output += c);
   const anon = new Client(), admin = new Client(), editor = new Client(), author = new Client();
   for (let i = 0; i < 160; i++) { if (child.exitCode !== null) throw new Error(output); try { if ((await anon.request('/api/health')).status === 200) break; } catch {} await new Promise((r) => setTimeout(r, 250)); }
@@ -179,7 +211,7 @@ try {
   pass('breaking announcements publish site-wide and expired announcements disappear');
   await prisma.siteExperience.update({ where: { area: 'homepage' }, data: { published: { corrupted: true } } });
   assert.deepEqual((await effectiveDocuments()).homepage, DEFAULT_SITE_EXPERIENCE.homepage);
-  assert((await expect(anon, '/')).text.includes('Authoritative sporting guides'));
+  assert((await expect(anon, '/')).text.includes(HOMEPAGE_H1.replace(/&/g, '&amp;')));
   pass('corrupted published configuration serves safe defaults');
   await expect(editor, api('homepage', 'draft'), 200, 'PUT', { document: DEFAULT_SITE_EXPERIENCE.homepage }); await expect(editor, api('homepage', 'publish'), 200, 'POST');
   const logs = await prisma.auditLog.findMany({ where: { userId: { in: userIds }, entityId: { startsWith: 'site-experience:' } } });
@@ -266,7 +298,7 @@ try {
   await panel.getByRole('button', { name: 'Enable draft preview', exact: true }).click();
   await page.getByText('Draft preview enabled. Open the website to see your saved changes.', { exact: true }).waitFor();
   const publicPage = await context.newPage(); await publicPage.goto(base + '/'); assert(await publicPage.getByRole('heading', { name: `${prefix} browser draft`, exact: true }).isVisible());
-  await publicPage.getByRole('button', { name: 'Exit preview', exact: true }).click(); await publicPage.getByRole('heading', { name: 'Authoritative sporting guides, verified schedules, and championship editions.', exact: true }).waitFor();
+  await publicPage.getByRole('button', { name: 'Exit preview', exact: true }).click(); await publicPage.getByRole('heading', { name: HOMEPAGE_H1, exact: true }).waitFor();
   pass('all admin areas render; draft preview and exit work through existing session');
   await panel.getByLabel('Publish at (your local time)').fill('2027-01-01T08:00');
   await panel.getByRole('button', { name: 'Schedule Homepage', exact: true }).click(); await page.getByText('Publication scheduled.', { exact: true }).waitFor();

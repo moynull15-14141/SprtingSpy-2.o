@@ -169,6 +169,60 @@ export function validateSeo(value: unknown, fieldName = 'seo'): ValidationResult
   return error ? { valid: false, error } : { valid: true };
 }
 
+/**
+ * PHASE H: a list of small `{ [key]: text }` records (quick facts, defending
+ * champions, article references). Rejects unknown keys, blanks and overlong
+ * values; `url` keys must be safe http(s) URLs or site paths.
+ */
+export function validateRecordList(value: unknown, fieldName: string, spec: Record<string, number>, maxItems: number): ValidationResult {
+  if (value === undefined || value === null) return { valid: true };
+  if (!Array.isArray(value)) return { valid: false, error: `${fieldName} must be a list.` };
+  if (value.length > maxItems) return { valid: false, error: `${fieldName} can have at most ${maxItems} entries.` };
+  for (const [index, item] of value.entries()) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return { valid: false, error: `${fieldName} entry ${index + 1} must be an object.` };
+    const unknownKey = Object.keys(item).find((k) => !(k in spec));
+    if (unknownKey) return { valid: false, error: `${fieldName} entry ${index + 1}: "${unknownKey}" is not supported.` };
+    for (const [key, max] of Object.entries(spec)) {
+      const v = (item as Record<string, unknown>)[key];
+      const check = key === 'url' ? validateSafeUrl(v, `${fieldName} entry ${index + 1} ${key}`) : validateText(v, `${fieldName} entry ${index + 1} ${key}`, max);
+      if (!check.valid) return check;
+    }
+  }
+  return { valid: true };
+}
+
+export const ARTICLE_STATUSES = ['draft', 'preview', 'scheduled', 'published', 'archived'] as const;
+const MAX_SCHEDULE_AHEAD_MS = 2 * 366 * 86_400_000;
+
+/**
+ * PHASE H: a scheduled publication time must be an unambiguous ISO-8601
+ * instant (with Z or an explicit offset, so it never depends on the server's
+ * time zone), in the future, and at most two years ahead.
+ */
+export function parseScheduledFor(value: unknown, now = Date.now()): { ok: true; date: Date } | { ok: false; error: string } {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/.test(value)) {
+    return { ok: false, error: 'Choose a publication date and time for the scheduled article.' };
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return { ok: false, error: 'The scheduled publication time is not a valid date.' };
+  // Date parsing normalizes impossible dates such as February 30; reject them.
+  if (!validateIsoDate(value.slice(0, 10), 'scheduledFor', true).valid) return { ok: false, error: 'The scheduled publication time is not a valid calendar date.' };
+  const time = value.slice(11).match(/^(\d{2}):(\d{2})(?::(\d{2}))?/)!;
+  if (Number(time[1]) > 23 || Number(time[2]) > 59 || Number(time[3] ?? 0) > 59) return { ok: false, error: 'The scheduled publication time is not a valid clock time.' };
+  if (date.getTime() <= now) return { ok: false, error: 'The scheduled publication time must be in the future.' };
+  if (date.getTime() > now + MAX_SCHEDULE_AHEAD_MS) return { ok: false, error: 'Schedule publication at most two years ahead.' };
+  return { ok: true, date };
+}
+
+/** PHASE H: calendar dates stored as YYYY-MM-DD strings (edition start/end). */
+export function validateIsoDate(value: unknown, fieldName: string, required = false): ValidationResult {
+  if (value === undefined || value === null || value === '') return required ? { valid: false, error: `${fieldName} is required.` } : { valid: true };
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`)) || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value) {
+    return { valid: false, error: `${fieldName} must be a date (YYYY-MM-DD).` };
+  }
+  return { valid: true };
+}
+
 /** Runs a list of validators in order and returns the first failure, or null if all pass. */
 export function firstError(...results: ValidationResult[]): string | null {
   for (const r of results) {

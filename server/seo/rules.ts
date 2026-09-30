@@ -217,6 +217,7 @@ export const RULES: RuleDef[] = [
     check: (s, ctx, cfg) => {
       const ed = editionOf(s, ctx);
       if (!ed) return [];
+      if (!ed.startDate || !ed.endDate) return [];
       const start = new Date(ed.startDate).getTime();
       const end = new Date(ed.endDate).getTime();
       if (Number.isNaN(start) || Number.isNaN(end)) return [];
@@ -355,15 +356,15 @@ export const RULES: RuleDef[] = [
   }),
   rule({
     key: 'edition-schema', name: 'SportsEvent structured data', category: 'structured-data', target: 'edition', severity: 'blocking', config: {},
-    why: 'Edition pages emit SportsEvent markup; invalid dates or a missing location make it invalid (Spec §15).',
-    fix: 'Correct the edition dates (YYYY-MM-DD) and venue/location.',
+    why: 'Edition pages emit SportsEvent markup only when a confirmed start date exists; supplied dates must be valid.',
+    fix: 'Correct supplied edition dates (YYYY-MM-DD), or leave unconfirmed dates empty until verified.',
     check: (ed) => {
       const out: Issue[] = [];
       const iso = /^\d{4}-\d{2}-\d{2}$/;
+      if (!ed.startDate) return out; // Without a confirmed start date, the public page omits SportsEvent markup.
       if (!iso.test(ed.startDate) || Number.isNaN(Date.parse(ed.startDate))) out.push({ message: `Start date "${ed.startDate}" is not a valid date.` });
-      if (!iso.test(ed.endDate) || Number.isNaN(Date.parse(ed.endDate))) out.push({ message: `End date "${ed.endDate}" is not a valid date.` });
-      if (!out.length && ed.endDate < ed.startDate) out.push({ message: 'End date is before the start date.' });
-      if (!ed.venue.trim() || !ed.location.trim()) out.push({ message: 'Venue or location is missing.' });
+      if (ed.endDate && (!iso.test(ed.endDate) || Number.isNaN(Date.parse(ed.endDate)))) out.push({ message: `End date "${ed.endDate}" is not a valid date.` });
+      if (!out.length && ed.endDate && ed.endDate < ed.startDate) out.push({ message: 'End date is before the start date.' });
       return out;
     },
   }),
@@ -429,6 +430,7 @@ export const RULES: RuleDef[] = [
     check: (s, ctx, cfg) => {
       const ed = editionOf(s, ctx);
       if (!ed || s.status !== 'published') return [];
+      if (!ed.startDate || !ed.endDate) return [];
       const start = Date.parse(ed.startDate);
       const end = Date.parse(ed.endDate);
       const now = ctx.now.getTime();
@@ -453,10 +455,10 @@ export const RULES: RuleDef[] = [
     fix: 'Update the edition status (upcoming / active / completed / archived).',
     check: (ed, ctx) => {
       const today = ctx.now.toISOString().slice(0, 10);
-      if (ed.status === 'upcoming' && ed.startDate <= today) return issue(`Status is "upcoming" but the edition started on ${ed.startDate}.`);
-      if (ed.status === 'active' && ed.endDate < today) return issue(`Status is "active" but the edition ended on ${ed.endDate}.`);
-      if (ed.status === 'active' && ed.startDate > today) return issue(`Status is "active" but the edition starts on ${ed.startDate}.`);
-      if (ed.status === 'completed' && ed.endDate >= today) return issue(`Status is "completed" but the edition ends on ${ed.endDate}.`);
+      if (ed.status === 'upcoming' && ed.startDate && ed.startDate <= today) return issue(`Status is "upcoming" but the edition started on ${ed.startDate}.`);
+      if (ed.status === 'active' && ed.endDate && ed.endDate < today) return issue(`Status is "active" but the edition ended on ${ed.endDate}.`);
+      if (ed.status === 'active' && ed.startDate && ed.startDate > today) return issue(`Status is "active" but the edition starts on ${ed.startDate}.`);
+      if (ed.status === 'completed' && ed.endDate && ed.endDate >= today) return issue(`Status is "completed" but the edition ends on ${ed.endDate}.`);
       return [];
     },
   }),

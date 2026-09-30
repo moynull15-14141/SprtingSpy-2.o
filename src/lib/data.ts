@@ -11,6 +11,7 @@ import { featureFlags } from '../../server/features';
 import { cookies } from 'next/headers';
 import { getSiteLayout, getHomepageSections } from '../../server/services/public/siteLayout';
 import { SITE_PREVIEW_COOKIE } from './siteExperience/preview';
+import { BRANDING } from '../config/branding';
 
 export const getNavSports = cache(content.getNavSports);
 export const getAdSlots = cache(content.getAdSlots);
@@ -25,6 +26,26 @@ export const getAuthorPage = cache(content.getAuthorPage);
 export const getApprovedComments = cache(content.getApprovedComments);
 export const search = cache(searchPublic);
 export const getFeatures = featureFlags;
+/** PHASE H: published FAQ entries for /faq/. */
+export const getFaqs = cache(async () => (await import('../../server/services/public/faq')).getPublishedFaqs());
+
+/**
+ * PHASE H: site identity from Admin → Settings (site name, description,
+ * default social image, X/Twitter handle), falling back to the built-in
+ * branding. These values are public by nature.
+ */
+export const getSiteIdentity = cache(async (): Promise<SiteIdentity> => {
+  let stored: Partial<Record<string, string>> = {};
+  try { stored = await (await import('../../server/settingsRegistry')).publicSettings(); } catch { /* database trouble: built-in branding keeps pages up */ }
+  return {
+    name: stored.siteName || BRANDING.name,
+    description: stored.siteDescription || BRANDING.description,
+    configuredDescription: stored.siteDescription || null,
+    defaultOgImage: stored.defaultOgImage || null,
+    twitterHandle: stored.twitterHandle || null,
+  };
+});
+export interface SiteIdentity { name: string; description: string; configuredDescription: string | null; defaultOgImage: string | null; twitterHandle: string | null }
 export { LATEST_PAGE_SIZE } from '../../server/services/public/content';
 
 /**

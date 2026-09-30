@@ -15,6 +15,7 @@ import type { Article, Author, EventEdition, Sport, SportEvent, AdSlotConfig, Co
 import { articlePath, editionPath } from '../../../src/lib/paths';
 import { toMediaAsset, type MediaAsset } from '../../../src/lib/media';
 import { legacyToDoc, type RichDoc } from '../../../src/lib/richText';
+import { publicSportEventValues, resolveSportEventConfiguration } from '../../sportEventConfiguration';
 
 // Loaded lazily so importing this module (e.g. while Next.js collects page
 // data at build time) never opens a database connection by itself.
@@ -40,12 +41,15 @@ type ArticleRow = Prisma.ArticleGetPayload<object>;
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : undefined);
 
 function toSport(row: Prisma.SportGetPayload<object>): Sport {
-  return { ...row, colorTheme: row.colorTheme ?? undefined, heroImage: row.heroImage ?? undefined, seo: row.seo as Sport['seo'] };
+  const { eventConfiguration, ...common } = row;
+  void eventConfiguration;
+  return { ...common, colorTheme: row.colorTheme ?? undefined, heroImage: row.heroImage ?? undefined, seo: row.seo as Sport['seo'] };
 }
 
 function toEvent(row: Prisma.SportEventGetPayload<object>): SportEvent {
+  const { sportSpecificValues: _values, ...common } = row;
   return {
-    ...row,
+    ...common,
     history: row.history ?? undefined,
     featuredImage: row.featuredImage ?? undefined,
     officialSourceUrl: row.officialSourceUrl ?? undefined,
@@ -68,7 +72,9 @@ function toEdition(row: Prisma.EventEditionGetPayload<object>): EventEdition {
 }
 
 function toArticle(row: ArticleRow): Article {
-  const { body: _body, featuredMediaId: _featuredMediaId, reviewedAt: _reviewedAt, ...rest } = row;
+  const { body: _body, featuredMediaId: _featuredMediaId, reviewedAt: _reviewedAt,
+    reviewStatus: _reviewStatus, reviewerId: _reviewerId, reviewComment: _reviewComment,
+    reviewSubmittedAt: _reviewSubmittedAt, reviewDecidedAt: _reviewDecidedAt, reviewVersion: _reviewVersion, ...rest } = row;
   return {
     ...rest,
     subtitle: row.subtitle || undefined,
@@ -186,19 +192,20 @@ async function countArticles(where: Prisma.ArticleWhereInput = {}) {
 async function summarizeEvents(rows: Prisma.SportEventGetPayload<object>[]): Promise<EventSummary[]> {
   if (!rows.length) return [];
   const prisma = await db();
+  const selectedRows = rows.filter((e) => e.currentEditionYear !== null);
   const [sports, editions] = await Promise.all([
     prisma.sport.findMany({ where: { slug: { in: [...new Set(rows.map((e) => e.sportSlug))] } }, select: { slug: true, name: true } }),
-    prisma.eventEdition.findMany({
-      where: { OR: rows.map((e) => ({ sportSlug: e.sportSlug, eventSlug: e.slug, year: e.currentEditionYear })) },
+    selectedRows.length ? prisma.eventEdition.findMany({
+      where: { OR: selectedRows.map((e) => ({ sportSlug: e.sportSlug, eventSlug: e.slug, year: e.currentEditionYear! })) },
       select: { sportSlug: true, eventSlug: true, year: true },
-    }),
+    }) : Promise.resolve([]),
   ]);
   const sportName = new Map(sports.map((s) => [s.slug, s.name]));
   const current = new Set(editions.map((ed) => `${ed.sportSlug}/${ed.eventSlug}/${ed.year}`));
   return rows.map((row) => ({
     ...toEvent(row),
     sportName: sportName.get(row.sportSlug) || row.sportSlug,
-    currentEditionUrl: current.has(`${row.sportSlug}/${row.slug}/${row.currentEditionYear}`)
+    currentEditionUrl: row.currentEditionYear !== null && current.has(`${row.sportSlug}/${row.slug}/${row.currentEditionYear}`)
       ? editionPath(row.sportSlug, row.slug, row.currentEditionYear)
       : undefined,
   }));
@@ -293,8 +300,7 @@ export async function getEventsDirectory(sportFilter?: string) {
   const prisma = await db();
   const allRows = await prisma.sportEvent.findMany({ where: visibleEventWhere() });
   const events = await summarizeEvents(allRows);
-  const sportSlugs = [...new Set(allRows.map((e) => e.sportSlug))];
-  const sports = await prisma.sport.findMany({ where: { slug: { in: sportSlugs }, isVisible: true }, orderBy: { order: 'asc' }, select: { id: true, slug: true, name: true } });
+  const sports = await prisma.sport.findMany({ where: { isVisible: true }, orderBy: { order: 'asc' }, select: { id: true, slug: true, name: true } });
   return {
     total: events.length,
     sports,
@@ -304,26 +310,36 @@ export async function getEventsDirectory(sportFilter?: string) {
 
 export async function getEvent(sportSlug: string, eventSlug: string) {
   const prisma = await db();
-  const row = await prisma.sportEvent.findFirst({ where: visibleEventWhere({ sportSlug, slug: eventSlug }) });
-  if (!row) return null;
-  const sport = await getSport(sportSlug);
-  return sport ? { sport, event: toEvent(row) } : null;
+  const [row, sportRow] = await Promise.all([
+    prisma.sportEvent.findFirst({ where: visibleEventWhere({ sportSlug, slug: eventSlug }) }),
+    prisma.sport.findFirst({ where: { slug: sportSlug, isVisible: true } }),
+  ]);
+  if (!row || !sportRow) return null;
+  const configuration = resolveSportEventConfiguration(sportRow.eventConfiguration);
+  return {
+    sport: toSport(sportRow),
+    event: { ...toEvent(row), sportSpecificValues: publicSportEventValues(row.sportSpecificValues, configuration) },
+    sportConfiguration: { ...configuration, fields: configuration.fields.filter((field) => field.publicVisible) },
+  };
 }
 
 export async function getEventPage(sportSlug: string, eventSlug: string) {
   const found = await getEvent(sportSlug, eventSlug);
   if (!found) return null;
   const prisma = await db();
-  const [editionRows, articles] = await Promise.all([
+  const [editionRows, articles, relatedRows] = await Promise.all([
     prisma.eventEdition.findMany({ where: { sportSlug, eventSlug }, orderBy: { year: 'desc' } }),
     listArticles({ sportSlug, eventSlug }),
+    prisma.sportEvent.findMany({ where: visibleEventWhere({ sportSlug, slug: { not: eventSlug } }), orderBy: [{ featured: 'desc' }, { name: 'asc' }], take: 3 }),
   ]);
   const editions = editionRows.map(toEdition);
   return {
     ...found,
+    sportSpecificValues: found.event.sportSpecificValues ?? {},
     editions,
     articles,
-    currentEdition: editions.find((ed) => ed.year === found.event.currentEditionYear) || editions[0],
+    relatedEvents: await summarizeEvents(relatedRows),
+    currentEdition: found.event.currentEditionYear === null ? undefined : editions.find((ed) => ed.year === found.event.currentEditionYear),
   };
 }
 

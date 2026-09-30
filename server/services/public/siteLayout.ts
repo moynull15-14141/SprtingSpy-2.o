@@ -18,6 +18,7 @@ import { effectiveDocuments } from '../../siteExperience';
 import { toMediaAsset, type MediaAsset } from '../../../src/lib/media';
 import { introMediaReferences } from '../../../src/lib/siteExperience/intro';
 import { inWindow, type ArticleSource, type AutoSource, type BlockPlacement, type GlobalBlock, type HomeSection, type SiteExperienceDocs } from '../../../src/lib/siteExperience/types';
+import { HOMEPAGE_H1, HOMEPAGE_INTRO, LEGACY_HOMEPAGE_INTRO } from '../../../src/lib/siteExperience/defaults';
 
 export type ResolvedAnnouncement = { id: string; variant: 'breaking' | 'info'; text: string; href: string | null };
 export type ResolvedBlock = Omit<GlobalBlock, 'articleId'> & { article: ArticleSummary | null };
@@ -126,7 +127,18 @@ export async function getHomepageSections(docs: SiteExperienceDocs, layout: Site
   const out: ResolvedSection[] = [];
   for (const s of sections) {
     switch (s.type) {
-      case 'intro': out.push({ id: s.id, type: s.type, section: s, image: s.appearance?.mediaId ? introImages.get(s.appearance.mediaId) ?? null : null }); break;
+      case 'intro': {
+        // Upgrade only untouched legacy defaults at render time. This also
+        // works when old article selections prevent republishing the document;
+        // manual wording, drafts and article selections remain intact.
+        const section = {
+          ...s,
+          title: s.title === LEGACY_HOMEPAGE_INTRO.title ? HOMEPAGE_H1 : s.title,
+          text: s.text === LEGACY_HOMEPAGE_INTRO.text ? HOMEPAGE_INTRO : s.text,
+          secondaryCta: s.secondaryCta?.label === LEGACY_HOMEPAGE_INTRO.secondaryCtaLabel ? { ...s.secondaryCta, label: 'Browse All Sports' } : s.secondaryCta,
+        };
+        out.push({ id: s.id, type: s.type, section, image: s.appearance?.mediaId ? introImages.get(s.appearance.mediaId) ?? null : null }); break;
+      }
       case 'adSlot': out.push({ id: s.id, type: s.type, slot: s.slot }); break;
       case 'featured': case 'articles': {
         const articles = resolveArticles(s.source, s.count);

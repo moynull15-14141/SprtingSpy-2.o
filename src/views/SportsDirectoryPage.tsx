@@ -26,7 +26,7 @@ export const SportsDirectoryPage: React.FC<{ sports: SportsDirectoryData }> = ({
           Sports Directory
         </h1>
         <p className="mt-2 text-stone-600 dark:text-stone-400 max-w-2xl text-sm sm:text-base">
-          SportingSpy provides structured tournament intelligence across 12 permanent sports disciplines. Each hub maintains official event records, yearly staging editions, and regulatory scoring guides.
+          Structured tournament coverage across {sports.length} {sports.length === 1 ? 'sport' : 'sports'}. Each hub collects its events, yearly editions and rules &amp; scoring guides as coverage grows.
         </p>
       </div>
 

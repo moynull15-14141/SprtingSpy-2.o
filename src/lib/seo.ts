@@ -2,12 +2,18 @@
  * Server-side page metadata (PHASE B). Produces the <title>, description,
  * canonical, Open Graph / Twitter and robots tags that are present in the
  * initial HTML response, replacing the old browser-only client-side head updates.
+ *
+ * PHASE H: the site name, default social image and X/Twitter handle come from
+ * Admin → Settings (getSiteIdentity), falling back to the built-in branding.
+ * Page-provided default titles/descriptions use the configured site name;
+ * editor-written SEO values (seo.metaTitle etc.) are used exactly as written.
  */
 
 import type { Metadata } from 'next';
 import type { SeoMetadata } from '../types';
 import { BRANDING } from '../config/branding';
 import { absoluteUrl } from './paths';
+import { getSiteIdentity } from './data';
 
 interface PageMetadataInput {
   title: string;
@@ -24,14 +30,18 @@ interface PageMetadataInput {
   openGraph?: Metadata['openGraph'];
 }
 
-export function pageMetadata({ title, description, path, seo, image, noindex, private: isPrivate, openGraph }: PageMetadataInput): Metadata {
-  const pageTitle = seo?.metaTitle || title;
-  const pageDescription = seo?.metaDescription || description;
+/** Replaces the built-in brand name in page-default text with the configured site name. */
+export const withSiteName = (text: string, siteName: string) => (siteName === BRANDING.name ? text : text.split(BRANDING.name).join(siteName));
+
+export async function pageMetadata({ title, description, path, seo, image, noindex, private: isPrivate, openGraph }: PageMetadataInput): Promise<Metadata> {
+  const identity = await getSiteIdentity();
+  const pageTitle = seo?.metaTitle || withSiteName(title, identity.name);
+  const pageDescription = seo?.metaDescription || withSiteName(description, identity.name);
   const canonical = seo?.canonicalUrl || absoluteUrl(path);
-  // Social metadata (Phase A) falls back to the SEO title/description/image.
+  // Social metadata (Phase A) falls back to the SEO title/description/image, then the site default image.
   const socialTitle = seo?.ogTitle || pageTitle;
   const socialDescription = seo?.ogDescription || pageDescription;
-  const socialImage = seo?.ogImage || image;
+  const socialImage = seo?.ogImage || image || identity.defaultOgImage || undefined;
   const images = socialImage ? [new URL(socialImage, absoluteUrl('/')).toString()] : undefined;
 
   return {
@@ -45,7 +55,7 @@ export function pageMetadata({ title, description, path, seo, image, noindex, pr
         : { index: true, follow: true },
     openGraph: {
       type: 'website',
-      siteName: BRANDING.name,
+      siteName: identity.name,
       title: socialTitle,
       description: socialDescription,
       url: canonical,
@@ -56,6 +66,7 @@ export function pageMetadata({ title, description, path, seo, image, noindex, pr
       card: 'summary_large_image',
       title: socialTitle,
       description: socialDescription,
+      ...(identity.twitterHandle ? { site: identity.twitterHandle } : {}),
       ...(images ? { images } : {}),
     },
   };

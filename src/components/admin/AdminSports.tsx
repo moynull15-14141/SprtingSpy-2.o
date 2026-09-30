@@ -14,11 +14,13 @@ import { suggestSportIcons } from '../../config/sportIcons';
 import { useApp } from '../../context/AppContext';
 import { Sport } from '../../types';
 import { Button } from '../ui/Button';
+import { EventConfigurationEditor } from './EventConfigurationEditor';
 
 export const AdminSports: React.FC = () => {
   const { sports, addSport, updateSport, deleteSport, navigate } = useApp();
   const [isCreating, setIsCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [configurationSportSlug, setConfigurationSportSlug] = useState<string | null>(null);
 
   // Form State
   const [name, setName] = useState('');
@@ -229,6 +231,7 @@ export const AdminSports: React.FC = () => {
       )}
 
       {/* SPORTS LIST */}
+      {configurationSportSlug && <EventConfigurationEditor sportSlug={configurationSportSlug} onClose={() => setConfigurationSportSlug(null)} />}
       <div className="overflow-x-auto rounded-xl border border-stone-200 dark:border-stone-800">
         <table className="w-full text-left text-xs">
           <thead className="bg-stone-50 dark:bg-stone-900/60 uppercase tracking-wider text-stone-500 border-b border-stone-200 dark:border-stone-800 dark:text-stone-400">
@@ -263,6 +266,7 @@ export const AdminSports: React.FC = () => {
                   </button>
                 </td>
                 <td className="p-3 text-right space-x-2">
+                  <button type="button" onClick={() => { if (configurationSportSlug && configurationSportSlug !== sport.slug && !window.confirm('Leave the current configuration editor? Unsaved changes may be lost.')) return; setConfigurationSportSlug(sport.slug); }} className="font-semibold text-amber-700 hover:underline dark:text-amber-400">Event configuration</button>
                   <button
                     onClick={() => navigate(`/${sport.slug}`)}
                     className="text-stone-600 hover:text-amber-600 dark:text-stone-400 font-semibold"

@@ -25,6 +25,8 @@ import { AdminUsers } from './AdminUsers';
 import { AdminRedirects } from './AdminRedirects';
 import { AdminSettings } from './AdminSettings';
 import { AdminSiteExperience } from './site/AdminSiteExperience';
+import { AdminFaq } from './AdminFaq';
+import { AdminInbox } from './AdminInbox';
 
 export function AdminApp() {
   return (
@@ -62,6 +64,10 @@ export function AdminApp() {
                 return <AdminSettings />;
               case 'site':
                 return <AdminSiteExperience />;
+              case 'faq':
+                return <AdminFaq />;
+              case 'inbox':
+                return <AdminInbox />;
               default:
                 return <AdminDashboard setActiveTab={setActiveTab} />;
             }

@@ -62,7 +62,7 @@ const base = `http://localhost:${port}`;
 const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
   cwd: process.cwd(),
   windowsHide: true,
-  env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', TRUST_PROXY: 'false', NODE_ENV: 'production', AUTH_MODE: 'production', DEV_LOGIN_BYPASS: 'false', ALLOWED_ORIGIN: base, ENABLE_READER_ACCOUNTS: 'false', ENABLE_COMMENTS: 'false' } as NodeJS.ProcessEnv,
+  env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', TRUST_PROXY: 'false', NODE_ENV: 'production', APP_ENV: 'production', AUTH_MODE: 'production', DEV_LOGIN_BYPASS: 'false', ALLOWED_ORIGIN: base, ENABLE_READER_ACCOUNTS: 'false', ENABLE_COMMENTS: 'false' } as NodeJS.ProcessEnv,
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let serverOutput = '';

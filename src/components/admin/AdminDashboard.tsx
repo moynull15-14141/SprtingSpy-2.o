@@ -6,6 +6,7 @@
 import React from 'react';
 import { useApp } from '../../context/AppContext';
 import { AdminTab } from './AdminLayout';
+import { UNPLACED_AD_SLOTS } from '../../types';
 
 interface AdminDashboardProps {
   setActiveTab: (tab: AdminTab) => void;
@@ -16,8 +17,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ setActiveTab }) 
 
   const publishedCount = articles.filter((a) => a.status === 'published').length;
   const draftCount = articles.filter((a) => a.status === 'draft').length;
+  const pendingArticles = articles.filter((article) => article.reviewStatus === 'in_review').length;
   const pendingComments = comments.filter((c) => c.status === 'pending');
-  const activeAdsCount = adSlots.filter((s) => s.enabled).length;
+  const activeAdsCount = adSlots.filter((s) => s.enabled && !UNPLACED_AD_SLOTS.includes(s.id)).length;
 
   return (
     <div className="space-y-8">
@@ -31,6 +33,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ setActiveTab }) 
       </div>
 
       {/* METRIC CARDS */}
+      <button type="button" onClick={() => setActiveTab('articles')} className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-left text-xs font-semibold text-amber-900 focus-visible:ring-2 focus-visible:ring-amber-500 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">{pendingArticles} article{pendingArticles === 1 ? '' : 's'} awaiting editorial review · Open Articles review queues →</button>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <div className="p-3.5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-900/40">
           <div className="text-[11px] text-stone-500 uppercase tracking-wider font-semibold dark:text-stone-400">Sports</div>

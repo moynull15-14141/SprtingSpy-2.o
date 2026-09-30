@@ -65,7 +65,7 @@ const port = (probe.address() as { port: number }).port; await new Promise<void>
 const base = `http://127.0.0.1:${port}`;
 const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
   cwd: process.cwd(), windowsHide: true,
-  env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', NODE_ENV: 'production', AUTH_MODE: 'production', DEV_LOGIN_BYPASS: 'false', TRUST_PROXY: 'false', ALLOWED_ORIGIN: base, GEMINI_API_KEY: '' },
+  env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', NODE_ENV: 'production', APP_ENV: 'production', AUTH_MODE: 'production', DEV_LOGIN_BYPASS: 'false', TRUST_PROXY: 'false', ALLOWED_ORIGIN: base, GEMINI_API_KEY: '' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let output = ''; child.stdout.on('data', (c) => { output += c; }); child.stderr.on('data', (c) => { output += c; });

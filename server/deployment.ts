@@ -6,9 +6,33 @@ import type { Request, Response, NextFunction } from 'express';
 
 export class DeploymentConfigError extends Error {}
 
+/**
+ * PHASE J: which environment this process serves. NODE_ENV=production means
+ * "production build and hardening"; APP_ENV says whether that build is the
+ * public site or a staging copy. Staging runs the same production code path
+ * but is kept out of search engines (robots.txt Disallow: /, X-Robots-Tag
+ * noindex on every response) and never notifies IndexNow.
+ */
+export const APP_ENVS = ['development', 'staging', 'production'] as const;
+export type AppEnv = (typeof APP_ENVS)[number];
+
+/** Placeholder values from .env.example that must never reach a real deployment. */
+const PLACEHOLDER_DATABASE = /\/\/USER:PASSWORD@|\/\/user:password@/;
+
+export function appEnv(env: NodeJS.ProcessEnv = process.env): AppEnv {
+  const value = env.APP_ENV?.trim().toLowerCase();
+  if (value && (APP_ENVS as readonly string[]).includes(value)) return value as AppEnv;
+  return env.NODE_ENV === 'production' ? 'production' : 'development';
+}
+
 export function deploymentConfig(env: NodeJS.ProcessEnv = process.env, buildExists = fs.existsSync(path.resolve('.next/BUILD_ID'))) {
   const production = env.NODE_ENV === 'production';
   const fail = (message: string): never => { throw new DeploymentConfigError(message); };
+  if (env.APP_ENV && !(APP_ENVS as readonly string[]).includes(env.APP_ENV.trim().toLowerCase())) fail(`APP_ENV must be one of ${APP_ENVS.join(', ')}.`);
+  const environment = appEnv(env);
+  if (!production && environment !== 'development') fail(`APP_ENV=${environment} requires NODE_ENV=production (use npm run start:production).`);
+  if (production && environment === 'development') fail('NODE_ENV=production requires APP_ENV=staging or production; do not reuse development configuration.');
+  if (env.DATABASE_URL && PLACEHOLDER_DATABASE.test(env.DATABASE_URL)) fail('DATABASE_URL still contains the USER:PASSWORD placeholder from .env.example.');
   const port = Number(env.PORT || '3000');
   if (!Number.isInteger(port) || port < 1 || port > 65535) fail('PORT must be an integer between 1 and 65535.');
   const host = env.HOST || '0.0.0.0';
@@ -37,12 +61,19 @@ export function deploymentConfig(env: NodeJS.ProcessEnv = process.env, buildExis
     try {
       const database = new URL(env.DATABASE_URL!);
       if (!['postgres:', 'postgresql:'].includes(database.protocol) || !database.hostname || database.pathname.length < 2) fail('DATABASE_URL must identify a PostgreSQL database.');
-    } catch { fail('DATABASE_URL must identify a PostgreSQL database.'); }
+      // Local production smoke tests are allowed; public production must not
+      // accidentally consume a development/test database copied from a shell.
+      const localSmoke = origin && ['localhost', '127.0.0.1', '[::1]'].includes(new URL(origin).hostname);
+      if (environment === 'production' && !localSmoke && /(?:^|[_-])(dev|development|test|testing)(?:$|[_-])/i.test(decodeURIComponent(database.pathname.slice(1)))) fail('APP_ENV=production must not target a development/test database.');
+    } catch (error) { if (error instanceof DeploymentConfigError) throw error; fail('DATABASE_URL must identify a PostgreSQL database.'); }
+    if (env.SHADOW_DATABASE_URL?.trim()) fail('SHADOW_DATABASE_URL must be unset for production-mode startup; deployment uses existing migrations without a shadow database.');
     if (!origin) fail('ALLOWED_ORIGIN is required in production to identify the browser-facing service origin.');
     if (env.DEV_LOGIN_BYPASS === 'true') fail('DEV_LOGIN_BYPASS is forbidden when NODE_ENV=production.');
     if (!buildExists) fail('Production build missing: run npm run build before starting the server.');
+    if (env.ALLOW_DESTRUCTIVE_DB_OPS === 'true') fail('ALLOW_DESTRUCTIVE_DB_OPS is a local-development switch and is forbidden when NODE_ENV=production.');
+    if (env.SHOW_AD_PLACEHOLDERS === 'true' && environment === 'production') fail('SHOW_AD_PLACEHOLDERS is for development only and is forbidden in APP_ENV=production.');
   }
-  return { production, port, host, origin, trustProxy };
+  return { production, port, host, origin, trustProxy, appEnv: environment };
 }
 
 export function enforceProductionTransport(req: Request, res: Response, next: NextFunction) {

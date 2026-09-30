@@ -40,6 +40,10 @@ export interface ArticleSearchParams {
   sport?: string;
   type?: string;
   authorId?: string;
+  ownerUserId?: string;
+  reviewStatus?: string;
+  draftsOnly?: boolean;
+  myDraftsUserId?: string;
   /** Staff scope only; ignored for public scope. */
   status?: ArticleStatusFilter;
   from?: Date;
@@ -91,6 +95,12 @@ function filters(p: ArticleSearchParams): Prisma.Sql[] {
   if (p.sport) where.push(Prisma.sql`a."sportSlug" = ${p.sport}`);
   if (p.type) where.push(Prisma.sql`a."articleType" = ${p.type}`);
   if (p.authorId) where.push(Prisma.sql`a."authorId" = ${p.authorId}`);
+  if (p.ownerUserId) where.push(Prisma.sql`EXISTS (SELECT 1 FROM "Author" own WHERE own."id" = a."authorId" AND own."userId" = ${p.ownerUserId})`);
+  if (p.draftsOnly) where.push(Prisma.sql`a."status" IN ('draft', 'preview')`);
+  if (p.myDraftsUserId) {
+    where.push(Prisma.sql`EXISTS (SELECT 1 FROM "Author" own WHERE own."id" = a."authorId" AND own."userId" = ${p.myDraftsUserId})`);
+  }
+  if (p.reviewStatus) where.push(Prisma.sql`a."reviewStatus"::text = ${p.reviewStatus}`);
   if (p.from) where.push(Prisma.sql`a."publishedAt" >= ${p.from}`);
   if (p.to) where.push(Prisma.sql`a."publishedAt" < ${p.to}`);
   if (p.excludeId) where.push(Prisma.sql`a."id" <> ${p.excludeId}`);

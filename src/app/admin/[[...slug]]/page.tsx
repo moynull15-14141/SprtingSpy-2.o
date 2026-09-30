@@ -4,7 +4,7 @@ import { pageMetadata } from '../../../lib/seo';
 
 // The CMS is a private, client-rendered area isolated in its own route
 // bundle; public pages never load it. Server APIs enforce all access.
-export const generateMetadata = (): Metadata =>
+export const generateMetadata = (): Promise<Metadata> =>
   pageMetadata({
   title: 'Editorial CMS & Content Manager | SportingSpy',
   description: 'SportingSpy editorial CMS.',

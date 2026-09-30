@@ -8,6 +8,19 @@
 import { BRANDING } from '../../config/branding';
 import type { SiteExperienceDocs } from './types';
 
+/** Spec v1.1 §7.1: the homepage H1 (PHASE H). */
+export const HOMEPAGE_H1 = 'Latest Sports News & Events';
+/** Spec v1.1 §7.1: short multi-sport introduction under the H1 (PHASE H). */
+export const HOMEPAGE_INTRO =
+  'Schedules, results, event guides and how-to-watch information across tennis, motorsport, golf, rugby, football and more — organised by sport, event and edition.';
+
+/** The pre-Phase-H intro wording, used only to recognise an unedited homepage intro. */
+export const LEGACY_HOMEPAGE_INTRO = {
+  title: 'Authoritative sporting guides, verified schedules, and championship editions.',
+  text: 'Independent, data-verified sports journalism across 12 core athletic disciplines. No automated clickbait—only structured tournament dossiers, venue mechanics, and rules analysis.',
+  secondaryCtaLabel: 'Browse All 12 Sports',
+};
+
 export const DEFAULT_SITE_EXPERIENCE: SiteExperienceDocs = {
   homepage: {
     sections: [
@@ -15,10 +28,10 @@ export const DEFAULT_SITE_EXPERIENCE: SiteExperienceDocs = {
       {
         id: 'intro', type: 'intro', enabled: true,
         eyebrow: 'Multi-Sport Intelligence Hub · Archival & Current Staging',
-        title: 'Authoritative sporting guides, verified schedules, and championship editions.',
-        text: 'Independent, data-verified sports journalism across 12 core athletic disciplines. No automated clickbait—only structured tournament dossiers, venue mechanics, and rules analysis.',
+        title: HOMEPAGE_H1,
+        text: HOMEPAGE_INTRO,
         primaryCta: { label: 'Explore Major Events', href: '/events/' },
-        secondaryCta: { label: 'Browse All 12 Sports', href: '/sports/' },
+        secondaryCta: { label: 'Browse All Sports', href: '/sports/' },
       },
       {
         id: 'latest', type: 'articles', enabled: true, eyebrow: 'Editorial Wire', title: 'Latest Analysis & Guides', layout: 'lead-grid',
@@ -56,6 +69,7 @@ export const DEFAULT_SITE_EXPERIENCE: SiteExperienceDocs = {
           { id: 'search', label: 'Search & Reference', href: '/search/', enabled: true, kind: 'link', system: false },
           { id: 'about', label: 'About SportingSpy', href: '/about/', enabled: true, kind: 'link', system: true },
           { id: 'contact', label: 'Contact Editorial Bureau', href: '/contact/', enabled: true, kind: 'link', system: true },
+          { id: 'faq', label: 'FAQ', href: '/faq/', enabled: true, kind: 'link', system: false },
         ],
       },
       {

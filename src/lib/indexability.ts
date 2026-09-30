@@ -16,6 +16,8 @@ const no = (reason: string): Indexability => ({ indexable: false, reason });
 /** Public static pages. /search/ is a user tool and is never indexable. */
 export const STATIC_INDEXABLE_PATHS = ['/', '/sports/', '/events/', '/latest/', '/about/', '/contact/', '/privacy-policy/', '/terms-and-conditions/', '/dmca/'];
 export const STATIC_NON_INDEXABLE_PATHS: Record<string, string> = { '/search/': 'search results are a user tool, not index targets' };
+/** PHASE H: indexable only while it has published questions (see server/seo/siteIndex.ts). */
+export const FAQ_PATH = '/faq/';
 
 /** An editor canonical override that points somewhere else makes this URL a duplicate. */
 function canonicalElsewhere(seo: SeoMetadata | undefined, selfPath: string, origin: string): boolean {

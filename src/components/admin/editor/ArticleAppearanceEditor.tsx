@@ -1,11 +1,13 @@
-import type { ArticlePresentation } from '../../../lib/richText';
+import { Pencil } from 'lucide-react';
+import type { ArticlePresentation, RichNode } from '../../../lib/richText';
 import { TEXT_COLORS } from '../../../lib/richText';
-import styles from '../../editorial/TextAppearance.module.css';
+import { RichText } from '../../editorial/RichText';
 
 const field = 'mt-1 block min-h-10 w-full rounded-lg border border-stone-300 bg-white p-2 text-xs dark:border-stone-700 dark:bg-stone-950';
 
-export function ArticleAppearanceEditor({ value, onChange, caption, credit }: {
+export function ArticleAppearanceEditor({ value, onChange, caption, credit, firstParagraph, onEditFirstParagraph }: {
   value: ArticlePresentation; onChange: (value: ArticlePresentation) => void; caption?: string; credit?: string;
+  firstParagraph?: RichNode; onEditFirstParagraph: () => void;
 }) {
   const patch = (change: Partial<ArticlePresentation>) => onChange({ ...value, ...change });
   return <fieldset className="min-w-0 space-y-4 rounded-lg border border-stone-300 p-3 dark:border-stone-700">
@@ -27,9 +29,17 @@ export function ArticleAppearanceEditor({ value, onChange, caption, credit }: {
       <label>First letter size<select className={field} aria-label="First letter size" disabled={value.dropCap === false} value={value.dropCapSize || 'medium'} onChange={e => patch({ dropCapSize: e.target.value as ArticlePresentation['dropCapSize'] })}><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select></label>
       <label>First letter color<select className={field} aria-label="First letter color" disabled={value.dropCap === false} value={value.dropCapColor || 'amber'} onChange={e => patch({ dropCapColor: e.target.value as ArticlePresentation['dropCapColor'] })}>{TEXT_COLORS.map(color => <option key={color} value={color}>{color === 'default' ? 'Body text color' : color.charAt(0).toUpperCase() + color.slice(1)}</option>)}</select></label>
     </div>
-    <div className="rounded-lg bg-stone-50 p-3 dark:bg-stone-900">
+    <div className="min-w-0 rounded-lg bg-stone-50 p-3 dark:bg-stone-900" role="region" aria-label="First letter preview">
       <p className="mb-2 text-[10px] font-bold uppercase text-stone-500 dark:text-stone-400">First letter preview</p>
-      <p className={`${value.dropCap !== false ? styles.dropCap : ''} flow-root text-base leading-relaxed`} data-size={value.dropCapSize || 'medium'} data-color={value.dropCapColor || 'amber'}>Global sporting coverage starts here. The first body paragraph will use your chosen appearance.</p>
+      {firstParagraph?.content?.some(node => node.type === 'text' && node.text?.trim())
+        ? <div className="flow-root break-words text-base leading-relaxed"><RichText doc={{ type: 'doc', content: [firstParagraph], attrs: value }} media={{}} /></div>
+        : <p className="text-sm text-stone-500 dark:text-stone-400">Add your article’s first paragraph to preview its appearance.</p>}
+      <div className="mt-3 border-t border-stone-200 pt-3 dark:border-stone-800">
+        <button type="button" onClick={onEditFirstParagraph} aria-controls="article-body" className="inline-flex min-h-10 items-center gap-2 rounded-md border border-stone-300 px-3 py-2 text-xs font-semibold hover:bg-stone-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:border-stone-700 dark:hover:bg-stone-800">
+          <Pencil size={14} aria-hidden="true" /> Edit first paragraph
+        </button>
+        <p className="mt-2 text-xs text-stone-500 dark:text-stone-400">Edit this text in the article body. The preview updates as you type; save the article to keep your changes.</p>
+      </div>
     </div>
   </fieldset>;
 }

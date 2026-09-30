@@ -4,6 +4,7 @@
  * SPORT -> EVENT -> EVENT EDITION -> ARTICLE
  */
 
+import type { ArticleReviewFields } from '../lib/editorialWorkflow';
 export type Role = 'Admin' | 'Editor' | 'Author' | 'Reader';
 
 // Spec v1.1 §5: the standard article types. "How to Watch" is one normal
@@ -51,6 +52,32 @@ export interface SeoMetadata {
   ogImage?: string;
 }
 
+export type SportEventFieldType = 'text' | 'textarea' | 'number' | 'boolean' | 'date' | 'select' | 'url';
+
+export interface SportEventFieldDefinition {
+  key: string;
+  label: string;
+  type: SportEventFieldType;
+  required: boolean;
+  order: number;
+  helpText?: string;
+  adminVisible: boolean;
+  publicVisible: boolean;
+  options?: string[];
+}
+
+export type SportEventTerminologyKey = 'event' | 'participant' | 'competition' | 'venue' | 'round';
+export type SportEventTerminology = Record<SportEventTerminologyKey, string>;
+
+/** A Sport stores overrides; generic terminology is resolved at read time. */
+export interface SportEventConfiguration {
+  terminology: Partial<SportEventTerminology>;
+  fields: SportEventFieldDefinition[];
+}
+
+export type SportEventFieldValue = string | number | boolean;
+export type SportEventFieldValues = Record<string, SportEventFieldValue>;
+
 export interface Sport {
   id: string;
   slug: string; // e.g. "tennis"
@@ -63,6 +90,7 @@ export interface Sport {
   colorTheme?: string;
   heroImage?: string;
   seo: SeoMetadata;
+  eventConfiguration?: SportEventConfiguration | null;
   /** Chosen from src/config/sportIcons.ts; null/undefined = suggested from the name. */
   icon?: string | null;
 }
@@ -75,10 +103,10 @@ export interface SportEvent {
   shortName: string; // e.g. "Roland-Garros"
   description: string;
   history?: string;
-  frequency: string; // e.g. "Annual (May-June)"
-  defaultVenue: string; // e.g. "Stade Roland Garros"
-  defaultLocation: string; // e.g. "Paris, France"
-  currentEditionYear: number; // e.g. 2027
+  frequency: string | null; // null until confirmed by an editor
+  defaultVenue: string | null;
+  defaultLocation: string | null;
+  currentEditionYear: number | null; // selected explicitly, not inferred from the calendar
   allEditionYears: number[]; // e.g. [2027, 2026, 2025]
   featured: boolean;
   isVisible: boolean;
@@ -86,6 +114,7 @@ export interface SportEvent {
   officialSourceUrl?: string; // official event website/source (Spec v1.1 §4.2)
   eventType?: string; // e.g. "Grand Slam", "League", "Major", "Grand Prix"
   seo: SeoMetadata;
+  sportSpecificValues?: SportEventFieldValues | null;
 }
 
 export interface QuickFact {
@@ -99,10 +128,10 @@ export interface EventEdition {
   sportSlug: string; // e.g. "tennis"
   year: number; // e.g. 2027
   title: string; // e.g. "2027 French Open"
-  startDate: string; // ISO date e.g. "2027-05-23"
-  endDate: string; // ISO date e.g. "2027-06-06"
-  venue: string; // e.g. "Stade Roland Garros"
-  location: string; // e.g. "Paris, France"
+  startDate: string | null; // ISO date when confirmed
+  endDate: string | null;
+  venue: string | null;
+  location: string | null;
   status: EditionStatus;
   quickFacts: QuickFact[];
   prizeMoneyTotal?: string; // e.g. "€53,500,000"
@@ -114,7 +143,7 @@ export interface EventEdition {
   participantsCount?: number;
   officialSourceUrl?: string;
   description: string;
-  featuredImage: string;
+  featuredImage: string | null;
   seo: SeoMetadata;
 }
 
@@ -125,7 +154,7 @@ export interface StructuredTable {
   caption?: string;
 }
 
-export interface Article {
+export interface Article extends ArticleReviewFields {
   id: string;
   slug: string; // e.g. "schedule" or "tennis-scoring"
   title: string;
@@ -287,6 +316,13 @@ export type AdSlotId =
   | 'HOMEPAGE_MIDDLE'
   | 'EVENT_TOP'
   | 'EVENT_BOTTOM';
+
+/**
+ * PHASE H: slots that no public template renders (the site has no sidebar).
+ * Their stored rows are kept untouched but they are hidden in the CMS and
+ * cannot be configured, so nobody sets up an ad that can never appear.
+ */
+export const UNPLACED_AD_SLOTS: readonly AdSlotId[] = ['SIDEBAR_TOP', 'SIDEBAR_MIDDLE'];
 
 export interface AdSlotConfig {
   id: AdSlotId;

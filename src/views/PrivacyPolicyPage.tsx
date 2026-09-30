@@ -44,6 +44,7 @@ export function PrivacyPolicyPage({ config }: { config: PrivacyConfig }) {
           <li><strong>Technical requests:</strong> like any website, our server receives your IP address and browser information with each request. We use the IP address briefly, in memory, to limit abusive traffic (for example repeated sign-in or search attempts); it is not stored in our database.</li>
           <li><strong>Accounts:</strong> staff accounts (and reader accounts, when that feature is on) store a name, e-mail address, role and a securely hashed password. Passwords are never stored in readable form.</li>
           <li><strong>Searches:</strong> your search text is used to find results. It is not stored by us. If analytics is active and you allowed it, a shortened, cleaned version may be reported (see Analytics).</li>
+          <li><strong>Contact form:</strong> if you send us a message, we store the name, e-mail address, subject and message you enter, and when it was sent, so the editorial team can read and answer it. We do not store your IP address or browser details with it, and the site does not send automatic e-mails.</li>
         </ul>
 
         <h2 className={h2}>Analytics</h2>

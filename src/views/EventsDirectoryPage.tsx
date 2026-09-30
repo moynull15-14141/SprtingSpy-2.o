@@ -62,11 +62,16 @@ export const EventsDirectoryPage: React.FC<{ data: EventsDirectoryData; filterSp
       </div>
 
       <h2 className="sr-only">Events</h2>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {filteredEvents.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-stone-300 p-8 text-center dark:border-stone-700">
+          <p className="font-semibold text-stone-800 dark:text-stone-200">No events have been added{filterSport ? ' for this sport' : ''} yet.</p>
+          <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">Browse another sport or return as new events are published.</p>
+        </div>
+      ) : <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredEvents.map((evt) => (
           <EventCard key={evt.id} event={evt} />
         ))}
-      </div>
+      </div>}
     </div>
   );
 };

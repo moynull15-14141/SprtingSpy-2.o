@@ -23,9 +23,12 @@ interface HeaderProps {
   sports: { id: string; slug: string; name: string; icon?: string | null }[];
   /** PHASE F.1: navigation items from the Site Experience (published, or draft in preview). */
   navigation: NavItem[];
+  /** PHASE H: site name from Admin → Settings (defaults to the built-in brand). */
+  siteName?: string;
 }
 
-export const Header: React.FC<HeaderProps> = ({ sports, navigation }) => {
+export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) => {
+  const brandName = siteName && siteName !== BRANDING.name ? siteName : BRANDING.shortName;
   const { currentPath, navigate, theme, toggleTheme, currentUser, isAuthenticated, login, logout } = useSite();
   const [isSportsMenuOpen, setIsSportsMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -69,10 +72,10 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation }) => {
                 setIsMobileMenuOpen(false);
               }}
               className="group text-left cursor-pointer flex items-center gap-2"
-              aria-label="SportingSpy Home"
+              aria-label={`${siteName || BRANDING.name} Home`}
             >
               <span className="font-display text-2xl font-bold tracking-tight text-stone-900 dark:text-stone-100 group-hover:text-amber-600 dark:group-hover:text-amber-500 transition-colors">
-                {BRANDING.shortName}
+                {brandName}
               </span>
               <span className="h-1.5 w-1.5 rounded-full bg-amber-700 dark:bg-amber-500 inline-block self-center mb-0.5"></span>
             </Link>

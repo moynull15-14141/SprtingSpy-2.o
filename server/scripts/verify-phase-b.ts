@@ -56,7 +56,7 @@ const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
   cwd: process.cwd(),
   windowsHide: true,
   env: {
-    ...process.env, PORT: String(port), HOST: '127.0.0.1', TRUST_PROXY: 'false', NODE_ENV: 'production', AUTH_MODE: 'production',
+    ...process.env, PORT: String(port), HOST: '127.0.0.1', TRUST_PROXY: 'false', NODE_ENV: 'production', APP_ENV: 'production', AUTH_MODE: 'production',
     DEV_LOGIN_BYPASS: 'false', ALLOWED_ORIGIN: base, ENABLE_READER_ACCOUNTS: 'false', ENABLE_COMMENTS: 'false',
   } as NodeJS.ProcessEnv,
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -184,12 +184,17 @@ try {
   tested(`real HTTP 404 (noindex, no canonical) for ${missing.length} unknown, invalid, hidden, draft, scheduled and archived URLs`);
 
   // ── 3. Server-rendered SEO metadata + JSON-LD in the raw HTML ──
-  assertSeo(html.home, '/', { title: 'SportingSpy – The Multi-Sport Intelligence & Editorial Platform', ld: ['Organization', 'WebSite'] });
+  // PHASE H: Spec v1.1 §7.1 recommended homepage title.
+  assertSeo(html.home, '/', { title: 'SportingSpy – Latest Sports News, Events, Schedules & Updates', ld: ['Organization', 'WebSite'] });
   assertSeo(html.sports, '/sports/', { ld: ['BreadcrumbList'] });
   assertSeo(html.events, '/events/', { ld: ['BreadcrumbList'] });
   assertSeo(html.latest, '/latest/', { ld: ['BreadcrumbList'] });
   assertSeo(html.sport, '/tennis/', { title: (tennis.seo as any).metaTitle || undefined, ld: ['BreadcrumbList', 'CollectionPage'] });
-  assertSeo(html.event, '/tennis/french-open/', { ld: ['BreadcrumbList'] });
+  // E4: a permanent Event page may emit SportsEvent only for its explicitly
+  // selected current Edition when that Edition has an authoritative start date.
+  assertSeo(html.event, '/tennis/french-open/', { ld: ['BreadcrumbList', 'SportsEvent'] });
+  const eventLd = jsonLd(html.event).find((d: any) => d['@type'] === 'SportsEvent');
+  assert.equal(eventLd.startDate, edition.startDate); assert.equal(eventLd.endDate, edition.endDate);
   const editionSeo = edition.seo as any;
   assertSeo(html.edition, paths.edition, { title: editionSeo.metaTitle, index: !editionSeo.noIndex, ld: ['BreadcrumbList', 'SportsEvent'] });
   const editionLd = jsonLd(html.edition).find((d: any) => d['@type'] === 'SportsEvent');

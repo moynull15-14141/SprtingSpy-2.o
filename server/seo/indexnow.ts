@@ -15,6 +15,7 @@
 import crypto from 'node:crypto';
 import { prisma } from '../db';
 import { canonicalPagePath } from '../../src/config/urls';
+import { appEnv } from '../deployment';
 
 const DEFAULT_ENDPOINT = 'https://api.indexnow.org/indexnow';
 let cachedKey: { value: string | null; at: number } | null = null;
@@ -34,13 +35,15 @@ export async function indexNowState(origin: string) {
   const key = await indexNowKey();
   const endpoint = process.env.INDEXNOW_ENDPOINT || DEFAULT_ENDPOINT;
   const publicOrigin = /^https:\/\//.test(origin) && !/\/\/(localhost|127\.|\[::1\])/.test(origin);
-  const active = !!key && (publicOrigin || !!process.env.INDEXNOW_ENDPOINT);
+  // PHASE J: a staging copy must never tell search engines about its URLs.
+  const staging = appEnv() === 'staging';
+  const active = !!key && !staging && (publicOrigin || !!process.env.INDEXNOW_ENDPOINT);
   return {
     configured: !!key,
     active,
     keyFileUrl: key ? `${origin}/${key}.txt` : null,
     endpoint,
-    reason: !key ? 'No IndexNow key is set (Settings → IndexNow).' : !active ? 'The site origin is not public HTTPS, so submissions are skipped in this environment.' : null,
+    reason: !key ? 'No IndexNow key is set (Settings → IndexNow).' : staging ? 'This is a staging environment (APP_ENV=staging), so submissions are skipped.' : !active ? 'The site origin is not public HTTPS, so submissions are skipped in this environment.' : null,
   };
 }
 

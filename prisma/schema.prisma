@@ -52,6 +52,14 @@ enum ArticleStatus {
   archived
 }
 
+enum ArticleReviewStatus {
+  not_required
+  draft
+  in_review
+  changes_requested
+  approved
+}
+
 // Spec v1.1 §4.3. Phase A renamed "ongoing" -> "active" and added
 // "archived" (migration 20260927000000_phase_a_foundation).
 enum EditionStatus {
@@ -87,6 +95,8 @@ enum AuditEntityType {
   User
   Author
   Redirect
+  Faq
+  ContactMessage
 }
 
 // ── Core domain hierarchy: Sport -> Event -> Edition -> Article ──
@@ -103,6 +113,8 @@ model Sport {
   colorTheme       String?
   heroImage        String?
   seo              Json
+  // E2: optional validated definitions/terminology. NULL resolves to generic configuration.
+  eventConfiguration Json?
   // Icon from the curated set in src/config/sportIcons.ts; null = suggested from the name.
   icon             String?
 
@@ -120,10 +132,10 @@ model SportEvent {
   shortName          String
   description        String
   history            String?
-  frequency          String
-  defaultVenue       String
-  defaultLocation    String
-  currentEditionYear Int
+  frequency          String?
+  defaultVenue       String?
+  defaultLocation    String?
+  currentEditionYear Int?
   allEditionYears    Int[]   @default([])
   featured           Boolean @default(false)
   isVisible          Boolean @default(true)
@@ -131,6 +143,8 @@ model SportEvent {
   officialSourceUrl  String?
   eventType          String?
   seo                Json
+  // E2: values only; definitions live on Sport.eventConfiguration.
+  sportSpecificValues Json?
 
   sport    Sport          @relation(fields: [sportSlug], references: [slug])
   editions EventEdition[]
@@ -147,10 +161,10 @@ model EventEdition {
   sportSlug          String
   year               Int
   title              String
-  startDate          String
-  endDate            String
-  venue              String
-  location           String
+  startDate          String?
+  endDate            String?
+  venue              String?
+  location           String?
   status             EditionStatus @default(upcoming)
   quickFacts         Json          @default("[]")
   prizeMoneyTotal    String?
@@ -159,7 +173,7 @@ model EventEdition {
   participantsCount  Int?
   officialSourceUrl  String?
   description        String
-  featuredImage      String
+  featuredImage      String?
   seo                Json
 
   event    SportEvent @relation(fields: [sportSlug, eventSlug], references: [sportSlug, slug])
@@ -187,6 +201,13 @@ model Article {
   updatedAt          DateTime?
   scheduledFor       DateTime?
   status             ArticleStatus @default(draft)
+  reviewStatus       ArticleReviewStatus @default(not_required)
+  reviewerId         String?
+  reviewComment      String?
+  reviewSubmittedAt  DateTime?
+  reviewDecidedAt    DateTime?
+  reviewVersion      Int @default(0)
+  reviewer           User? @relation("ArticleReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
   readingTimeMinutes Int
   featured           Boolean       @default(false)
   tables             Json?
@@ -225,6 +246,7 @@ model Article {
   @@index([sportSlug])
   @@index([status])
   @@index([status, scheduledFor])
+  @@index([reviewStatus, reviewerId])
   @@index([slug])
   @@index([authorId])
   @@index([featuredMediaId])
@@ -285,6 +307,7 @@ model User {
   passwordHash String
 
   authorProfile Author?
+  assignedReviews Article[] @relation("ArticleReviewer")
   sessions      Session[]
 
   @@index([email])
@@ -488,6 +511,38 @@ model AuditLog {
   @@index([timestamp])
   @@index([userId])
   @@index([entityType, entityId])
+}
+
+// PHASE H: editor-managed FAQ shown at /faq/. Plain text only (no HTML);
+// `status` is draft | published | archived, like other editorial content.
+model FaqEntry {
+  id           String   @id
+  question     String
+  answer       String
+  displayOrder Int      @default(0)
+  status       String   @default("draft")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  updatedBy    String
+
+  @@index([status, displayOrder])
+}
+
+// PHASE H: messages sent through the public contact form. Stored only —
+// no e-mail is sent. No IP address or user agent is kept. `status` is
+// open | resolved | spam; `readAt` NULL means unread.
+model ContactMessage {
+  id        String    @id
+  name      String
+  email     String
+  subject   String
+  message   String
+  status    String    @default("open")
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([createdAt])
+  @@index([status, readAt])
 }
 
 // PHASE F.1: Site Experience — one validated JSON document per public-site

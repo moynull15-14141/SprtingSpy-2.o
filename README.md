@@ -30,6 +30,7 @@ included in backups.
 ```bash
 npm install
 cp .env.example .env          # set DATABASE_URL
+npm run db:generate           # generated Prisma client is not committed
 npm run db:migrate:deploy     # apply migrations (never resets)
 npm run dev                   # http://localhost:3000 (Next.js dev + hot reload)
 ```
@@ -38,6 +39,7 @@ npm run dev                   # http://localhost:3000 (Next.js dev + hot reload)
 
 ```bash
 npm ci
+npm run db:generate           # required on a clean checkout
 npm run db:migrate:deploy
 npm run media:import-legacy   # once: process legacy /src/assets/images media (idempotent)
 npm run build                 # tsc --noEmit && next build  (creates .next/)
@@ -49,6 +51,41 @@ public https origin; also the canonical URL base), plus `PORT`, `HOST`,
 `TRUST_PROXY` as needed. Optional launch flags: `ENABLE_READER_ACCOUNTS`,
 `ENABLE_COMMENTS` (both default off). `DEV_LOGIN_BYPASS` is refused in
 production. The build does not need a database connection; the server does.
+
+Set `APP_ENV=production` (or `staging`) when deploying; the development value
+in `.env.example` is refused by the production server. The deployment,
+persistent local/S3 media, backup/recovery and rollback procedures are in
+[DEPLOYMENT.md](DEPLOYMENT.md). Provider setup and default-password replacement
+remain operator actions.
+
+Phase H adds staff-managed FAQ at `/faq/` and a stored contact form at
+`/contact/`. Admin/Editor staff manage these through **FAQ** and **Contact
+Inbox**. Contact success means the message was saved; no email is sent.
+Article scheduling uses the editor's local timezone and stores UTC instants.
+
+After a production build, `npm run test:phase-h` verifies the browser/API
+workflows against a safe local database. `npm run test:phase-j` checks
+deployment/storage configuration; set `PHASE_J_BASE_URL` for live probes.
+Use `npm run content:phase-h` to inspect the narrow legacy homepage/footer
+correction and `npm run content:phase-h -- --apply` to publish it. The script
+preserves manual wording and skips documents with unpublished drafts.
+In PowerShell, use `node --import tsx server/scripts/apply-phase-h-content.ts --apply`
+to pass the apply flag directly. Existing unpublished article selections can
+block republishing; the public renderer still corrects untouched legacy intro
+wording while preserving those selections.
+
+Phase I adds Author submission and editorial approval to the existing Articles
+workspace. Authors save their own draft, select an active Admin/Editor reviewer
+and submit; the reviewer or an Admin can request changes with a reason or
+approve. Publication remains restricted to Admin/Editor. Admin-created articles
+can publish directly. **Needs Review**, **Changes Requested**, **Approved** and
+**My Drafts** use the existing article repository. Freshness review is separate
+from approval. See [PHASE_I_REQUIREMENTS.md](PHASE_I_REQUIREMENTS.md) and
+[PHASE_I_IMPLEMENTATION.md](PHASE_I_IMPLEMENTATION.md).
+
+After `npm run build`, run `npm run test:phase-i` with installed Chrome or
+`PLAYWRIGHT_EXECUTABLE_PATH`. It requires a safe local database, runs direct API
+attacks and real role-based browser flows, and removes only disposable fixtures.
 
 ## Checks
 

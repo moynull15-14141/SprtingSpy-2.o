@@ -3,7 +3,7 @@ import { AccountPage } from '../../views/AccountPage';
 import { pageMetadata } from '../../lib/seo';
 
 // Private, per-user area: rendered in the browser from the session.
-export const generateMetadata = (): Metadata =>
+export const generateMetadata = (): Promise<Metadata> =>
   pageMetadata({
   title: 'My Account | SportingSpy',
   description: 'SportingSpy staff account settings.',

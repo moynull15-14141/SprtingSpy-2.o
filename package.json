@@ -40,7 +40,16 @@
     "audit:a11y": "tsx server/scripts/audit-a11y.ts",
     "test:site-experience": "tsx server/scripts/verify-site-experience.ts",
     "test:settings-ui": "tsx server/scripts/verify-settings-ui.ts",
-    "test:ad-creatives": "tsx server/scripts/verify-ad-creatives.ts"
+    "test:ad-creatives": "tsx server/scripts/verify-ad-creatives.ts",
+    "test:phase-h": "tsx server/scripts/verify-phase-h.ts",
+    "test:phase-j": "tsx server/scripts/verify-phase-j.ts",
+    "test:phase-i": "tsx server/scripts/verify-phase-i.ts",
+    "test:phase-e1": "tsx server/scripts/verify-phase-e1.ts",
+    "test:phase-e2": "tsx server/scripts/verify-phase-e2.ts",
+    "test:phase-e3": "tsx server/scripts/verify-phase-e3.ts",
+    "test:phase-e4": "tsx server/scripts/verify-phase-e4.ts",
+    "content:phase-h": "tsx server/scripts/apply-phase-h-content.ts",
+    "check:env": "tsx server/scripts/check-env.ts"
   },
   "dependencies": {
     "@ffprobe-installer/ffprobe": "^2.1.2",

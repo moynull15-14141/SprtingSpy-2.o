@@ -8,6 +8,7 @@
  */
 
 import { ARTICLE_TYPES } from '../../../src/types';
+import { REVIEW_STATUSES } from '../../../src/lib/editorialWorkflow';
 import { SEARCH_MAX_LIMIT, SEARCH_MAX_QUERY, normalizeQuery, type ArticleStatusFilter, type SearchSort } from './articleSearch';
 
 export const DATE_RANGES = ['today', 'week', 'month', 'year'] as const;
@@ -31,6 +32,8 @@ export interface SearchQuery {
   limit: number;
   status: ArticleStatusFilter | '';
   publicOnly?: boolean;
+  reviewStatus?: string;
+  myDrafts?: boolean;
 }
 
 type Raw = Record<string, unknown>;
@@ -61,6 +64,14 @@ export function parseSearchQuery(raw: Raw, options: { strict: boolean; defaultLi
     if (typeof input !== 'string') { const f = fail(`${key} must be a single value.`); if (f) return f; continue; }
     let error: string | null = null;
     switch (key) {
+      case 'reviewStatus':
+        if (options.allowStatus && (REVIEW_STATUSES as readonly string[]).includes(input)) value.reviewStatus = input;
+        else error = 'reviewStatus must be an editorial review state and is available only in CMS search.';
+        break;
+      case 'myDrafts':
+        if (options.allowStatus && ['true','false'].includes(input)) value.myDrafts = input === 'true';
+        else error = 'myDrafts must be true or false and is available only in CMS search.';
+        break;
       case 'q':
         if (input.length > SEARCH_MAX_QUERY * 2) error = `q must be at most ${SEARCH_MAX_QUERY} characters.`;
         else value.q = normalizeQuery(input);

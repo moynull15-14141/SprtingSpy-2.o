@@ -22,6 +22,7 @@ import { aiSuggestions, assistantState } from './assistant';
 import { indexNowState } from './indexnow';
 import { sitemapFiles } from './sitemap';
 import { robotsTxt } from './robots';
+import { appEnv } from '../deployment';
 import { validateRichDoc } from '../../src/lib/richText';
 
 /** A stored rule config must keep the default's shape: same keys, same value kinds. */
@@ -174,7 +175,7 @@ export function seoRouter(getLookup: () => AuthLookup, origin: () => string) {
     return res.json({
       origin: o,
       sitemap: { indexUrl: `${o}/sitemap.xml`, files: [...sitemap.files.keys()].map((f) => `${o}/sitemaps/${f}`), ...sitemap.report },
-      robots: robotsTxt(o),
+      robots: robotsTxt(o, appEnv()),
       searchConsole: {
         verificationTokenSet: has('googleSiteVerification'),
         sitemapUrl: `${o}/sitemap.xml`,
