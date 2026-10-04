@@ -7,6 +7,9 @@ import { pageMetadata } from '../../lib/seo';
 import type { SearchParams } from '../../lib/params';
 import { parseSearchQuery } from '../../../server/services/search/params';
 import { SEARCH_PAGE_SIZE, type PublicSearchInput } from '../../../server/services/public/search';
+import { recordSearch } from '../../../server/searchAnalytics';
+import { headers } from 'next/headers';
+import { RumPageType } from '../../components/analytics/RumPageType';
 
 export function generateMetadata(): Promise<Metadata> {
   return pageMetadata({
@@ -29,7 +32,7 @@ export default async function Page({ searchParams }: { searchParams: SearchParam
   const p = parsed.value!;
   const custom = typeof raw.from === 'string' || typeof raw.to === 'string';
   const state: SearchState = {
-    q: p.q, sport: p.sport, type: p.type, author: p.author, date: custom ? '' : p.date,
+    q: p.q, kind: p.kind, sport: p.sport, type: p.type, author: p.author, date: custom ? '' : p.date,
     from: custom ? day(p.from) : '', to: custom ? day(p.to, true) : '', sort: p.sort, page: p.page,
   };
   // loading.tsx only covers arriving from another route. Keying the boundary
@@ -37,11 +40,17 @@ export default async function Page({ searchParams }: { searchParams: SearchParam
   // page changes on /search itself, instead of leaving stale results up.
   return (
     <Suspense key={JSON.stringify(state)} fallback={<Loading />}>
-      <Results input={{ q: p.q, sport: p.sport, type: p.type, author: p.author, from: p.from, to: p.to, sort: p.sort, page: p.page }} state={state} />
+      <Results input={{ q: p.q, kind: p.kind, sport: p.sport, type: p.type, author: p.author, from: p.from, to: p.to, sort: p.sort, page: p.page }} state={state} />
     </Suspense>
   );
 }
 
 async function Results({ input, state }: { input: PublicSearchInput; state: SearchState }) {
-  return <SearchPage results={await search(input)} state={state} />;
+  const results = await search(input);
+  // PHASE R: aggregate search analytics (popular / no-result queries). First page only; no personal data.
+  if (input.q && (input.page ?? 1) === 1) {
+    const userAgent = (await headers()).get('user-agent');
+    void recordSearch(input.q, results.articleTotal + results.eventTotal + results.sports.length, userAgent);
+  }
+  return <><RumPageType type="search" /><SearchPage results={results} state={state} /></>;
 }

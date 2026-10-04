@@ -11,7 +11,7 @@ import { Header } from '../components/layout/Header';
 import { Footer } from '../components/layout/Footer';
 import { SiteProvider } from '../context/SiteContext';
 import { BRANDING } from '../config/branding';
-import { getFeatures, getNavSports, getSiteIdentity, getSiteLayoutForRequest } from '../lib/data';
+import { getFeatures, getGlobalFaqSettings, getRumEnabled, getNavSports, getSiteIdentity, getSiteLayoutForRequest } from '../lib/data';
 import { AnnouncementBar } from '../components/site/AnnouncementBar';
 import { GlobalBlocks } from '../components/site/GlobalBlocks';
 import { PreviewBanner } from '../components/site/PreviewBanner';
@@ -21,6 +21,8 @@ import { cookies, headers } from 'next/headers';
 import { PrivacyProvider } from '../components/privacy/PrivacyProvider';
 import { CONSENT_COOKIE, parseConsent } from '../lib/consent';
 import { trackingConfig } from '../../server/trackingConfig';
+import { WebVitalsReporter } from '../components/analytics/WebVitalsReporter';
+import { AdsensePageTag } from '../components/ui/AdsenseUnit';
 
 // Every page reads live content (and the CSP nonce) per request.
 export const dynamic = 'force-dynamic';
@@ -50,7 +52,11 @@ export const viewport: Viewport = { width: 'device-width', initialScale: 1 };
 const THEME_SCRIPT = `try{var t=localStorage.getItem('sportingspy_theme');if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.classList.toggle('dark',t==='dark')}catch(e){}`;
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const [sports, privacyConfig, cookieStore, requestHeaders, site, identity] = await Promise.all([getNavSports(), trackingConfig(), cookies(), headers(), getSiteLayoutForRequest(), getSiteIdentity()]);
+  const [sports, privacyConfig, cookieStore, requestHeaders, site, identity, faqSettings, rumEnabled] = await Promise.all([getNavSports(), trackingConfig(), cookies(), headers(), getSiteLayoutForRequest(), getSiteIdentity(), getGlobalFaqSettings(), getRumEnabled()]);
+  // PHASE R (v2.2): while the site-wide /faq/ page is off it is a 404, so no menu links to it.
+  const isFaqLink = (href: string) => /^\/faq\/?$/.test(href);
+  const navigationItems = faqSettings.pageEnabled ? site.docs.navigation.items : site.docs.navigation.items.filter((item) => !isFaqLink(item.href));
+  const footerConfig = faqSettings.pageEnabled ? site.docs.footer : { ...site.docs.footer, columns: site.docs.footer.columns.map((c) => ({ ...c, links: c.links.filter((l) => !isFaqLink(l.href)) })) };
   // The production CSP allows inline scripts only with this request's nonce.
   const nonce = requestHeaders.get('content-security-policy')?.match(/'nonce-([^']+)'/)?.[1];
   // PHASE F: the visitor's privacy choice is known on the server, so the
@@ -74,11 +80,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <PrivacyProvider config={privacyConfig} initialConsent={initialConsent}>
           <div className="site-shell min-h-screen flex flex-col bg-stone-50 dark:bg-[#0c0d0e] text-stone-900 dark:text-stone-100 font-sans selection:bg-amber-500 selection:text-white transition-colors relative">
             {site.preview && <PreviewBanner />}
-            <Header sports={sports} navigation={site.docs.navigation.items} siteName={identity.name} />
+            {/* PHASE R: first-party, aggregate real-user monitoring (no cookies, no identifiers). */}
+            <WebVitalsReporter enabled={rumEnabled && !site.preview} />
+            <AdsensePageTag />
+            <Header sports={sports} navigation={navigationItems} siteName={identity.name} />
             <AnnouncementBar items={site.announcements} />
             <main className="site-main flex-1 max-w-[98rem] w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">{children}</main>
             <GlobalBlocks blocks={blocksFor(site, 'footer_top')} className="site-footer-blocks mx-auto w-full max-w-[98rem] px-4 sm:px-6 lg:px-8" />
-            <Footer sports={sports} config={site.docs.footer} siteName={identity.name} />
+            <Footer sports={sports} config={footerConfig} siteName={identity.name} />
           </div>
           </PrivacyProvider>
         </SiteProvider>

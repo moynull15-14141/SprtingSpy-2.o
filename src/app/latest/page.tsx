@@ -4,6 +4,7 @@ import { LatestArticlesPage } from '../../views/LatestArticlesPage';
 import { getLatest } from '../../lib/data';
 import { pageMetadata } from '../../lib/seo';
 import { articleTypeParam, firstParam, pageParam, slugParam, type SearchParams } from '../../lib/params';
+import { RumPageType } from '../../components/analytics/RumPageType';
 
 async function readParams(searchParams: SearchParams) {
   const params = await searchParams;
@@ -31,7 +32,9 @@ export async function generateMetadata({ searchParams }: { searchParams: SearchP
 export default async function Page({ searchParams }: { searchParams: SearchParams }) {
   const { sport, type, page, invalid } = await readParams(searchParams);
   if (invalid || page === null) notFound();
+  // PHASE R: Article Types are database-backed; a name that is no type at all is a 404 (as before).
+  if (type && !(await (await import('../../../server/articleTypes')).allArticleTypes()).some((t) => t.name === type)) notFound();
   const data = await getLatest({ sport: sport || undefined, type: type || undefined, page });
   if (page > data.totalPages) notFound();
-  return <LatestArticlesPage data={data} selectedSport={sport} selectedType={type} currentPage={page} />;
+  return <><RumPageType type="latest" /><LatestArticlesPage data={data} selectedSport={sport} selectedType={type} currentPage={page} /></>;
 }

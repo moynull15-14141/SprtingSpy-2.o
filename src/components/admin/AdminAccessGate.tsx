@@ -31,15 +31,19 @@ export const AdminAccessGate: React.FC<{ children: React.ReactNode }> = ({ child
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // PHASE R: second factor, asked for after a correct password.
+  const [totpRequired, setTotpRequired] = useState(false);
+  const [totpCode, setTotpCode] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     setError(null);
-    const result = await login(email, password);
+    const result = await login(email, password, totpRequired ? totpCode.trim() : undefined);
     setIsSubmitting(false);
     if (!result.success) {
-      setError(result.error || 'Login failed.');
+      if (result.totpRequired) setTotpRequired(true);
+      setError(result.totpRequired && !totpRequired ? null : result.error || 'Login failed.');
     }
   };
 
@@ -79,11 +83,19 @@ export const AdminAccessGate: React.FC<{ children: React.ReactNode }> = ({ child
               onChange={(e) => setPassword(e.target.value)}
               className="w-full text-sm p-2.5 rounded-lg border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-950 text-stone-900 dark:text-stone-100 focus:outline-none focus:ring-1 focus:ring-amber-500"
             />
-            {error && <p className="text-xs text-rose-600 dark:text-rose-400">{error}</p>}
+            {totpRequired && (
+              <div>
+                <label htmlFor="admin-totp" className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">Authentication code</label>
+                <input id="admin-totp" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required autoFocus value={totpCode} onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ''))} placeholder="6-digit code" className="w-full text-sm p-2.5 rounded-lg border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-950 tracking-widest" />
+                <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400">Enter the code from your authenticator app.</p>
+              </div>
+            )}
+            {error && <p role="alert" className="text-xs text-rose-600 dark:text-rose-400">{error}</p>}
             <Button type="submit" size="md" isLoading={isSubmitting} className="w-full justify-center">
-              Sign In
+              {totpRequired ? 'Verify and sign in' : 'Sign In'}
             </Button>
           </form>
+          <a href="/reset-password/" className="block text-center text-xs font-semibold text-amber-700 hover:underline dark:text-amber-400">Forgot your password?</a>
           <button
             onClick={() => navigate('/')}
             className="w-full text-center text-xs text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 dark:text-stone-400"

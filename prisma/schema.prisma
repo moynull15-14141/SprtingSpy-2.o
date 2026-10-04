@@ -97,6 +97,36 @@ enum AuditEntityType {
   Redirect
   Faq
   ContactMessage
+  // PHASE R
+  ArticleType
+  Migration
+  Media
+  Integration
+}
+
+// PHASE R (Spec v2.0 §9.3 "editable and expandable"): the Article Type list
+// lives in the database. `name` is the identity stored on Article.articleType
+// (FK, ON UPDATE/DELETE RESTRICT): a type in use can be deactivated but never
+// renamed or deleted, so existing articles keep their exact type. System
+// types are the seeded specification types. `seoProfile` selects the
+// type-aware SEO checks a custom type inherits; `schemaType` selects the
+// Article/NewsArticle/BlogPosting structured-data type.
+model ArticleType {
+  id          String   @id
+  name        String   @unique
+  slug        String   @unique
+  description String   @default("")
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  isSystem    Boolean  @default(false)
+  schemaType  String   @default("Article")
+  seoProfile  String   @default("general")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  articles Article[]
+
+  @@index([isActive, sortOrder])
 }
 
 // ── Core domain hierarchy: Sport -> Event -> Edition -> Article ──
@@ -117,11 +147,18 @@ model Sport {
   eventConfiguration Json?
   // Icon from the curated set in src/config/sportIcons.ts; null = suggested from the name.
   icon             String?
+  // PHASE R: the sport image/logo as a Media Library item (heroImage keeps the resolved URL).
+  heroMediaId      String?
+  // PHASE R: FAQPage structured data for this sport's FAQ is opt-in (validated before output).
+  faqSchemaEnabled Boolean  @default(false)
 
-  events   SportEvent[]
-  articles Article[]
+  events    SportEvent[]
+  articles  Article[]
+  heroMedia MediaItem?   @relation("SportHeroMedia", fields: [heroMediaId], references: [id], onDelete: Restrict)
+  faqs      FaqEntry[]
 
   @@index([isVisible])
+  @@index([heroMediaId])
 }
 
 model SportEvent {
@@ -145,14 +182,29 @@ model SportEvent {
   seo                Json
   // E2: values only; definitions live on Sport.eventConfiguration.
   sportSpecificValues Json?
+  // PHASE R: other names readers search for (one per line, e.g. "Roland Garros").
+  alternativeNames    String  @default("")
+  // PHASE R: Media Library relation for featuredImage (URL kept as the resolved value).
+  featuredMediaId     String?
+  faqSchemaEnabled    Boolean @default(false)
+  // PHASE M: weighted full-text document maintained by PostgreSQL (migration
+  // 20261009090000_phase_m_event_search). Never written by the application;
+  // read only through server/services/search.
+  searchVector        Unsupported("tsvector")? @default(dbgenerated("(((setweight(to_tsvector('english'::regconfig, ((((COALESCE(name, ''::text) || ' '::text) || COALESCE(\"shortName\", ''::text)) || ' '::text) || COALESCE(\"alternativeNames\", ''::text))), 'A'::\"char\") || setweight(to_tsvector('english'::regconfig, ((((replace(COALESCE(\"sportSlug\", ''::text), '-'::text, ' '::text) || ' '::text) || replace(COALESCE(slug, ''::text), '-'::text, ' '::text)) || ' '::text) || COALESCE(\"eventType\", ''::text))), 'B'::\"char\")) || setweight(to_tsvector('english'::regconfig, ((((COALESCE(\"defaultVenue\", ''::text) || ' '::text) || COALESCE(\"defaultLocation\", ''::text)) || ' '::text) || COALESCE(frequency, ''::text))), 'C'::\"char\")) || setweight(to_tsvector('english'::regconfig, ((COALESCE(description, ''::text) || ' '::text) || COALESCE(history, ''::text))), 'D'::\"char\"))"))
 
-  sport    Sport          @relation(fields: [sportSlug], references: [slug])
-  editions EventEdition[]
+  sport         Sport          @relation(fields: [sportSlug], references: [slug])
+  editions      EventEdition[]
+  faqs          FaqEntry[]
+  featuredMedia MediaItem?     @relation("EventFeaturedMedia", fields: [featuredMediaId], references: [id], onDelete: Restrict)
 
   // Matches the exact uniqueness the app already enforces in POST /api/events
   // ("Event '<slug>' already exists under sport '<sportSlug>'").
   @@unique([sportSlug, slug])
   @@index([sportSlug])
+  @@index([featuredMediaId])
+  @@index([searchVector], type: Gin)
+  @@index([name(ops: raw("gin_trgm_ops"))], map: "SportEvent_name_trgm_idx", type: Gin)
+  @@index([alternativeNames(ops: raw("gin_trgm_ops"))], map: "SportEvent_alternativeNames_trgm_idx", type: Gin)
 }
 
 model EventEdition {
@@ -175,13 +227,23 @@ model EventEdition {
   description        String
   featuredImage      String?
   seo                Json
+  // PHASE R: Media Library relation for featuredImage; opt-in FAQPage markup.
+  featuredMediaId    String?
+  faqSchemaEnabled   Boolean       @default(false)
+  // PHASE M: weighted full-text document maintained by PostgreSQL; lets an
+  // Edition's title, year or venue lead search to its Event.
+  searchVector       Unsupported("tsvector")? @default(dbgenerated("(((setweight(to_tsvector('english'::regconfig, COALESCE(title, ''::text)), 'A'::\"char\") || setweight(to_tsvector('english'::regconfig, (year)::text), 'B'::\"char\")) || setweight(to_tsvector('english'::regconfig, ((COALESCE(venue, ''::text) || ' '::text) || COALESCE(location, ''::text))), 'C'::\"char\")) || setweight(to_tsvector('english'::regconfig, COALESCE(description, ''::text)), 'D'::\"char\"))"))
 
-  event    SportEvent @relation(fields: [sportSlug, eventSlug], references: [sportSlug, slug])
-  articles Article[]
+  event         SportEvent @relation(fields: [sportSlug, eventSlug], references: [sportSlug, slug])
+  articles      Article[]
+  featuredMedia MediaItem? @relation("EditionFeaturedMedia", fields: [featuredMediaId], references: [id], onDelete: Restrict)
+  faqs          FaqEntry[]
 
   // Matches POST /api/editions's exact collision check.
   @@unique([sportSlug, eventSlug, year])
   @@index([sportSlug, eventSlug])
+  @@index([featuredMediaId])
+  @@index([searchVector], type: Gin)
 }
 
 model Article {
@@ -223,6 +285,8 @@ model Article {
   // PHASE D: when an editor last confirmed the content is still accurate
   // (freshness review). Never changes updatedAt.
   reviewedAt         DateTime?
+  // PHASE R: FAQPage structured data for this article's FAQ is opt-in.
+  faqSchemaEnabled   Boolean       @default(false)
   // PHASE E: weighted full-text search document. A STORED generated column
   // computed by PostgreSQL from title/subtitle/type/sport/event/keywords/
   // excerpt/content (see migration 20260929090000_phase_e_search). Never
@@ -233,8 +297,10 @@ model Article {
   author        Author         @relation(fields: [authorId], references: [id])
   edition       EventEdition?  @relation(fields: [sportSlug, eventSlug, editionYear], references: [sportSlug, eventSlug, year])
   featuredMedia MediaItem?     @relation("ArticleFeaturedMedia", fields: [featuredMediaId], references: [id], onDelete: Restrict)
+  type          ArticleType    @relation(fields: [articleType], references: [name], onDelete: Restrict, onUpdate: Restrict)
   bodyMedia     ArticleMedia[]
   comments      Comment[]
+  faqs          FaqEntry[]
 
   // NOTE: true slug-collision scoping (sportSlug+eventSlug+editionYear+slug,
   // with JS `undefined === undefined` semantics for general articles) is
@@ -251,6 +317,8 @@ model Article {
   @@index([authorId])
   @@index([featuredMediaId])
   @@index([status, publishedAt])
+  @@index([articleType])
+  @@index([sportSlug, eventSlug, editionYear, status, publishedAt])
   @@index([searchVector], type: Gin)
   @@index([title(ops: raw("gin_trgm_ops"))], map: "Article_title_trgm_idx", type: Gin)
   @@index([excerpt(ops: raw("gin_trgm_ops"))], map: "Article_excerpt_trgm_idx", type: Gin)
@@ -306,9 +374,15 @@ model User {
   // server/db/users.ts's sanitizeUser() projection.
   passwordHash String
 
+  // PHASE R: optional TOTP second factor (RFC 6238). The secret is stored
+  // encrypted (server/totp.ts) and never leaves the server after enrolment.
+  totpSecret    String?
+  totpEnabledAt DateTime?
+
   authorProfile Author?
   assignedReviews Article[] @relation("ArticleReviewer")
   sessions      Session[]
+  passwordResets PasswordResetToken[]
 
   @@index([email])
   @@index([role, status])
@@ -322,6 +396,25 @@ model Session {
   userId    String
   createdAt DateTime
   expiresAt DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// PHASE R: single-use password reset tokens. Only a SHA-256 hash of the token
+// is stored; the token itself exists only in the reset link. `createdBy` is
+// "self" (requested from the sign-in screen) or the Admin user id that
+// generated the link. Using a token revokes all of the user's sessions.
+model PasswordResetToken {
+  id        String    @id
+  userId    String
+  tokenHash String    @unique
+  createdAt DateTime
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdBy String
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -363,7 +456,7 @@ model MediaItem {
   credit       String?
   source       String?
   license      String?
-  creationType String  @default("Original")
+  creationType String  @default("SportingSpy Original")
   uploadedAt   DateTime
   fileSize     String?
   dimensions   String?
@@ -381,9 +474,16 @@ model MediaItem {
   humanEditing    String?
   copyrightReview String    @default("pending")
   updatedAt       DateTime?
+  // PHASE R: SHA-256 of the uploaded original, for duplicate detection.
+  contentHash     String?
 
-  featuredIn Article[]      @relation("ArticleFeaturedMedia")
-  bodyUsages ArticleMedia[]
+  featuredIn     Article[]      @relation("ArticleFeaturedMedia")
+  bodyUsages     ArticleMedia[]
+  sportHeroes    Sport[]        @relation("SportHeroMedia")
+  eventImages    SportEvent[]   @relation("EventFeaturedMedia")
+  editionImages  EventEdition[] @relation("EditionFeaturedMedia")
+
+  @@index([contentHash])
 }
 
 model AdSlotConfig {
@@ -507,6 +607,10 @@ model AuditLog {
   entityId   String
   timestamp  DateTime
   details    String
+  // PHASE R (Spec §24.3): the changed fields only, before and after.
+  // Secrets are never recorded (server/audit.ts redacts them).
+  before     Json?
+  after      Json?
 
   @@index([timestamp])
   @@index([userId])
@@ -524,8 +628,128 @@ model FaqEntry {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   updatedBy    String
+  // E5: NULL = the global /faq/ page; set = shown only on that Event's page.
+  // Keyed by the stable Event id so slug/sport changes never orphan it.
+  eventId      String?
+  // PHASE R (v2.2 FAQ & Reader Questions): an entry belongs to at most ONE
+  // context — an Article, an Event Edition, an Event or a Sport-level guide
+  // (CHECK constraint "FaqEntry_single_context"). No context = site-wide.
+  articleId    String?
+  editionId    String?
+  sportId      String?
+  // Where the entry came from: "editor", "ai-suggestion" or "data-suggestion".
+  // Suggestions are always created as drafts; publishing needs an editor.
+  source       String   @default("editor")
+  // Who published it (human approval record).
+  approvedBy   String?
+  approvedAt   DateTime?
+
+  event   SportEvent?   @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  article Article?      @relation(fields: [articleId], references: [id], onDelete: Restrict)
+  edition EventEdition? @relation(fields: [editionId], references: [id], onDelete: Restrict)
+  sport   Sport?        @relation(fields: [sportId], references: [id], onDelete: Restrict)
 
   @@index([status, displayOrder])
+  @@index([eventId, status, displayOrder])
+  @@index([articleId, status, displayOrder])
+  @@index([editionId, status, displayOrder])
+  @@index([sportId, status, displayOrder])
+}
+
+// PHASE R (Spec §19.5 / §25.5): aggregate internal search analytics. One row
+// per UTC day and normalized query. No user, session, IP or device data.
+model SearchQueryStat {
+  day         DateTime @db.Date
+  query       String
+  searches    Int      @default(0)
+  zeroResults Int      @default(0)
+
+  @@id([day, query])
+  @@index([day])
+}
+
+// PHASE R (Spec §25.6–25.8): real-user Core Web Vitals, aggregated per UTC
+// day, page type, metric and device class. `histogram` counts samples per
+// fixed bucket (server/rum.ts) so the 75th percentile can be computed
+// without storing individual measurements.
+model WebVitalStat {
+  day       DateTime @db.Date
+  pageType  String
+  metric    String
+  device    String
+  samples   Int      @default(0)
+  good      Int      @default(0)
+  needsWork Int      @default(0)
+  poor      Int      @default(0)
+  histogram Int[]    @default([])
+
+  @@id([day, pageType, metric, device])
+  @@index([day])
+}
+
+// PHASE R (Spec §25.2): aggregate page views per UTC day and public path.
+// Counted without cookies or identifiers; query strings are never stored.
+model PageViewStat {
+  day      DateTime @db.Date
+  path     String
+  pageType String
+  views    Int      @default(0)
+
+  @@id([day, path])
+  @@index([day, pageType])
+}
+
+// PHASE R (Spec §17.2, §25.3–25.4): Search Console / Bing Webmaster data,
+// stored exactly as the provider API returned it (never estimated).
+// dimension: "date" | "query" | "page" | "country" | "device" | "searchAppearance".
+model SearchPerformanceStat {
+  source      String
+  day         DateTime @db.Date
+  dimension   String
+  key         String
+  clicks      Int
+  impressions Int
+  ctr         Float
+  position    Float
+
+  @@id([source, day, dimension, key])
+  @@index([source, dimension, day])
+}
+
+// PHASE R: latest provider snapshot that is not a daily series
+// (Search Console sitemaps, Bing crawl/index stats). kind: "sitemaps" | "crawl".
+model SearchEngineSnapshot {
+  source    String
+  kind      String
+  fetchedAt DateTime
+  data      Json
+
+  @@id([source, kind])
+}
+
+// PHASE R (Spec §27): the migration sheet. One row per old-site URL. The
+// inventory itself is owner input; this table holds the decisions, the new
+// URL and the resulting redirect. decision: UNDECIDED | KEEP | REWRITE | MERGE | RETIRE.
+model MigrationItem {
+  id           String    @id
+  oldUrl       String    @unique
+  oldCategory  String    @default("")
+  oldTitle     String    @default("")
+  decision     String    @default("UNDECIDED")
+  newCategory  String    @default("")
+  newTitle     String    @default("")
+  newUrl       String    @default("")
+  // "pending" | "ok" | "error"; `validation` lists the problems found.
+  checkStatus  String    @default("pending")
+  validation   Json?
+  redirectId   String?
+  notes        String    @default("")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  updatedBy    String
+
+  @@index([decision])
+  @@index([checkStatus])
 }
 
 // PHASE H: messages sent through the public contact form. Stored only —

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { DmcaPage } from '../../views/StaticPages';
 import { pageMetadata } from '../../lib/seo';
+import { RumPageType } from '../../components/analytics/RumPageType';
 
 export const generateMetadata = (): Promise<Metadata> =>
   pageMetadata({
@@ -10,5 +11,5 @@ export const generateMetadata = (): Promise<Metadata> =>
 });
 
 export default function Page() {
-  return <DmcaPage />;
+  return <><RumPageType type="static" /><DmcaPage /></>;
 }

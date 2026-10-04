@@ -12,10 +12,11 @@
 
 import type { Prisma } from '../../generated/prisma/client';
 import type { Article, Author, EventEdition, Sport, SportEvent, AdSlotConfig, Comment } from '../../../src/types';
-import { articlePath, editionPath } from '../../../src/lib/paths';
+import { articlePath, editionPath, eventPath } from '../../../src/lib/paths';
 import { toMediaAsset, type MediaAsset } from '../../../src/lib/media';
 import { legacyToDoc, type RichDoc } from '../../../src/lib/richText';
 import { publicSportEventValues, resolveSportEventConfiguration } from '../../sportEventConfiguration';
+import { utcToday, type EditionTiming } from '../../../src/lib/eventTiming';
 
 // Loaded lazily so importing this module (e.g. while Next.js collects page
 // data at build time) never opens a database connection by itself.
@@ -34,6 +35,9 @@ export type ArticleSummary = Omit<Article, 'content' | 'tables' | 'references'> 
 export type EventSummary = SportEvent & { sportName: string; currentEditionUrl?: string };
 
 export type EditionSummary = EventEdition & { sportName: string; url: string };
+
+/** PHASE E5: an Edition in Event discovery, with the names its card needs. */
+export type DiscoveryEdition = EditionSummary & { eventName: string; eventUrl: string };
 
 // ── Serializers (DB row -> public domain type; Dates -> ISO strings) ──
 
@@ -124,6 +128,27 @@ const visibleEventWhere = (extra: Prisma.SportEventWhereInput = {}): Prisma.Spor
   sport: { isVisible: true },
   ...extra,
 });
+
+/**
+ * PHASE E5: SQL form of src/lib/eventTiming.ts#editionTiming (same rules; the
+ * verify-phase-e5 suite checks the two agree). Dates are `YYYY-MM-DD` strings,
+ * so string comparison is calendar order.
+ */
+export function editionTimingWhere(timing: EditionTiming, today: string = utcToday()): Prisma.EventEditionWhereInput {
+  const live: Prisma.EventEditionWhereInput = { status: { in: ['upcoming', 'active'] } };
+  const lastBeforeToday: Prisma.EventEditionWhereInput = { OR: [{ endDate: { lt: today } }, { endDate: null, startDate: { lt: today } }] };
+  const lastNotBeforeToday: Prisma.EventEditionWhereInput = { OR: [{ endDate: { gte: today } }, { endDate: null, startDate: { gte: today } }, { endDate: null, startDate: null }] };
+  if (timing === 'past') return { OR: [{ status: { in: ['completed', 'archived'] } }, lastBeforeToday] };
+  if (timing === 'upcoming') {
+    return { AND: [live, lastNotBeforeToday, { OR: [{ startDate: { gt: today } }, { startDate: null, endDate: { gt: today } }, { startDate: null, endDate: null, status: 'upcoming' }] }] };
+  }
+  return { AND: [live, lastNotBeforeToday, { OR: [{ startDate: { lte: today } }, { startDate: null, endDate: { lte: today } }, { startDate: null, endDate: null, status: 'active' }] }] };
+}
+
+/** Soonest first for upcoming/ongoing; most recent first for past. Undated last; ties are deterministic. */
+export const editionTimingOrder = (timing: EditionTiming): Prisma.EventEditionOrderByWithRelationInput[] => timing === 'past'
+  ? [{ endDate: { sort: 'desc', nulls: 'last' } }, { startDate: { sort: 'desc', nulls: 'last' } }, { year: 'desc' }, { id: 'asc' }]
+  : [{ startDate: { sort: 'asc', nulls: 'last' } }, { endDate: { sort: 'asc', nulls: 'last' } }, { year: 'asc' }, { id: 'asc' }];
 
 // Everything except the (potentially large) body, tables and references.
 const summarySelect = {
@@ -238,7 +263,7 @@ export async function getHomeData() {
     countArticles(),
     prisma.sportEvent.findMany({ where: visibleEventWhere({ featured: true }) }),
     prisma.sport.findMany({ where: { isVisible: true }, orderBy: { order: 'asc' } }),
-    prisma.eventEdition.findMany({ where: { status: 'upcoming', event: visibleEventWhere() }, take: 3 }),
+    prisma.eventEdition.findMany({ where: { AND: [{ event: visibleEventWhere() }, editionTimingWhere('upcoming')] }, orderBy: editionTimingOrder('upcoming'), take: 3 }),
   ]);
   const [articleCounts, eventCounts, featuredEvents] = await Promise.all([
     prisma.article.groupBy({ by: ['sportSlug'], where: await publishedArticleWhere(), _count: { _all: true } }),
@@ -279,32 +304,125 @@ export async function getSport(slug: string): Promise<Sport | null> {
   return row ? toSport(row) : null;
 }
 
+/** PHASE R: Article Types whose SEO profile marks them as evergreen reference content (Spec §8.6 "Related Articles"). */
+const EVERGREEN_PROFILES = ['event-guide', 'past-winners', 'records', 'venue', 'qualification', 'rules-format', 'history', 'analysis', 'general', 'players', 'teams', 'prize-money', 'viewing'];
+async function evergreenTypes(): Promise<string[]> {
+  const { allArticleTypes } = await import('../../articleTypes');
+  return (await allArticleTypes()).filter((t) => EVERGREEN_PROFILES.includes(t.seoProfile)).map((t) => t.name);
+}
+
+/** Bounded list sizes for hub pages (Spec §23.4, §26.2: no unbounded listings). */
+export const HUB_LIMITS = { featuredEvents: 6, upcoming: 6, latest: 12, events: 24, guides: 12, explore: 6, editionLatest: 9, related: 6, eventEditions: 30, author: 30 } as const;
+
+/** Merges ranked lists, keeping the first occurrence of each article. */
+function mergeUnique(lists: ArticleSummary[][], exclude: Set<string>, limit: number): ArticleSummary[] {
+  const out: ArticleSummary[] = [];
+  const seen = new Set(exclude);
+  for (const list of lists) for (const a of list) {
+    if (out.length >= limit) return out;
+    if (seen.has(a.id)) continue;
+    seen.add(a.id);
+    out.push(a);
+  }
+  return out;
+}
+
 export async function getSportHub(slug: string) {
   const sport = await getSport(slug);
   if (!sport) return null;
   const prisma = await db();
-  const [eventRows, articles, editionRows] = await Promise.all([
-    prisma.sportEvent.findMany({ where: visibleEventWhere({ sportSlug: slug }) }),
-    listArticles({ sportSlug: slug }),
-    prisma.eventEdition.findMany({ where: { sportSlug: slug, event: visibleEventWhere() } }),
+  const today = utcToday();
+  const sportEvents = visibleEventWhere({ sportSlug: slug });
+  const [featuredRows, flaggedRows, eventRows, eventTotal, latestArticles, articleTotal, guides, guideTotal, upcomingRows, recentPastRows, faqs] = await Promise.all([
+    sport.featuredEventIds.length ? prisma.sportEvent.findMany({ where: { ...sportEvents, id: { in: sport.featuredEventIds } } }) : Promise.resolve([]),
+    prisma.sportEvent.findMany({ where: { ...sportEvents, featured: true }, orderBy: [{ name: 'asc' }], take: HUB_LIMITS.featuredEvents }),
+    prisma.sportEvent.findMany({ where: sportEvents, orderBy: [{ featured: 'desc' }, { name: 'asc' }, { id: 'asc' }], take: HUB_LIMITS.events }),
+    prisma.sportEvent.count({ where: sportEvents }),
+    listArticles({ sportSlug: slug }, { take: HUB_LIMITS.latest }),
+    countArticles({ sportSlug: slug }),
+    listArticles({ sportSlug: slug, eventSlug: null }, { take: HUB_LIMITS.guides }),
+    countArticles({ sportSlug: slug, eventSlug: null }),
+    prisma.eventEdition.findMany({ where: { AND: [{ sportSlug: slug, event: visibleEventWhere() }, { OR: [editionTimingWhere('ongoing', today), editionTimingWhere('upcoming', today)] }] }, orderBy: editionTimingOrder('upcoming'), take: HUB_LIMITS.upcoming }),
+    prisma.eventEdition.findMany({ where: { AND: [{ sportSlug: slug, event: visibleEventWhere() }, editionTimingWhere('past', today)] }, orderBy: editionTimingOrder('past'), take: HUB_LIMITS.explore }),
+    prisma.faqEntry.findMany({ where: { sportId: sport.id, status: 'published' }, orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }], select: { id: true, question: true, answer: true } }),
   ]);
+  // Featured: the editor's explicit choice (in their order), else events flagged "featured".
+  const chosen = sport.featuredEventIds.map((id) => featuredRows.find((e) => e.id === id)).filter((e): e is NonNullable<typeof e> => !!e);
+  const featuredEvents = await summarizeEvents(chosen.length ? chosen.slice(0, HUB_LIMITS.featuredEvents) : flaggedRows);
+  const editionCard = (ed: Prisma.EventEditionGetPayload<object>) => ({ ...toEdition(ed), sportName: sport.name, url: editionPath(ed.sportSlug, ed.eventSlug, ed.year) });
   return {
     sport,
+    faqSchemaEnabled: !!sport.faqSchemaEnabled,
+    featuredEvents,
+    upcomingEditions: upcomingRows.map(editionCard),
+    latestArticles,
+    articleTotal,
     events: await summarizeEvents(eventRows),
-    articles,
-    editions: editionRows.map((ed) => ({ ...toEdition(ed), sportName: sport.name, url: editionPath(ed.sportSlug, ed.eventSlug, ed.year) })),
+    eventTotal,
+    guides,
+    guideTotal,
+    recentEditions: recentPastRows.map(editionCard),
+    faqs,
   };
 }
 
-export async function getEventsDirectory(sportFilter?: string) {
+export const EVENTS_PAGE_SIZE = 12;
+export const DISCOVERY_PREVIEW_SIZE = 6;
+
+/** Editions (of visible Events) with their Event/Sport names, for discovery cards. */
+async function discoveryEditions(where: Prisma.EventEditionWhereInput, orderBy: Prisma.EventEditionOrderByWithRelationInput[], opts: { take: number; skip?: number }): Promise<DiscoveryEdition[]> {
   const prisma = await db();
-  const allRows = await prisma.sportEvent.findMany({ where: visibleEventWhere() });
-  const events = await summarizeEvents(allRows);
-  const sports = await prisma.sport.findMany({ where: { isVisible: true }, orderBy: { order: 'asc' }, select: { id: true, slug: true, name: true } });
+  const rows = await prisma.eventEdition.findMany({
+    where, orderBy, ...opts,
+    include: { event: { select: { name: true, sport: { select: { name: true } } } } },
+  });
+  return rows.map(({ event, ...ed }) => ({
+    ...toEdition(ed),
+    sportName: event.sport.name,
+    eventName: event.name,
+    eventUrl: eventPath(ed.sportSlug, ed.eventSlug),
+    url: editionPath(ed.sportSlug, ed.eventSlug, ed.year),
+  }));
+}
+
+/**
+ * PHASE E5: the public Event discovery page. Without `when`, a paginated
+ * Event index plus short Happening now / Upcoming / Past previews; with
+ * `when`, a paginated list of Editions in that timing. Every list is bounded
+ * and filtered in SQL (no full-table loads).
+ */
+export async function getEventsDirectory({ sport, when, page = 1 }: { sport?: string; when?: EditionTiming; page?: number } = {}) {
+  const prisma = await db();
+  const today = utcToday();
+  const eventWhere = visibleEventWhere(sport ? { sportSlug: sport } : {});
+  const editionWhere = (timing: EditionTiming): Prisma.EventEditionWhereInput => ({ AND: [{ event: eventWhere }, editionTimingWhere(timing, today)] });
+  const [total, sports, timingCounts] = await Promise.all([
+    prisma.sportEvent.count({ where: visibleEventWhere() }),
+    prisma.sport.findMany({ where: { isVisible: true }, orderBy: { order: 'asc' }, select: { id: true, slug: true, name: true } }),
+    Promise.all((['ongoing', 'upcoming', 'past'] as const).map((t) => prisma.eventEdition.count({ where: editionWhere(t) }))),
+  ]);
+  const counts: Record<EditionTiming, number> = { ongoing: timingCounts[0], upcoming: timingCounts[1], past: timingCounts[2] };
+  const skip = (page - 1) * EVENTS_PAGE_SIZE;
+
+  if (when) {
+    const editions = await discoveryEditions(editionWhere(when), editionTimingOrder(when), { take: EVENTS_PAGE_SIZE, skip });
+    return { today, total, sports, counts, when, page, totalPages: Math.max(1, Math.ceil(counts[when] / EVENTS_PAGE_SIZE)), events: [] as EventSummary[], eventTotal: 0, editions, previews: null };
+  }
+
+  const [eventTotal, eventRows, ongoing, upcoming, past] = await Promise.all([
+    prisma.sportEvent.count({ where: eventWhere }),
+    prisma.sportEvent.findMany({ where: eventWhere, orderBy: [{ featured: 'desc' }, { name: 'asc' }, { id: 'asc' }], take: EVENTS_PAGE_SIZE, skip }),
+    discoveryEditions(editionWhere('ongoing'), editionTimingOrder('ongoing'), { take: DISCOVERY_PREVIEW_SIZE }),
+    discoveryEditions(editionWhere('upcoming'), editionTimingOrder('upcoming'), { take: DISCOVERY_PREVIEW_SIZE }),
+    discoveryEditions(editionWhere('past'), editionTimingOrder('past'), { take: 3 }),
+  ]);
   return {
-    total: events.length,
-    sports,
-    events: sportFilter ? events.filter((e) => e.sportSlug === sportFilter) : events,
+    today, total, sports, counts, when: undefined, page,
+    totalPages: Math.max(1, Math.ceil(eventTotal / EVENTS_PAGE_SIZE)),
+    events: await summarizeEvents(eventRows),
+    eventTotal,
+    editions: [] as DiscoveryEdition[],
+    previews: { ongoing, upcoming, past },
   };
 }
 
@@ -323,37 +441,87 @@ export async function getEvent(sportSlug: string, eventSlug: string) {
   };
 }
 
+const faqSelect = { id: true, question: true, answer: true } as const;
+const faqOrder: Prisma.FaqEntryOrderByWithRelationInput[] = [{ displayOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }];
+
+/**
+ * Event page. Latest Articles = newest published articles of the event;
+ * Related Articles = evergreen reference articles (event-level or sport-level)
+ * not already listed. Both are generated from relationships (Spec §8.6).
+ */
 export async function getEventPage(sportSlug: string, eventSlug: string) {
   const found = await getEvent(sportSlug, eventSlug);
   if (!found) return null;
   const prisma = await db();
-  const [editionRows, articles, relatedRows] = await Promise.all([
-    prisma.eventEdition.findMany({ where: { sportSlug, eventSlug }, orderBy: { year: 'desc' } }),
-    listArticles({ sportSlug, eventSlug }),
+  const evergreen = await evergreenTypes();
+  const [editionRows, editionTotal, articles, articleTotal, relatedRows, faqs] = await Promise.all([
+    prisma.eventEdition.findMany({ where: { sportSlug, eventSlug }, orderBy: { year: 'desc' }, take: HUB_LIMITS.eventEditions }),
+    prisma.eventEdition.count({ where: { sportSlug, eventSlug } }),
+    listArticles({ sportSlug, eventSlug }, { take: HUB_LIMITS.editionLatest }),
+    countArticles({ sportSlug, eventSlug }),
     prisma.sportEvent.findMany({ where: visibleEventWhere({ sportSlug, slug: { not: eventSlug } }), orderBy: [{ featured: 'desc' }, { name: 'asc' }], take: 3 }),
+    // Published, editor-approved questions scoped to this Event (v2.2: no automatic FAQ).
+    prisma.faqEntry.findMany({ where: { eventId: found.event.id, status: 'published' }, orderBy: faqOrder, select: faqSelect }),
+  ]);
+  const latestIds = new Set(articles.map((a) => a.id));
+  const [eventEvergreen, sportEvergreen] = await Promise.all([
+    listArticles({ sportSlug, eventSlug, articleType: { in: evergreen }, id: { notIn: [...latestIds] } }, { take: HUB_LIMITS.related }),
+    listArticles({ sportSlug, eventSlug: null, articleType: { in: evergreen } }, { take: HUB_LIMITS.related }),
   ]);
   const editions = editionRows.map(toEdition);
+  const currentEdition = found.event.currentEditionYear === null
+    ? undefined
+    : editions.find((ed) => ed.year === found.event.currentEditionYear)
+      ?? (await prisma.eventEdition.findFirst({ where: { sportSlug, eventSlug, year: found.event.currentEditionYear } }).then((r) => (r ? toEdition(r) : undefined)));
   return {
     ...found,
     sportSpecificValues: found.event.sportSpecificValues ?? {},
     editions,
+    editionTotal,
     articles,
+    articleTotal,
+    relatedArticles: mergeUnique([eventEvergreen, sportEvergreen], latestIds, HUB_LIMITS.related),
     relatedEvents: await summarizeEvents(relatedRows),
-    currentEdition: found.event.currentEditionYear === null ? undefined : editions.find((ed) => ed.year === found.event.currentEditionYear),
+    faqs,
+    faqSchemaEnabled: !!found.event.faqSchemaEnabled,
+    today: utcToday(),
+    currentEdition,
   };
 }
 
+/**
+ * Edition page (Spec §8.4): Latest Articles = newest published articles of
+ * this edition; Related Articles = evergreen articles of the same event
+ * (event-level or other editions) and of the sport, excluding the latest list.
+ */
 export async function getEditionPage(sportSlug: string, eventSlug: string, year: number) {
   const found = await getEvent(sportSlug, eventSlug);
   if (!found) return null;
   const prisma = await db();
   const row = await prisma.eventEdition.findFirst({ where: { sportSlug, eventSlug, year } });
   if (!row) return null;
-  const [articles, otherYears] = await Promise.all([
-    listArticles({ sportSlug, eventSlug, editionYear: year }),
-    prisma.eventEdition.findMany({ where: { sportSlug, eventSlug, year: { not: year } }, select: { id: true, year: true } }),
+  const evergreen = await evergreenTypes();
+  const [latestArticles, articleTotal, otherYears, faqs] = await Promise.all([
+    listArticles({ sportSlug, eventSlug, editionYear: year }, { take: HUB_LIMITS.editionLatest }),
+    countArticles({ sportSlug, eventSlug, editionYear: year }),
+    prisma.eventEdition.findMany({ where: { sportSlug, eventSlug, year: { not: year } }, select: { id: true, year: true }, orderBy: { year: 'desc' }, take: HUB_LIMITS.eventEditions }),
+    prisma.faqEntry.findMany({ where: { editionId: row.id, status: 'published' }, orderBy: faqOrder, select: faqSelect }),
   ]);
-  return { ...found, edition: toEdition(row), articles, otherEditions: otherYears };
+  const latestIds = new Set(latestArticles.map((a) => a.id));
+  const [eventEvergreen, sportEvergreen] = await Promise.all([
+    listArticles({ sportSlug, eventSlug, articleType: { in: evergreen }, OR: [{ editionYear: null }, { editionYear: { not: year } }] }, { take: HUB_LIMITS.related }),
+    listArticles({ sportSlug, eventSlug: null, articleType: { in: evergreen } }, { take: HUB_LIMITS.related }),
+  ]);
+  return {
+    ...found,
+    edition: toEdition(row),
+    latestArticles,
+    articleTotal,
+    relatedArticles: mergeUnique([eventEvergreen, sportEvergreen], latestIds, HUB_LIMITS.related),
+    otherEditions: otherYears,
+    faqs,
+    faqSchemaEnabled: row.faqSchemaEnabled,
+  };
 }
 
 /**
@@ -374,6 +542,27 @@ export async function getArticlePage(sportSlug: string, slug: string, eventSlug?
   return buildArticleView(row, sport, true);
 }
 
+const STOPWORDS = new Set(['the', 'and', 'for', 'with', 'from', 'that', 'this', 'what', 'when', 'where', 'how', 'who', 'your', 'about', 'into', 'will', 'are', 'was', 'guide', 'complete']);
+
+/**
+ * Topic similarity (Spec §12 priority 4): published articles of the sport
+ * whose full-text document matches the title's significant words, ranked by
+ * PostgreSQL ts_rank. Bounded and index-backed (Article_searchVector_idx).
+ */
+async function similarArticleIds(sportSlug: string, excludeId: string, title: string, limit: number): Promise<string[]> {
+  const terms = [...new Set(title.toLowerCase().normalize('NFKD').replace(/[^a-z0-9 ]+/g, ' ').split(' ').filter((w) => w.length > 3 && !STOPWORDS.has(w) && !/^\d+$/.test(w)))].slice(0, 8);
+  if (!terms.length) return [];
+  const prisma = await db();
+  const query = terms.join(' | ');
+  const rows = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT "id" FROM "Article"
+    WHERE "status" = 'published' AND "sportSlug" = ${sportSlug} AND "id" <> ${excludeId}
+      AND "searchVector" @@ to_tsquery('english', ${query})
+    ORDER BY ts_rank("searchVector", to_tsquery('english', ${query})) DESC, "publishedAt" DESC
+    LIMIT ${limit}`;
+  return rows.map((r) => r.id);
+}
+
 /**
  * Everything the article template needs. Shared by the public page and the
  * staff preview so both render identically. `withRelated` is false for
@@ -387,22 +576,39 @@ async function buildArticleView(row: ArticleRow, sport: Sport, withRelated: bool
   const bodyMediaIds: string[] = [];
   const collect = (nodes: RichDoc['content']) => nodes.forEach((n) => (n.type === 'image' ? bodyMediaIds.push(String(n.attrs?.mediaId)) : n.content && collect(n.content)));
   collect(body.content);
-  const [eventRow, editionRow, authorRow, media] = await Promise.all([
+  const [eventRow, editionRow, authorRow, media, faqs, typeDef] = await Promise.all([
     article.eventSlug ? prisma.sportEvent.findFirst({ where: visibleEventWhere({ sportSlug, slug: article.eventSlug }) }) : null,
     article.eventSlug && article.editionYear
       ? prisma.eventEdition.findFirst({ where: { sportSlug, eventSlug: article.eventSlug, year: article.editionYear } })
       : null,
     prisma.author.findUnique({ where: { id: article.authorId } }),
     mediaAssets([row.featuredMediaId, ...bodyMediaIds]),
+    prisma.faqEntry.findMany({ where: { articleId: row.id, status: 'published' }, orderBy: faqOrder, select: faqSelect }),
+    import('../../articleTypes').then((m) => m.articleTypeMap()).then((map) => map.get(row.articleType) ?? null),
   ]);
 
-  // Related content priority (Spec §12): same edition -> same event -> same sport, newest first.
-  const candidates = withRelated ? await listArticles({ sportSlug, id: { not: article.id } }, { take: 24 }) : [];
-  const rank = (a: ArticleSummary) =>
-    a.eventSlug === article.eventSlug && article.eventSlug
-      ? a.editionYear === article.editionYear && article.editionYear ? 0 : 1
-      : 2;
-  const related = [...candidates].sort((a, b) => rank(a) - rank(b)).slice(0, 3);
+  // Related content priority (Spec §12): same edition → same event → same sport
+  // + topic similarity → newest in the sport. Each step is a bounded, indexed
+  // query (no fixed "latest 24" window), so older but closely related
+  // articles are still found as the archive grows.
+  let related: ArticleSummary[] = [];
+  let latest: ArticleSummary[] = [];
+  if (withRelated) {
+    const self = new Set([article.id]);
+    const RELATED = 3;
+    const [sameEdition, sameEvent, similarIds] = await Promise.all([
+      article.eventSlug && article.editionYear ? listArticles({ sportSlug, eventSlug: article.eventSlug, editionYear: article.editionYear, id: { not: article.id } }, { take: RELATED + 1 }) : Promise.resolve([]),
+      article.eventSlug ? listArticles({ sportSlug, eventSlug: article.eventSlug, id: { not: article.id }, ...(article.editionYear ? { NOT: { editionYear: article.editionYear } } : {}) }, { take: RELATED + 1 }) : Promise.resolve([]),
+      similarArticleIds(sportSlug, article.id, `${article.title} ${article.articleType}`, RELATED + 1),
+    ]);
+    const similar = similarIds.length ? (await listArticles({ id: { in: similarIds } })).sort((a, b) => similarIds.indexOf(a.id) - similarIds.indexOf(b.id)) : [];
+    const needFallback = sameEdition.length + sameEvent.length + similar.length < RELATED;
+    const sportRecent = needFallback ? await listArticles({ sportSlug, id: { not: article.id } }, { take: RELATED + 1 }) : [];
+    related = mergeUnique([sameEdition, sameEvent, similar, sportRecent], self, RELATED);
+    // Latest Articles (Spec §9.7): newest in the same sport, not already shown as related (never other sports).
+    const shown = new Set([article.id, ...related.map((a) => a.id)]);
+    latest = (await listArticles({ sportSlug, id: { notIn: [...shown] } }, { take: 4 }));
+  }
 
   return {
     article,
@@ -414,6 +620,10 @@ async function buildArticleView(row: ArticleRow, sport: Sport, withRelated: bool
     edition: editionRow ? toEdition(editionRow) : null,
     author: authorRow ? toAuthor(authorRow) : null,
     related,
+    latest,
+    faqs,
+    faqSchemaEnabled: row.faqSchemaEnabled,
+    schemaType: typeDef?.schemaType ?? 'Article',
   };
 }
 
@@ -448,14 +658,18 @@ export async function getLatest({ sport, type, page }: { sport?: string; type?: 
     listArticles(where, { take: LATEST_PAGE_SIZE, skip: (page - 1) * LATEST_PAGE_SIZE }),
     prisma.sport.findMany({ where: { isVisible: true }, orderBy: { order: 'asc' }, select: { id: true, slug: true, name: true } }),
   ]);
-  return { total, allPublished, articles, sports, totalPages: Math.max(1, Math.ceil(total / LATEST_PAGE_SIZE)) };
+  // PHASE R: the type filter lists the active, database-backed Article Types.
+  const types = (await (await import('../../articleTypes')).activeArticleTypes()).map((t) => t.name);
+  return { total, allPublished, articles, sports, types, totalPages: Math.max(1, Math.ceil(total / LATEST_PAGE_SIZE)) };
 }
 
 export async function getAuthorPage(slug: string) {
   const prisma = await db();
   const row = await prisma.author.findUnique({ where: { slug } });
   if (!row) return null;
-  return { author: toAuthor(row), articles: await listArticles({ authorId: row.id }) };
+  // PHASE R: bounded (newest first) with the total, so large bylines stay fast.
+  const [articles, articleTotal] = await Promise.all([listArticles({ authorId: row.id }, { take: HUB_LIMITS.author }), countArticles({ authorId: row.id })]);
+  return { author: toAuthor(row), articles, articleTotal };
 }
 
 /** Approved comments only; callers check the comments launch flag first. */

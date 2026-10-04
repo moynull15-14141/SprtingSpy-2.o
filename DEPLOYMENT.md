@@ -55,6 +55,22 @@ Configure DNS, valid TLS certificates, HTTPS termination/renewal and network res
 
 Collect service stdout/stderr in a protected log destination. Alert on readiness failures, 5xx rates, storage/database failures and process restarts; correlate errors with X-Request-Id. Keep request bodies, query strings and credentials out of logs. External alerting, uptime checks, dashboards and log retention require provider setup and have not been implemented by repository code.
 
+## Phase R: optional integrations and their owner actions
+
+| Variable / setting | Purpose | Without it |
+| --- | --- | --- |
+| `TOTP_ENCRYPTION_KEY` (env, 32+ chars) | Encrypts staff two-factor secrets | Production refuses 2FA enrolment (HTTP 503); rotate only when no account has 2FA on, or reset 2FA first |
+| `RESEND_API_KEY`, `MAIL_FROM` (env) | Self-service password-reset e-mails | Requests answer generically and send nothing; Admins issue reset links from Users |
+| `GOOGLE_SEARCH_CONSOLE_CREDENTIALS` (env) + Settings → Search Console property | Daily import of clicks, impressions, CTR, position, queries, pages, countries, devices, search appearance, sitemap status | Insights shows "not connected"; nothing is estimated. Add the service-account e-mail as a user of the property |
+| `BING_WEBMASTER_API_KEY` (env) + Settings → Bing site URL | Daily import of Bing traffic, queries, pages, crawl stats | Same as above |
+| `PUBLIC_CACHE_TTL_SECONDS` (env, default 60) | Public data cache lifetime per server process | — (0 disables). With several instances, other instances refresh within the TTL |
+| Settings → Consent interface = `google-cmp` | Uses Google's certified CMP (AdSense Privacy & messaging) for advertising consent | Built-in banner. **Owner must enable the GDPR/UK/CH message in the AdSense account**; certification belongs to the CMP |
+| Settings → AdSense Auto ads | Loads the AdSense tag on all pages for Auto ads | Controlled slots only |
+| Settings → Real-user monitoring | First-party aggregate page views and Core Web Vitals | Enabled by default; disable if legal review requires |
+| Settings → Site-wide /faq/ page | Optional global FAQ | Disabled (404) — FAQ is contextual |
+
+Deploy order for this phase: back up → `npm run db:migrate:deploy` (applies `20261010090000_phase_r_requirements_reconciliation`, additive) → `npm run db:generate` → `npm run build` → restart → `npm run test:phase-r` only against a disposable/staging database (it creates and removes fixtures).
+
 ## Backup, restore and disaster recovery
 
 The existing `npm run db:backup-drill` is preserved. It is **local development only**: it reads the source with `pg_dump`, restores to its own new drill database, compares all table counts/content hashes, migration history, extensions and the generated search vector, then removes only that drill database. Run this only after checking the local target; it is not a production backup scheduler.

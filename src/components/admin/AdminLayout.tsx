@@ -6,7 +6,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   PanelLeftClose, PanelLeftOpen, LayoutDashboard, FileText, Trophy, CalendarDays, UserSquare2, ShieldCheck,
-  MessageSquare, Image, Megaphone, SearchCheck, ArrowLeftRight, ScrollText, Settings, PanelsTopLeft, HelpCircle, Inbox, type LucideIcon,
+  MessageSquare, Image, Megaphone, SearchCheck, ArrowLeftRight, ScrollText, Settings, PanelsTopLeft, HelpCircle, Inbox, Tags, ChartNoAxesCombined, Route, type LucideIcon,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
@@ -26,6 +26,9 @@ export type AdminTab =
   | 'site'
   | 'faq'
   | 'inbox'
+  | 'types'
+  | 'insights'
+  | 'migration'
   | 'settings';
 
 interface AdminLayoutProps {
@@ -52,6 +55,8 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
   const NAV_ITEMS: { id: AdminTab; label: string; badge?: number; icon: LucideIcon }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'articles', label: 'Articles', icon: FileText },
+    // PHASE R: database-backed Article Types (Admin edits; Editor/Author can view).
+    ...(['Admin', 'Editor'].includes(currentUser.role) ? [{ id: 'types' as AdminTab, label: 'Article Types', icon: Tags }] : []),
     ...(['Admin', 'Editor'].includes(currentUser.role) ? [{ id: 'site' as AdminTab, label: 'Site Experience', icon: PanelsTopLeft }] : []),
     // PHASE H: FAQ content and the contact-form inbox (APIs are Admin/Editor only).
     ...(['Admin', 'Editor'].includes(currentUser.role) ? [{ id: 'faq' as AdminTab, label: 'FAQ', icon: HelpCircle }, { id: 'inbox' as AdminTab, label: 'Contact Inbox', icon: Inbox }] : []),
@@ -63,6 +68,8 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
     { id: 'media', label: 'Media Library', icon: Image },
     { id: 'ads', label: 'Ad Placements', icon: Megaphone },
     { id: 'seo', label: 'SEO Intelligence', icon: SearchCheck },
+    // PHASE R: content / search / performance insights (separate from ad placement management).
+    ...(['Admin', 'Editor'].includes(currentUser.role) ? [{ id: 'insights' as AdminTab, label: 'Analytics & Insights', icon: ChartNoAxesCombined }, { id: 'migration' as AdminTab, label: 'Site Migration', icon: Route }] : []),
     { id: 'redirects', label: 'URL Redirects (301/302)', badge: redirectRules.length, icon: ArrowLeftRight },
     { id: 'audit', label: 'Audit Logs', icon: ScrollText },
     ...(currentUser.role === 'Admin' ? [{ id: 'settings' as AdminTab, label: 'Settings', icon: Settings }] : []),

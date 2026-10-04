@@ -16,6 +16,8 @@ import { SETTINGS, SETTING_KEYS, type SettingKey } from './settingsRegistry';
 import { forgetIndexNowKey } from './seo/indexnow';
 
 import { invalidateTrackingConfig } from './trackingConfig';
+import { recordAudit } from './audit';
+import { forgetRumSetting } from './rum';
 export { publicSettings } from './settingsRegistry';
 
 export function settingsRouter(getLookup: () => AuthLookup) {
@@ -27,7 +29,7 @@ export function settingsRouter(getLookup: () => AuthLookup) {
   router.get('/', requireRole(getLookup, ['Admin']), wrap(async (_req, res) => {
     const rows = await prisma.siteSetting.findMany();
     const values = Object.fromEntries(rows.filter((r) => r.key in SETTINGS).map((r) => [r.key, r.value]));
-    const definitions = SETTING_KEYS.map((key) => ({ key, group: SETTINGS[key].group, label: SETTINGS[key].label, public: SETTINGS[key].public }));
+    const definitions = SETTING_KEYS.map((key) => ({ key, group: SETTINGS[key].group, label: SETTINGS[key].label, public: SETTINGS[key].public, options: 'options' in SETTINGS[key] ? (SETTINGS[key] as { options: readonly string[] }).options : undefined }));
     return res.json({ values, definitions });
   }));
 
@@ -47,18 +49,25 @@ export function settingsRouter(getLookup: () => AuthLookup) {
       }
     }
     const { userId, userName } = req.authContext!;
+    const previous = Object.fromEntries((await prisma.siteSetting.findMany({ where: { key: { in: entries.map(([k]) => k) } } })).map((r) => [r.key, r.value]));
     await prisma.$transaction(async (tx) => {
       for (const [key, value] of entries) {
         const trimmed = (value as string).trim();
         if (trimmed) await tx.siteSetting.upsert({ where: { key }, create: { key, value: trimmed, updatedAt: new Date(), updatedBy: userId }, update: { value: trimmed, updatedAt: new Date(), updatedBy: userId } });
         else await tx.siteSetting.deleteMany({ where: { key } });
       }
-      await tx.auditLog.create({
-        data: { id: `log-${crypto.randomUUID()}`, userId, userName, action: 'Updated Settings', entityType: 'Setting', entityId: 'site-settings', timestamp: new Date(), details: `Admin ${userName} updated settings: ${entries.map(([k]) => k).join(', ')}.` },
+      // PHASE R: previous and new values (settings hold IDs and tokens that are public by design, no secrets).
+      await recordAudit(tx, {
+        userId, userName, action: 'Updated Settings', entityType: 'Setting', entityId: 'site-settings',
+        details: `Admin ${userName} updated settings: ${entries.map(([k]) => k).join(', ')}.`,
+        before: Object.fromEntries(entries.map(([k]) => [k, previous[k] ?? null])),
+        after: Object.fromEntries(entries.map(([k, v]) => [k, (v as string).trim() || null])),
       });
     });
     forgetIndexNowKey();
     invalidateTrackingConfig();
+    forgetRumSetting();
+    void crypto;
     const rows = await prisma.siteSetting.findMany();
     return res.json({ values: Object.fromEntries(rows.map((r) => [r.key, r.value])) });
   }));

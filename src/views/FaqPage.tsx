@@ -10,21 +10,13 @@ import Link from 'next/link';
 import { ChevronDown } from 'lucide-react';
 import { Breadcrumbs } from '../components/ui/Breadcrumbs';
 import { JsonLd } from '../components/seo/JsonLd';
-import { answerParagraphs } from '../lib/faq';
+import { answerParagraphs, faqPageSchema, validateFaqSchema } from '../lib/faq';
 import type { PublicFaq } from '../../server/services/public/faq';
 
-export const FaqPage: React.FC<{ faqs: PublicFaq[] }> = ({ faqs }) => {
-  const structuredData = faqs.length
-    ? {
-        '@context': 'https://schema.org',
-        '@type': 'FAQPage',
-        mainEntity: faqs.map((f) => ({
-          '@type': 'Question',
-          name: f.question,
-          acceptedAnswer: { '@type': 'Answer', text: answerParagraphs(f.answer).map((p) => p.join(' ')).join('\n\n') },
-        })),
-      }
-    : null;
+export const FaqPage: React.FC<{ faqs: PublicFaq[]; schemaEnabled: boolean }> = ({ faqs, schemaEnabled }) => {
+  // PHASE R: FAQPage markup only when enabled in Settings and the visible entries validate.
+  const check = validateFaqSchema(faqs, schemaEnabled);
+  const structuredData = check.ok ? faqPageSchema(check.valid) : null;
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">

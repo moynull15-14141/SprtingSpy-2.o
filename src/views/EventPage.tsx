@@ -9,17 +9,19 @@ import { DynamicPublicEventFields } from '../components/editorial/DynamicPublicE
 import { JsonLd } from '../components/seo/JsonLd';
 import { AdSlot } from '../components/ui/AdSlot';
 import { absoluteUrl, editionPath } from '../lib/paths';
+import { editionDates } from '../lib/eventDates';
+import { ContextFaq } from '../components/editorial/ContextFaq';
+import { RumPageType } from '../components/analytics/RumPageType';
 import type { EventEdition } from '../types';
 import type { getEventPage } from '../../server/services/public/content';
 
 type EventPageData = NonNullable<Awaited<ReturnType<typeof getEventPage>>>;
-const longDate = (value: string) => new Date(`${value}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
-const editionDates = (edition: EventEdition) => edition.startDate && edition.endDate ? `${longDate(edition.startDate)} – ${longDate(edition.endDate)}` : edition.startDate ? longDate(edition.startDate) : edition.endDate ? longDate(edition.endDate) : null;
-const schemaStatus = (status: EventEdition['status']) => status === 'completed' ? 'https://schema.org/EventCompleted' : status === 'upcoming' || status === 'active' ? 'https://schema.org/EventScheduled' : undefined;
-const absoluteMedia = (url: string) => /^https?:\/\//i.test(url) ? url : absoluteUrl(url.startsWith('/') ? url : `/${url}`);
+// Edition schema helpers are shared with the Edition page (PHASE E5) so both describe the same SportsEvent.
+export const schemaStatus = (status: EventEdition['status']) => status === 'completed' ? 'https://schema.org/EventCompleted' : status === 'upcoming' || status === 'active' ? 'https://schema.org/EventScheduled' : undefined;
+export const absoluteMedia = (url: string) => /^https?:\/\//i.test(url) ? url : absoluteUrl(url.startsWith('/') ? url : `/${url}`);
 
 export const EventPage: React.FC<{ data: EventPageData }> = ({ data }) => {
-  const { sport, event, sportConfiguration, sportSpecificValues, editions, articles, currentEdition, relatedEvents } = data;
+  const { sport, event, sportConfiguration, sportSpecificValues, editions, editionTotal, articles, articleTotal, relatedArticles, currentEdition, relatedEvents, faqs, faqSchemaEnabled } = data;
   const terminology = sportConfiguration.terminology;
   const currentDates = currentEdition ? editionDates(currentEdition) : null;
   const detailRows = [
@@ -30,17 +32,22 @@ export const EventPage: React.FC<{ data: EventPageData }> = ({ data }) => {
     { label: 'Location', value: event.defaultLocation, icon: MapPin },
   ].filter((row) => row.value);
 
+  // PHASE R (v2.2): only published, editor-approved questions are shown; FAQPage markup is opt-in per event.
+  const currentEditionUrl = currentEdition ? absoluteUrl(editionPath(sport.slug, event.slug, currentEdition.year)) : '';
+
+  // `@id` matches the Edition page's SportsEvent, so crawlers merge the two descriptions of one edition.
   const eventSchema = currentEdition?.startDate ? {
-    '@context': 'https://schema.org', '@type': 'SportsEvent', name: currentEdition.title || event.name,
+    '@context': 'https://schema.org', '@type': 'SportsEvent', '@id': `${currentEditionUrl}#event`, name: currentEdition.title || event.name, sport: sport.name,
     ...(event.description ? { description: event.description } : {}), startDate: currentEdition.startDate,
     ...(currentEdition.endDate ? { endDate: currentEdition.endDate } : {}), ...(schemaStatus(currentEdition.status) ? { eventStatus: schemaStatus(currentEdition.status) } : {}),
-    url: absoluteUrl(editionPath(sport.slug, event.slug, currentEdition.year)),
+    url: currentEditionUrl,
     ...(currentEdition.featuredImage || event.featuredImage ? { image: [absoluteMedia(currentEdition.featuredImage || event.featuredImage!)] } : {}),
     ...(currentEdition.venue || currentEdition.location ? { location: { '@type': 'Place', ...(currentEdition.venue ? { name: currentEdition.venue } : {}), ...(currentEdition.location ? { address: currentEdition.location } : {}) } } : {}),
   } : null;
 
   return <div className="min-w-0 space-y-10">
     {eventSchema && <JsonLd data={eventSchema} />}
+    <RumPageType type="event" />
     <Breadcrumbs items={[{ label: 'Sports', url: '/sports' }, { label: sport.name, url: `/${sport.slug}` }, { label: event.name }]} />
 
     <header className="overflow-hidden rounded-2xl border border-stone-200 bg-stone-900 shadow-sm dark:border-stone-800">
@@ -70,7 +77,7 @@ export const EventPage: React.FC<{ data: EventPageData }> = ({ data }) => {
         </section>}
 
         {editions.length > 0 && <section aria-labelledby="editions-heading">
-          <div className="mb-4 flex flex-wrap items-end justify-between gap-2 border-b border-stone-200 pb-3 dark:border-stone-800"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-500">Edition archive</p><h2 id="editions-heading" className="font-serif text-2xl font-bold">{event.name} editions</h2></div><span className="text-xs text-stone-500 dark:text-stone-400">{editions.length} {editions.length === 1 ? 'edition' : 'editions'}</span></div>
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-2 border-b border-stone-200 pb-3 dark:border-stone-800"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-500">Edition archive</p><h2 id="editions-heading" className="font-serif text-2xl font-bold">{event.name} editions</h2></div><span className="text-xs text-stone-500 dark:text-stone-400">{editionTotal} {editionTotal === 1 ? 'edition' : 'editions'}{editionTotal > editions.length ? ` (latest ${editions.length} shown)` : ''}</span></div>
           <div className="grid gap-5 sm:grid-cols-2">{editions.map((edition) => {
             const dates = editionDates(edition);
             return <article key={edition.id} className="group overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm dark:border-stone-800 dark:bg-[#121417]"><Link href={editionPath(sport.slug, event.slug, edition.year)} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500">
@@ -80,7 +87,11 @@ export const EventPage: React.FC<{ data: EventPageData }> = ({ data }) => {
           })}</div>
         </section>}
 
-        {articles.length > 0 && <section aria-labelledby="coverage-heading"><div className="mb-4 border-b border-stone-200 pb-3 dark:border-stone-800"><p className="text-xs font-bold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-500">Editorial</p><h2 id="coverage-heading" className="font-serif text-2xl font-bold">Coverage of {event.name}</h2></div><div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">{articles.map((article) => <ArticleCard key={article.id} article={article} variant="standard" />)}</div></section>}
+        {articles.length > 0 && <section aria-labelledby="coverage-heading"><div className="mb-4 flex flex-wrap items-end justify-between gap-2 border-b border-stone-200 pb-3 dark:border-stone-800"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-500">Latest articles</p><h2 id="coverage-heading" className="font-serif text-2xl font-bold">Latest {event.name} articles</h2></div>{articleTotal > articles.length && <Link href={`/search/?q=${encodeURIComponent(event.name)}&sport=${sport.slug}`} className="text-xs font-semibold text-amber-700 hover:underline dark:text-amber-400">All {articleTotal} articles <span aria-hidden="true">→</span></Link>}</div><div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">{articles.map((article) => <ArticleCard key={article.id} article={article} variant="standard" />)}</div></section>}
+
+        {relatedArticles.length > 0 && <section aria-labelledby="event-related-heading"><div className="mb-4 border-b border-stone-200 pb-3 dark:border-stone-800"><p className="text-xs font-bold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-500">Related articles</p><h2 id="event-related-heading" className="font-serif text-2xl font-bold">Guides &amp; background</h2></div><div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">{relatedArticles.map((article) => <ArticleCard key={article.id} article={article} variant="standard" />)}</div></section>}
+
+        <ContextFaq items={faqs} heading={`${event.name}: frequently asked questions`} schemaEnabled={faqSchemaEnabled} />
       </main>
 
       <aside className="min-w-0 space-y-5 lg:sticky lg:top-6" aria-label="Event details">
@@ -89,6 +100,6 @@ export const EventPage: React.FC<{ data: EventPageData }> = ({ data }) => {
       </aside>
     </div>
 
-    {relatedEvents.length > 0 && <section aria-labelledby="related-events-heading"><div className="mb-4 border-b border-stone-200 pb-3 dark:border-stone-800"><p className="text-xs font-bold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-500">More in {sport.name}</p><h2 id="related-events-heading" className="font-serif text-2xl font-bold">Related events</h2></div><div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">{relatedEvents.map((related) => <EventCard key={related.id} event={related} />)}</div></section>}
+    {relatedEvents.length > 0 && <section aria-labelledby="related-events-heading"><div className="mb-4 flex flex-wrap items-end justify-between gap-2 border-b border-stone-200 pb-3 dark:border-stone-800"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-500">More in {sport.name}</p><h2 id="related-events-heading" className="font-serif text-2xl font-bold">Related events</h2></div><Link href={`/events/?sport=${sport.slug}`} className="text-xs font-semibold text-amber-700 hover:underline dark:text-amber-400">All {sport.name} events <span aria-hidden="true">→</span></Link></div><div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">{relatedEvents.map((related) => <EventCard key={related.id} event={related} />)}</div></section>}
   </div>;
 };

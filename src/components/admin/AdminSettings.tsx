@@ -9,7 +9,7 @@ import { SettingsHelp } from './settings/SettingsHelp';
 import { CATEGORY_PRESENTATION, FIELD_PRESENTATION } from './settings/presentation';
 import styles from './settings/Settings.module.css';
 
-interface Definition { key: string; group: string; label: string; public: boolean }
+interface Definition { key: string; group: string; label: string; public: boolean; options?: string[] }
 type SettingsResponse = { values: Record<string, string>; definitions: Definition[] };
 
 export const AdminSettings: React.FC = () => {
@@ -156,7 +156,13 @@ export const AdminSettings: React.FC = () => {
                     <span className={`inline-flex items-center gap-1 ${saved[d.key]?.trim() ? 'text-emerald-800 dark:text-emerald-300' : 'text-stone-600 dark:text-stone-400'}`}>{saved[d.key]?.trim() ? <Check size={12} aria-hidden="true" /> : <Circle size={11} aria-hidden="true" />}{saved[d.key]?.trim() ? 'Configured' : 'Not configured'}</span>
                     {updated && <span className="text-amber-800 dark:text-amber-300">Unsaved edit</span>}
                   </div>
-                  {field?.multiline ? <textarea {...inputProps} rows={3} className={`${inputProps.className} resize-y`} /> : <input {...inputProps} type="text" />}
+                  {d.options ? (
+                    // PHASE R: choice settings (empty = the built-in default described in the help text).
+                    <select id={inputId} name={d.key} value={values[d.key] || ''} disabled={saving} className={styles.input} aria-describedby={`${inputId}-helper`} onChange={(e) => { setValues((v) => ({ ...v, [d.key]: e.target.value })); setFeedback(null); }}>
+                      <option value="">Default</option>
+                      {d.options.map((o) => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                  ) : field?.multiline ? <textarea {...inputProps} rows={3} className={`${inputProps.className} resize-y`} /> : <input {...inputProps} type="text" />}
                   <p id={`${inputId}-helper`} className="mt-2 text-[11px] leading-relaxed text-stone-600 dark:text-stone-400">{field?.helper ?? (d.public ? 'Published in page HTML when saved.' : 'Saved in site configuration.')}</p>
                   {fieldErrors[d.key] && <p id={`${inputId}-error`} className="mt-1 text-xs font-medium text-rose-800 dark:text-rose-300">{fieldErrors[d.key]}</p>}
                 </div>;

@@ -12,7 +12,7 @@ import { Button } from '../../ui/Button';
 import type { CopyrightReview, MediaCreationType, MediaItem } from '../../../types';
 import { mediaUrl } from '../../../lib/media';
 
-export const CREATION_TYPES: MediaCreationType[] = ['Original', 'AI-created', 'AI-assisted', 'Licensed', 'Official Source', 'Creative Commons', 'Other'];
+export const CREATION_TYPES: MediaCreationType[] = ['SportingSpy Original', 'SportingSpy AI-Created', 'SportingSpy AI-Assisted/Edited', 'Licensed', 'Official Source', 'Creative Commons', 'Other'];
 export const REVIEW_STATES: CopyrightReview[] = ['pending', 'reviewed', 'restricted'];
 export const ACCEPT = '.jpg,.jpeg,.png,.webp,.avif,image/jpeg,image/png,image/webp,image/avif';
 
@@ -46,11 +46,11 @@ export function MediaUploadForm({ onUploaded, onCancel }: { onUploaded: (item: M
   const [credit, setCredit] = useState('');
   const [source, setSource] = useState('');
   const [license, setLicense] = useState('');
-  const [creationType, setCreationType] = useState<MediaCreationType>('Original');
+  const [creationType, setCreationType] = useState<MediaCreationType>('SportingSpy Original');
   const [aiTool, setAiTool] = useState('');
   const [humanEditing, setHumanEditing] = useState('');
   const [busy, setBusy] = useState(false);
-  const aiInvolved = creationType === 'AI-created' || creationType === 'AI-assisted';
+  const aiInvolved = creationType === 'SportingSpy AI-Created' || creationType === 'SportingSpy AI-Assisted/Edited';
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();

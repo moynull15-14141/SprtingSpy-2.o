@@ -7,7 +7,7 @@
 
 import crypto from 'node:crypto';
 import { prisma } from '../db';
-import { RULES, RULES_BY_KEY, SEVERITIES, type Category, type RuleDef, type Severity, type TargetType } from './rules';
+import { RULES, RULES_BY_KEY, SEVERITIES, typeMatches, type Category, type RuleDef, type Severity, type TargetType } from './rules';
 import { buildSeoContext, toArticleSubject, type ArticleSubject, type SeoContext } from './context';
 
 export interface Finding {
@@ -103,7 +103,8 @@ export function evaluate(ctx: SeoContext, settings: Map<string, RuleSettings>, o
     const s = settings.get(def.key)!;
     if (!s.enabled || (opts.targets && !opts.targets.includes(def.target))) continue;
     for (const item of subjectsFor(def.target, ctx, opts.articles || 'published') as { subject: any; id: string; title: string; url?: string; articleType?: string }[]) {
-      if (def.target === 'article' && s.articleTypes.length && !s.articleTypes.includes(item.articleType!)) continue;
+      // PHASE R: a type also matches through its SEO profile (custom types inherit their profile's rules).
+      if (def.target === 'article' && s.articleTypes.length && !typeMatches(s.articleTypes, item.articleType!, ctx.typeProfiles)) continue;
       let issues;
       try {
         issues = def.check(item.subject, ctx, s.config);
@@ -168,7 +169,7 @@ export async function checkArticleDraft(origin: string, input: Parameters<typeof
   const findings = evaluate(ctx, settings, { targets: ['article'], articles: [subject] });
   const applicable = RULES.filter((r) => {
     const s = settings.get(r.key)!;
-    return r.target === 'article' && s.enabled && (!s.articleTypes.length || s.articleTypes.includes(subject.articleType));
+    return r.target === 'article' && s.enabled && (!s.articleTypes.length || typeMatches(s.articleTypes, subject.articleType, ctx.typeProfiles));
   });
   const checklist = applicable.map((r) => {
     const own = findings.filter((f) => f.ruleKey === r.key);

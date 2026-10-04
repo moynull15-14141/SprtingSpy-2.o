@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { PrivacyPolicyPage } from '../../views/PrivacyPolicyPage';
 import { pageMetadata } from '../../lib/seo';
 import { trackingConfig } from '../../../server/trackingConfig';
+import { RumPageType } from '../../components/analytics/RumPageType';
 
 export const generateMetadata = (): Promise<Metadata> =>
   pageMetadata({
@@ -12,5 +13,5 @@ export const generateMetadata = (): Promise<Metadata> =>
 
 export default async function Page() {
   // PHASE F: the policy states which optional providers are actually active.
-  return <PrivacyPolicyPage config={await trackingConfig()} />;
+  return <><RumPageType type="static" /><PrivacyPolicyPage config={await trackingConfig()} /></>;
 }

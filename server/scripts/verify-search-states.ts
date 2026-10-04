@@ -97,7 +97,8 @@ try {
 
   await page.getByRole('button', { name: 'Try again' }).click();
   await resultsSettled(page, 15_000);
-  assert.match(await page.locator('#search-results-heading').innerText(), /results? for “prize”/);
+  // PHASE M: when Events also match, the heading reads "N articles and M events for …".
+  assert.match(await page.locator('#search-results-heading').innerText(), /(results?|articles? and \d+ events?) for “prize”/);
   pass('"Try again" recovers once the database is available again');
 
   // React #441 is the production-sanitized report of the deliberately failed

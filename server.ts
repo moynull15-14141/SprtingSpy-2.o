@@ -83,6 +83,40 @@ import {
 import { ensureCsrfCookie, requireCsrfToken } from './server/csrf';
 import { securityHeaders } from './server/securityHeaders';
 import { corsPolicy } from './server/cors';
+// PHASE R
+import { recordAudit } from './server/audit';
+import { invalidateOnWrite, invalidatePublicCache, beginContentWrite } from './server/publicCache';
+import { articleTypesRouter, allArticleTypes, validateArticleTypeForWrite } from './server/articleTypes';
+import { snapshotUrls, redirectChangedUrls, moveEventLevelArticles, assertSportSlugAllowed, assertArticleSlugFree, assertEventSlugFree, UrlConflict } from './server/urlStability';
+import { passwordResetRouter } from './server/passwordReset';
+import { rumRouter } from './server/rum';
+import { insightsRouter } from './server/insights';
+import { migrationRouter } from './server/migration';
+import { searchConsoleRouter, runScheduledSearchSync } from './server/searchConsole';
+import { totpRouter } from './server/totp';
+
+const SPORT_AUDIT_FIELDS = ['name', 'slug', 'tagline', 'description', 'order', 'isVisible', 'featuredEventIds', 'heroImage', 'heroMediaId', 'icon', 'seo', 'faqSchemaEnabled'] as const;
+const EVENT_AUDIT_FIELDS = ['name', 'slug', 'sportSlug', 'shortName', 'alternativeNames', 'description', 'history', 'frequency', 'defaultVenue', 'defaultLocation', 'currentEditionYear', 'featured', 'isVisible', 'featuredImage', 'featuredMediaId', 'officialSourceUrl', 'eventType', 'seo', 'sportSpecificValues', 'faqSchemaEnabled'] as const;
+const EDITION_AUDIT_FIELDS = ['title', 'startDate', 'endDate', 'venue', 'location', 'status', 'quickFacts', 'prizeMoneyTotal', 'defendingChampions', 'qualificationInfo', 'participantsCount', 'officialSourceUrl', 'description', 'featuredImage', 'featuredMediaId', 'seo', 'faqSchemaEnabled'] as const;
+// PHASE R.1: audit field lists. Secrets (passwordHash, totpSecret, tokens) are never listed.
+const USER_AUDIT_FIELDS = ['name', 'email', 'role', 'status', 'avatar'] as const;
+const AUTHOR_AUDIT_FIELDS = ['slug', 'name', 'roleTitle', 'bio', 'avatar', 'twitter', 'email', 'userId'] as const;
+const COMMENT_AUDIT_FIELDS = ['articleId', 'userId', 'userName', 'content', 'status'] as const;
+const AD_AUDIT_FIELDS = ['name', 'placementDescription', 'enabled', 'provider', 'providerSlotId', 'sponsorName', 'bannerText', 'linkUrl', 'dimensions', 'creativeId', 'creativeAlt', 'creativeFit'] as const;
+const ARTICLE_AUDIT_FIELDS = ['title', 'subtitle', 'slug', 'sportSlug', 'eventSlug', 'editionYear', 'articleType', 'excerpt', 'content', 'featuredImage', 'featuredMediaId', 'authorId', 'status', 'scheduledFor', 'publishedAt', 'featured', 'tables', 'references', 'seo', 'faqSchemaEnabled'] as const;
+
+/** Alternative event names: one per line, trimmed, de-duplicated, at most 20. */
+function normalizeAlternativeNames(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const seen = new Set<string>();
+  return value.split(/\r?\n|,/).map((v) => v.trim().replace(/\s+/g, ' ')).filter((v) => v && v.length <= 120 && !seen.has(v.toLowerCase()) && seen.add(v.toLowerCase())).slice(0, 20).join('\n');
+}
+
+/** The Media Library item whose URL this is (entity images must be library items). */
+async function mediaIdForUrl(url: string | null | undefined): Promise<string | null> {
+  if (!url) return null;
+  return (await prisma.mediaItem.findFirst({ where: { url: url.trim() }, orderBy: [{ uploadedAt: 'asc' }, { id: 'asc' }], select: { id: true } }))?.id ?? null;
+}
 
 /**
  * Every seeded demo account that predates Phase 1 was migrated (via
@@ -101,9 +135,11 @@ const DUMMY_HASH_FOR_TIMING_CAMOUFLAGE = hashPassword('sportingspy-dummy-timing-
 
 
 /** Never send passwordHash to the client. Always project through this before responding. */
-function sanitizeUser<T extends { passwordHash: string }>(user: T): Omit<T, 'passwordHash'> {
-  const { passwordHash, ...safe } = user;
-  return safe;
+function sanitizeUser<T extends { passwordHash: string; totpSecret?: string | null }>(user: T): Omit<T, 'passwordHash' | 'totpSecret'> & { totpEnabled?: boolean } {
+  // PHASE R: the TOTP secret is as sensitive as the password hash.
+  const { passwordHash, totpSecret, ...safe } = user;
+  void passwordHash; void totpSecret;
+  return 'totpEnabledAt' in safe ? { ...safe, totpEnabled: !!(safe as { totpEnabledAt?: Date | null }).totpEnabledAt } : safe;
 }
 
 /** True if `candidateUserId` is the sole active Admin — blocks role/status/delete changes that would leave zero administrators. */
@@ -168,11 +204,19 @@ async function publishScheduledArticles(): Promise<number> {
   for (const art of due) {
     // PHASE H: conditional update, so overlapping ticks (timer, sitemap, CMS
     // load) or a concurrent reschedule/cancel never publish or log twice.
-    const result = await prisma.article.updateMany({
-      where: { id: art.id, status: 'scheduled', scheduledFor: art.scheduledFor },
-      // PHASE D: publishing is not a content change, so updatedAt is left alone.
-      data: { status: 'published', publishedAt: art.scheduledFor || now },
-    });
+    // PHASE R.1: the public cache is bypassed while the row changes and cleared
+    // afterwards, so the article is public the moment its row says so.
+    const endWrite = beginContentWrite('scheduled publication');
+    let result;
+    try {
+      result = await prisma.article.updateMany({
+        where: { id: art.id, status: 'scheduled', scheduledFor: art.scheduledFor },
+        // PHASE D: publishing is not a content change, so updatedAt is left alone.
+        data: { status: 'published', publishedAt: art.scheduledFor || now },
+      });
+    } finally {
+      endWrite();
+    }
     if (!result.count) continue;
     published++;
     notifyIndexNow(siteOrigin(), [articlePath(art)], 'scheduled article published');
@@ -265,6 +309,8 @@ async function startServer() {
   app.use(express.json({ limit: '2mb' }));
   app.use(ensureCsrfCookie);
   app.use(requireCsrfToken);
+  // PHASE R: every successful CMS write invalidates the public data cache.
+  app.use(invalidateOnWrite);
   // Draft previews are staff-only, uncached and excluded from indexing.
   // The preference cookie alone grants no access; Next resolves the active session.
   app.use((req, res, next) => {
@@ -386,10 +432,13 @@ async function startServer() {
     '/api/auth/login',
     asyncHandler(async (req: Request, res: Response) => {
       const ip = req.ip || req.socket.remoteAddress || 'unknown';
-      const { email, password } = req.body as { email?: string; password?: string };
+      const { email, password, totpCode } = req.body as { email?: string; password?: string; totpCode?: unknown };
 
       if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password) {
         return res.status(400).json({ error: 'email and password are required.' });
+      }
+      if (totpCode !== undefined && (typeof totpCode !== 'string' || !/^\d{6}$/.test(totpCode.trim()))) {
+        return res.status(400).json({ error: 'The authentication code must be 6 digits.' });
       }
 
       const rateLimit = checkLoginRateLimit(ip, email);
@@ -430,6 +479,18 @@ async function startServer() {
           },
         });
         return res.status(401).json({ error: 'Invalid email or password.' });
+      }
+
+      // PHASE R: second factor. Asked for only after the password is correct;
+      // a wrong code counts as a failed attempt for rate limiting.
+      if (user.totpEnabledAt && user.totpSecret) {
+        const { verifyTotpForUser } = await import('./server/totp');
+        if (typeof totpCode !== 'string') return res.status(401).json({ error: 'Enter the 6-digit code from your authenticator app.', totpRequired: true });
+        if (!(await verifyTotpForUser(user.id, user.totpSecret, totpCode.trim()))) {
+          recordFailedLogin(ip, email);
+          await recordAudit(prisma, { userId: user.id, userName: user.name, action: 'Login Failed', entityType: 'User', entityId: user.id, details: `Wrong authentication code for "${email.trim()}" from ${ip}.` });
+          return res.status(401).json({ error: 'The authentication code is not valid.', totpRequired: true });
+        }
       }
 
       clearLoginRateLimit(ip, email);
@@ -499,6 +560,10 @@ async function startServer() {
     })
   );
 
+  // PHASE R: password reset is public (token-based), so it is mounted BEFORE
+  // the account router, whose router-level requireAuth covers /api/auth/*.
+  app.use('/api/auth', passwordResetRouter(getAuthLookup));
+  app.use('/api/auth/totp', totpRouter(getAuthLookup));
   app.use('/api/auth', accountRouter(getAuthLookup));
 
   // 6. REST API Endpoints
@@ -531,7 +596,8 @@ async function startServer() {
             : Promise.resolve([]),
           prisma.mediaItem.findMany({ orderBy: { uploadedAt: 'desc' } }),
           prisma.adSlotConfig.findMany({ include: { creative: true } }),
-          ['Admin', 'Editor'].includes(role) ? prisma.auditLog.findMany({ orderBy: { timestamp: 'desc' } }) : Promise.resolve([]),
+          // PHASE R: bounded (the full log is paged through /api/audit-logs).
+          ['Admin', 'Editor'].includes(role) ? prisma.auditLog.findMany({ orderBy: { timestamp: 'desc' }, take: 500 }) : Promise.resolve([]),
           prisma.redirectRule.findMany({ orderBy: { createdAt: 'desc' } }),
         ]);
 
@@ -551,6 +617,8 @@ async function startServer() {
         redirectRules,
         features,
         mediaUsage: await mediaUsageMap(role === 'Author' ? {articleWhere: articleReadWhere(req.authContext!), publicSiteOnly: true} : {}),
+        // PHASE R: database-backed Article Types (active and inactive).
+        articleTypes: await allArticleTypes(),
       });
     })
   );
@@ -624,14 +692,18 @@ async function startServer() {
         validateText(body.subtitle, 'subtitle', 300, false),
         validateText(body.excerpt, 'excerpt', 1000, false),
         validateSafeUrl(body.featuredImage, 'featuredImage', { required: false }),
-        validateOneOf(body.articleType, 'articleType', ARTICLE_TYPES),
         validateOneOf(body.status, 'status', ARTICLE_STATUSES),
         validateRecordList(body.references, 'references', { title: 200, url: 2048 }, 30),
-        validateSeo(body.seo)
+        validateSeo(body.seo),
+        body.faqSchemaEnabled === undefined || typeof body.faqSchemaEnabled === 'boolean' ? { valid: true } : { valid: false, error: 'faqSchemaEnabled must be true or false.' }
       );
       if (validationError) {
         return res.status(400).json({ error: validationError });
       }
+      // PHASE R: Article Types come from the database (active types only for new content).
+      if (body.articleType === undefined) body.articleType = 'Event Guide';
+      const typeError = await validateArticleTypeForWrite(body.articleType);
+      if (typeError) return res.status(400).json({ error: typeError });
       // PHASE H: a scheduled article needs a future publication time; any
       // other status never carries one.
       let scheduledFor: Date | null = null;
@@ -653,6 +725,9 @@ async function startServer() {
       if (collision) {
         return res.status(409).json({ error: `Article with slug '${slug}' already exists in this sport/edition scope.` });
       }
+      // PHASE R collision rule: an event-less article may not take an event's URL.
+      try { await assertArticleSlugFree(prisma, { sportSlug: body.sportSlug, eventSlug, editionYear, slug }); }
+      catch (err) { if (err instanceof UrlConflict) return res.status(err.status).json({ error: err.message }); throw err; }
 
       // PHASE 1: Article.authorId references an Author profile's id, not a
       // User's id — these are different namespaces (e.g. 'auth-elena' vs
@@ -704,6 +779,7 @@ async function startServer() {
           tables: body.tables ?? undefined,
           references: body.references ?? undefined,
           seo: body.seo || { metaTitle: body.title, metaDescription: body.excerpt },
+          faqSchemaEnabled: body.faqSchemaEnabled === true,
           ...prepared.data,
         },
         });
@@ -715,17 +791,10 @@ async function startServer() {
         return created;
       });
 
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Created Article',
-          entityType: 'Article',
-          entityId: newArticle.id,
-          timestamp: new Date(),
-          details: `Created article "${newArticle.title}" (status: ${newArticle.status}) by ${userName} (${role}).`,
-        },
+      await recordAudit(prisma, {
+        userId, userName, action: 'Created Article', entityType: 'Article', entityId: newArticle.id,
+        details: `Created article "${newArticle.title}" (status: ${newArticle.status}) by ${userName} (${role}).`,
+        before: null, after: newArticle as unknown as Record<string, unknown>, fields: ARTICLE_AUDIT_FIELDS,
       });
 
       if (newArticle.status === 'published') notifyIndexNow(seoOrigin(), [articlePath(newArticle)], 'article published');
@@ -770,13 +839,18 @@ async function startServer() {
         validateText(updates.subtitle, 'subtitle', 300, false),
         validateText(updates.excerpt, 'excerpt', 1000, false),
         validateSafeUrl(updates.featuredImage, 'featuredImage', { required: false }),
-        'articleType' in updates ? validateOneOf(updates.articleType, 'articleType', ARTICLE_TYPES, true) : { valid: true },
         'status' in updates ? validateOneOf(updates.status, 'status', ARTICLE_STATUSES, true) : { valid: true },
         validateRecordList(updates.references, 'references', { title: 200, url: 2048 }, 30),
-        validateSeo(updates.seo)
+        validateSeo(updates.seo),
+        updates.faqSchemaEnabled === undefined || typeof updates.faqSchemaEnabled === 'boolean' ? { valid: true } : { valid: false, error: 'faqSchemaEnabled must be true or false.' }
       );
       if (validationError) {
         return res.status(400).json({ error: validationError });
+      }
+      // PHASE R: an existing article may keep its (possibly now inactive) type.
+      if ('articleType' in updates) {
+        const typeError = await validateArticleTypeForWrite(updates.articleType, existing.articleType);
+        if (typeError) return res.status(400).json({ error: typeError });
       }
       // PHASE H scheduling: status "scheduled" requires a future time
       // (new or rescheduled); leaving "scheduled" cancels the schedule.
@@ -833,6 +907,8 @@ async function startServer() {
         if (collision) {
           return res.status(409).json({ error: `Another article already uses ${newPath}/.` });
         }
+        try { await assertArticleSlugFree(prisma, next); }
+        catch (err) { if (err instanceof UrlConflict) return res.status(err.status).json({ error: err.message }); throw err; }
       }
 
       let updated;
@@ -863,17 +939,11 @@ async function startServer() {
         notifyIndexNow(seoOrigin(), changed, wasLive && !isLive ? 'article unpublished' : !wasLive && isLive ? 'article published' : oldPath !== newPath ? 'article URL changed' : 'article content changed');
       }
 
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Updated Article',
-          entityType: 'Article',
-          entityId: updated.id,
-          timestamp: new Date(),
-          details: `Updated article "${updated.title}" (status: ${updated.status}${updated.scheduledFor ? `, publishes ${updated.scheduledFor.toISOString()}` : existing.status === 'scheduled' && updated.status !== 'scheduled' ? ', schedule cancelled' : ''}) by ${userName}.`,
-        },
+      const publishedNow = existing.status !== 'published' && updated.status === 'published';
+      await recordAudit(prisma, {
+        userId, userName, action: publishedNow ? 'Published Article' : 'Updated Article', entityType: 'Article', entityId: updated.id,
+        details: `Updated article "${updated.title}" (status: ${updated.status}${updated.scheduledFor ? `, publishes ${updated.scheduledFor.toISOString()}` : existing.status === 'scheduled' && updated.status !== 'scheduled' ? ', schedule cancelled' : ''}) by ${userName}.`,
+        before: existing as unknown as Record<string, unknown>, after: updated as unknown as Record<string, unknown>, fields: ARTICLE_AUDIT_FIELDS,
       });
 
       return res.json(updated);
@@ -891,19 +961,15 @@ async function startServer() {
         return res.status(404).json({ error: 'Article not found.' });
       }
 
+      // PHASE R: article-scoped FAQ entries are editorial content; never drop them silently.
+      const faqCount = await prisma.faqEntry.count({ where: { articleId: target.id } });
+      if (faqCount > 0) return res.status(400).json({ error: `This article has ${faqCount} FAQ ${faqCount === 1 ? 'entry' : 'entries'}. Move or delete them in FAQ first.` });
       await prisma.article.delete({ where: { id: target.id } });
       if (target.status === 'published') notifyIndexNow(seoOrigin(), [articlePath(target)], 'article deleted');
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Deleted Article',
-          entityType: 'Article',
-          entityId: req.params.id,
-          timestamp: new Date(),
-          details: `Deleted article "${target.title}" by ${userName}.`,
-        },
+      await recordAudit(prisma, {
+        userId, userName, action: 'Deleted Article', entityType: 'Article', entityId: req.params.id,
+        details: `Deleted article "${target.title}" by ${userName}.`,
+        before: target as unknown as Record<string, unknown>, after: null, fields: ARTICLE_AUDIT_FIELDS,
       });
 
       return res.json({ success: true, id: req.params.id });
@@ -911,6 +977,35 @@ async function startServer() {
   );
 
   // Sports API (Admin Only)
+  // PHASE R: shared validation; images must be Media Library items; featured
+  // events must belong to the sport; SEO is merged (never wiped by a partial save).
+  async function sportPayloadError(body: Record<string, any>, sportSlug: string | null): Promise<string | null> {
+    const error = firstError(
+      'name' in body ? validateText(body.name, 'name', 200) : { valid: true },
+      body.slug !== undefined ? validateSlug(body.slug, 'slug') : { valid: true },
+      validateText(body.tagline, 'tagline', 300, false),
+      validateText(body.description, 'description', 5000, false),
+      validateSafeUrl(body.heroImage, 'heroImage', { required: false }),
+      validateSportIcon(body.icon),
+      validateSeo(body.seo),
+      body.order === undefined || (Number.isInteger(body.order) && body.order >= 0 && body.order <= 10000) ? { valid: true } : { valid: false, error: 'order must be a whole number from 0 to 10000.' },
+      body.isVisible === undefined || typeof body.isVisible === 'boolean' ? { valid: true } : { valid: false, error: 'isVisible must be true or false.' },
+      body.faqSchemaEnabled === undefined || typeof body.faqSchemaEnabled === 'boolean' ? { valid: true } : { valid: false, error: 'faqSchemaEnabled must be true or false.' },
+      body.featuredEventIds === undefined || (Array.isArray(body.featuredEventIds) && body.featuredEventIds.length <= 12 && body.featuredEventIds.every((id: unknown) => typeof id === 'string' && id.length <= 200) && new Set(body.featuredEventIds).size === body.featuredEventIds.length)
+        ? { valid: true } : { valid: false, error: 'featuredEventIds must be a list of at most 12 unique Event ids.' },
+    );
+    if (error) return error;
+    if (body.slug !== undefined) {
+      try { assertSportSlugAllowed(body.slug); } catch (err) { if (err instanceof UrlConflict) return err.message; throw err; }
+    }
+    if ('heroImage' in body && !(await imageIsManaged(body.heroImage))) return 'heroImage must reference a Media Library item.';
+    if (Array.isArray(body.featuredEventIds) && body.featuredEventIds.length) {
+      const found = sportSlug ? await prisma.sportEvent.count({ where: { id: { in: body.featuredEventIds }, sportSlug } }) : 0;
+      if (found !== body.featuredEventIds.length) return 'featuredEventIds must be Events of this sport.';
+    }
+    return null;
+  }
+
   app.post(
     '/api/sports',
     requireRole(getAuthLookup, ['Admin']),
@@ -921,18 +1016,9 @@ async function startServer() {
       if (!body.name || !body.slug) {
         return res.status(400).json({ error: 'Sport name and slug are required.' });
       }
-
-      const validationError = firstError(
-        validateText(body.name, 'name', 200),
-        validateSlug(body.slug, 'slug'),
-        validateText(body.tagline, 'tagline', 300, false),
-        validateText(body.description, 'description', 5000, false),
-        validateSafeUrl(body.heroImage, 'heroImage', { required: false }),
-        validateSportIcon(body.icon)
-      );
-      if (validationError) {
-        return res.status(400).json({ error: validationError });
-      }
+      if (Array.isArray(body.featuredEventIds) && body.featuredEventIds.length) return res.status(400).json({ error: 'Create the sport first, then choose its featured events.' });
+      const validationError = await sportPayloadError({ ...body, featuredEventIds: undefined }, null);
+      if (validationError) return res.status(400).json({ error: validationError });
 
       const existing = await prisma.sport.findUnique({ where: { slug: body.slug } });
       if (existing) {
@@ -940,33 +1026,28 @@ async function startServer() {
       }
 
       const sportCount = await prisma.sport.count();
-      const newSport = await prisma.sport.create({
-        data: {
-          id: `sport-${body.slug}-${Date.now()}`,
-          slug: body.slug,
-          name: body.name,
-          tagline: body.tagline || '',
-          description: body.description || '',
-          order: body.order || sportCount + 1,
-          isVisible: body.isVisible !== false,
-          featuredEventIds: body.featuredEventIds || [],
-          heroImage: body.heroImage,
-          icon: body.icon || null,
-          seo: body.seo || { metaTitle: `${body.name} Coverage | SportingSpy`, metaDescription: body.description },
-        },
-      });
-
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Created Sport',
-          entityType: 'Sport',
-          entityId: newSport.id,
-          timestamp: new Date(),
-          details: `Admin ${userName} created sport ${newSport.name}.`,
-        },
+      const heroImage = typeof body.heroImage === 'string' && body.heroImage.trim() ? body.heroImage.trim() : null;
+      const heroMediaId = await mediaIdForUrl(heroImage);
+      const newSport = await prisma.$transaction(async (tx) => {
+        const created = await tx.sport.create({
+          data: {
+            id: `sport-${body.slug}-${Date.now()}`,
+            slug: body.slug,
+            name: body.name,
+            tagline: body.tagline || '',
+            description: body.description || '',
+            order: body.order || sportCount + 1,
+            isVisible: body.isVisible !== false,
+            featuredEventIds: [],
+            heroImage,
+            heroMediaId,
+            icon: body.icon || null,
+            faqSchemaEnabled: body.faqSchemaEnabled === true,
+            seo: body.seo || { metaTitle: `${body.name} Coverage | SportingSpy`, metaDescription: body.description },
+          },
+        });
+        await recordAudit(tx, { userId, userName, action: 'Created Sport', entityType: 'Sport', entityId: created.id, details: `Admin ${userName} created sport ${created.name}.`, before: null, after: created as unknown as Record<string, unknown>, fields: SPORT_AUDIT_FIELDS });
+        return created;
       });
 
       return res.status(201).json(newSport);
@@ -984,36 +1065,44 @@ async function startServer() {
         return res.status(404).json({ error: 'Sport not found.' });
       }
 
-      const sportUpdates: Record<string, any> = req.body;
-      const sportUpdateError = firstError(
-        validateText(sportUpdates.name, 'name', 200, false),
-        sportUpdates.slug !== undefined ? validateSlug(sportUpdates.slug, 'slug') : { valid: true },
-        validateText(sportUpdates.tagline, 'tagline', 300, false),
-        validateText(sportUpdates.description, 'description', 5000, false),
-        validateSafeUrl(sportUpdates.heroImage, 'heroImage', { required: false }),
-        validateSportIcon(sportUpdates.icon)
-      );
+      const sportUpdates: Record<string, any> = { ...req.body };
       if (sportUpdates.icon === '') sportUpdates.icon = null;
-      if (sportUpdateError) {
-        return res.status(400).json({ error: sportUpdateError });
+      const sportUpdateError = await sportPayloadError(sportUpdates, existing.slug);
+      if (sportUpdateError) return res.status(400).json({ error: sportUpdateError });
+
+      const data: Record<string, any> = {};
+      for (const key of ['name', 'slug', 'tagline', 'description', 'order', 'isVisible', 'featuredEventIds', 'colorTheme', 'icon', 'faqSchemaEnabled'] as const) if (key in sportUpdates) data[key] = sportUpdates[key];
+      if ('heroImage' in sportUpdates) {
+        data.heroImage = typeof sportUpdates.heroImage === 'string' && sportUpdates.heroImage.trim() ? sportUpdates.heroImage.trim() : null;
+        data.heroMediaId = await mediaIdForUrl(data.heroImage);
       }
+      // SEO/social metadata is merged so a form that edits some fields never wipes the others.
+      if ('seo' in sportUpdates) data.seo = { ...((existing.seo as Record<string, unknown>) || {}), ...(sportUpdates.seo || {}) };
+      const slugChanging = typeof data.slug === 'string' && data.slug !== existing.slug;
+      if (slugChanging && (await prisma.sport.findUnique({ where: { slug: data.slug } }))) return res.status(409).json({ error: `Sport slug '${data.slug}' already exists.` });
 
-      const updated = await prisma.sport.update({ where: { id: existing.id }, data: sportUpdates });
+      let moves: { from: string; to: string }[] = [];
+      let updated;
+      try {
+        updated = await prisma.$transaction(async (tx) => {
+          // PHASE R (Spec §13.2): a slug change moves every URL under the sport — record them first.
+          const before = slugChanging ? await snapshotUrls(tx, { sportSlug: existing.slug }) : null;
+          const saved = await tx.sport.update({ where: { id: existing.id }, data });
+          if (before) moves = await redirectChangedUrls(tx, before, `sport slug ${existing.slug} → ${saved.slug}`);
+          await recordAudit(tx, {
+            userId, userName, action: 'Updated Sport', entityType: 'Sport', entityId: existing.id,
+            details: `Admin ${userName} updated sport ${saved.name}.${moves.length ? ` ${moves.length} URL(s) moved with 301 redirects.` : ''}`,
+            before: existing as unknown as Record<string, unknown>, after: saved as unknown as Record<string, unknown>, fields: SPORT_AUDIT_FIELDS,
+          });
+          return saved;
+        }, { timeout: 60_000 });
+      } catch (err) {
+        if (err instanceof RedirectConflict) return res.status(409).json({ error: `Slug change blocked: ${err.message}` });
+        throw err;
+      }
+      if (moves.length) notifyIndexNow(seoOrigin(), moves.flatMap((m) => [m.from, m.to]), 'sport URL changed');
 
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Updated Sport',
-          entityType: 'Sport',
-          entityId: req.params.id,
-          timestamp: new Date(),
-          details: `Admin ${userName} updated sport ${updated.name}.`,
-        },
-      });
-
-      return res.json(updated);
+      return res.json({ ...updated, movedUrls: moves.length });
     })
   );
 
@@ -1039,20 +1128,11 @@ async function startServer() {
           error: `Cannot delete sport '${sport.name}': has ${associatedEvents} active events and ${associatedArticles} articles. Remove or reassign them first to prevent orphaned records.`,
         });
       }
+      const sportFaqs = await prisma.faqEntry.count({ where: { sportId: sport.id } });
+      if (sportFaqs > 0) return res.status(400).json({ error: `Cannot delete sport '${sport.name}': it has ${sportFaqs} FAQ ${sportFaqs === 1 ? 'entry' : 'entries'}. Move or delete them in FAQ first.` });
 
       await prisma.sport.delete({ where: { id: sport.id } });
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Deleted Sport',
-          entityType: 'Sport',
-          entityId: req.params.id,
-          timestamp: new Date(),
-          details: `Admin ${userName} deleted sport ${sport.name}.`,
-        },
-      });
+      await recordAudit(prisma, { userId, userName, action: 'Deleted Sport', entityType: 'Sport', entityId: req.params.id, details: `Admin ${userName} deleted sport ${sport.name}.`, before: sport as unknown as Record<string, unknown>, after: null, fields: SPORT_AUDIT_FIELDS });
 
       return res.json({ success: true, id: req.params.id });
     })
@@ -1083,6 +1163,8 @@ async function startServer() {
         validateSafeUrl(body.featuredImage, 'featuredImage', { required: false }),
         validateSafeUrl(body.officialSourceUrl, 'officialSourceUrl', { required: false, allowRelative: false }),
         validateText(body.eventType, 'eventType', 80, false),
+        validateText(body.alternativeNames, 'alternativeNames', 1000, false),
+        body.faqSchemaEnabled === undefined || typeof body.faqSchemaEnabled === 'boolean' ? { valid: true } : { valid: false, error: 'faqSchemaEnabled must be true or false.' },
         body.currentEditionYear == null ? { valid: true } : { valid: false, error: 'Create the edition first, then explicitly select currentEditionYear on the event.' },
         validateSeo(body.seo)
       );
@@ -1102,6 +1184,9 @@ async function startServer() {
         if ('error' in eventValues) return { status: 400 as const, error: eventValues.error };
         const collision = await tx.sportEvent.findUnique({ where: { sportSlug_slug: { sportSlug: body.sportSlug, slug: body.slug } }, select: { id: true } });
         if (collision) return { status: 409 as const, error: `Event '${body.slug}' already exists under sport '${body.sportSlug}'.` };
+        // PHASE R collision rule: an event may not take an event-less article's URL.
+        try { await assertEventSlugFree(tx, { sportSlug: body.sportSlug, slug: body.slug }); }
+        catch (err) { if (err instanceof UrlConflict) return { status: err.status as 409, error: err.message }; throw err; }
         const newEvent = await tx.sportEvent.create({ data: {
           id: `event-${body.slug}-${Date.now()}`,
           sportSlug: body.sportSlug,
@@ -1118,8 +1203,11 @@ async function startServer() {
           featured: body.featured || false,
           isVisible: body.isVisible !== false,
           featuredImage: optionalFact(body.featuredImage),
+          featuredMediaId: await mediaIdForUrl(optionalFact(body.featuredImage)),
           officialSourceUrl: body.officialSourceUrl?.trim() || null,
           eventType: body.eventType?.trim() || null,
+          alternativeNames: normalizeAlternativeNames(body.alternativeNames),
+          faqSchemaEnabled: body.faqSchemaEnabled === true,
           seo: body.seo || {},
           sportSpecificValues: Object.keys(eventValues.value).length ? eventValues.value : Prisma.DbNull,
         } });
@@ -1128,18 +1216,7 @@ async function startServer() {
       if ('error' in result) return res.status(result.status).json({ error: result.error });
       const { newEvent } = result;
 
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Created Permanent Event',
-          entityType: 'Event',
-          entityId: newEvent.id,
-          timestamp: new Date(),
-          details: `Created permanent event ${newEvent.name} under ${newEvent.sportSlug}.`,
-        },
-      });
+      await recordAudit(prisma, { userId, userName, action: 'Created Permanent Event', entityType: 'Event', entityId: newEvent.id, details: `Created permanent event ${newEvent.name} under ${newEvent.sportSlug}.`, before: null, after: newEvent as unknown as Record<string, unknown>, fields: EVENT_AUDIT_FIELDS });
 
       return res.status(201).json(newEvent);
     })
@@ -1162,6 +1239,7 @@ async function startServer() {
         updates.slug !== undefined ? validateSlug(updates.slug, 'slug') : { valid: true },
         updates.sportSlug !== undefined ? validateSlug(updates.sportSlug, 'sportSlug') : { valid: true },
         validateText(updates.shortName, 'shortName', 200, false),
+        validateText(updates.alternativeNames, 'alternativeNames', 1000, false),
         validateText(updates.description, 'description', 5000, false),
         validateText(updates.history, 'history', 10000, false),
         validateText(updates.frequency, 'frequency', 200, false),
@@ -1170,6 +1248,7 @@ async function startServer() {
         validateSafeUrl(updates.featuredImage, 'featuredImage', { required: false }),
         validateSafeUrl(updates.officialSourceUrl, 'officialSourceUrl', { required: false, allowRelative: false }),
         validateText(updates.eventType, 'eventType', 80, false),
+        updates.faqSchemaEnabled === undefined || typeof updates.faqSchemaEnabled === 'boolean' ? { valid: true } : { valid: false, error: 'faqSchemaEnabled must be true or false.' },
         !('currentEditionYear' in updates) || updates.currentEditionYear === null || validEditionYear(updates.currentEditionYear)
           ? { valid: true } : { valid: false, error: 'currentEditionYear must be null or an edition year between 1900 and 2200.' },
         validateSeo(updates.seo)
@@ -1189,7 +1268,7 @@ async function startServer() {
         const edition = await prisma.eventEdition.findFirst({ where: { sportSlug: existing.sportSlug, eventSlug: existing.slug, year: updates.currentEditionYear }, select: { id: true } });
         if (!edition) return res.status(400).json({ error: 'currentEditionYear must identify an existing edition of this event.' });
       }
-      const allowed = ['name', 'slug', 'sportSlug', 'shortName', 'description', 'history', 'frequency', 'defaultVenue', 'defaultLocation', 'currentEditionYear', 'featured', 'isVisible', 'featuredImage', 'officialSourceUrl', 'eventType', 'seo', 'sportSpecificValues'] as const;
+      const allowed = ['name', 'slug', 'sportSlug', 'shortName', 'description', 'history', 'frequency', 'defaultVenue', 'defaultLocation', 'currentEditionYear', 'featured', 'isVisible', 'featuredImage', 'officialSourceUrl', 'eventType', 'seo', 'sportSpecificValues', 'faqSchemaEnabled'] as const;
       const data: Record<string, unknown> = {};
       for (const key of allowed) if (key in updates) data[key] = updates[key];
       for (const key of ['history', 'frequency', 'defaultVenue', 'defaultLocation', 'featuredImage', 'officialSourceUrl', 'eventType'] as const) {
@@ -1197,39 +1276,57 @@ async function startServer() {
       }
       if ('description' in updates) data.description = optionalFact(updates.description) || '';
       if ('shortName' in updates) data.shortName = optionalFact(updates.shortName) || (updates.name ?? existing.name);
-      const updateResult = 'sportSpecificValues' in updates
-        ? await prisma.$transaction(async (tx) => {
-            const sportSlug = updates.sportSlug ?? existing.sportSlug;
-            const locked = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Sport" WHERE "slug" = ${sportSlug} FOR SHARE`;
-            if (!locked.length) return { error: 'sportSlug must identify an existing sport.' };
+      if ('alternativeNames' in updates) data.alternativeNames = normalizeAlternativeNames(updates.alternativeNames);
+      if ('featuredImage' in updates) data.featuredMediaId = await mediaIdForUrl(data.featuredImage as string | null);
+
+      // PHASE R (Spec §13.2–13.3): slug or sport changes move the event page,
+      // its edition pages and its articles. Collision rule 1 is checked first.
+      const nextSport = (data.sportSlug as string | undefined) ?? existing.sportSlug;
+      const nextSlug = (data.slug as string | undefined) ?? existing.slug;
+      const urlChanging = nextSport !== existing.sportSlug || nextSlug !== existing.slug;
+      if (urlChanging) {
+        const clash = await prisma.sportEvent.findUnique({ where: { sportSlug_slug: { sportSlug: nextSport, slug: nextSlug } }, select: { id: true } });
+        if (clash && clash.id !== existing.id) return res.status(409).json({ error: `Event '${nextSlug}' already exists under sport '${nextSport}'.` });
+        try { await assertEventSlugFree(prisma, { sportSlug: nextSport, slug: nextSlug }); }
+        catch (err) { if (err instanceof UrlConflict) return res.status(err.status).json({ error: err.message }); throw err; }
+      }
+
+      let moves: { from: string; to: string }[] = [];
+      let updated;
+      try {
+        updated = await prisma.$transaction(async (tx) => {
+          const before = urlChanging ? await snapshotUrls(tx, { sportSlug: existing.sportSlug, eventSlug: existing.slug }) : null;
+          if ('sportSpecificValues' in updates) {
+            const locked = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Sport" WHERE "slug" = ${nextSport} FOR SHARE`;
+            if (!locked.length) throw new UrlConflict('sportSlug must identify an existing sport.', 400);
             const [sport, latestEvent] = await Promise.all([
-              tx.sport.findUniqueOrThrow({ where: { slug: sportSlug }, select: { eventConfiguration: true } }),
+              tx.sport.findUniqueOrThrow({ where: { slug: nextSport }, select: { eventConfiguration: true } }),
               tx.sportEvent.findUniqueOrThrow({ where: { id: existing.id }, select: { sportSpecificValues: true } }),
             ]);
-            const previous = sportSlug === existing.sportSlug ? latestEvent.sportSpecificValues : null;
+            const previous = nextSport === existing.sportSlug ? latestEvent.sportSpecificValues : null;
             const values = parseSportEventValues(updates.sportSpecificValues, resolveSportEventConfiguration(sport.eventConfiguration), { newEvent: false, previous });
-            if ('error' in values) return { error: values.error };
+            if ('error' in values) throw new UrlConflict(values.error, 400);
             data.sportSpecificValues = Object.keys(values.value).length ? values.value : Prisma.DbNull;
-            return { updated: await tx.sportEvent.update({ where: { id: existing.id }, data }) };
-          })
-        : { updated: await prisma.sportEvent.update({ where: { id: existing.id }, data }) };
-      if ('error' in updateResult) return res.status(400).json({ error: updateResult.error });
-      const { updated } = updateResult;
+          }
+          // Event-level articles have no FK to the event: carry them along first.
+          if (urlChanging) await moveEventLevelArticles(tx, { sportSlug: existing.sportSlug, eventSlug: existing.slug }, { sportSlug: nextSport, eventSlug: nextSlug });
+          const saved = await tx.sportEvent.update({ where: { id: existing.id }, data });
+          if (before) moves = await redirectChangedUrls(tx, before, `event ${existing.sportSlug}/${existing.slug} → ${saved.sportSlug}/${saved.slug}`);
+          await recordAudit(tx, {
+            userId, userName, action: 'Updated Permanent Event', entityType: 'Event', entityId: existing.id,
+            details: `Updated event ${saved.name}.${moves.length ? ` ${moves.length} URL(s) moved with 301 redirects.` : ''}`,
+            before: existing as unknown as Record<string, unknown>, after: saved as unknown as Record<string, unknown>, fields: EVENT_AUDIT_FIELDS,
+          });
+          return saved;
+        }, { timeout: 60_000 });
+      } catch (err) {
+        if (err instanceof UrlConflict) return res.status(err.status).json({ error: err.message });
+        if (err instanceof RedirectConflict) return res.status(409).json({ error: `URL change blocked: ${err.message}` });
+        throw err;
+      }
+      if (moves.length) notifyIndexNow(seoOrigin(), moves.flatMap((m) => [m.from, m.to]), 'event URL changed');
 
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Updated Permanent Event',
-          entityType: 'Event',
-          entityId: req.params.id,
-          timestamp: new Date(),
-          details: `Updated event ${updated.name}.`,
-        },
-      });
-
-      return res.json(updated);
+      return res.json({ ...updated, movedUrls: moves.length });
     })
   );
 
@@ -1244,9 +1341,10 @@ async function startServer() {
         return res.status(404).json({ error: 'Event not found.' });
       }
 
-      const [editionsCount, articlesCount] = await Promise.all([
+      const [editionsCount, articlesCount, faqCount] = await Promise.all([
         prisma.eventEdition.count({ where: { sportSlug: ev.sportSlug, eventSlug: ev.slug } }),
         prisma.article.count({ where: { sportSlug: ev.sportSlug, eventSlug: ev.slug } }),
+        prisma.faqEntry.count({ where: { eventId: ev.id } }),
       ]);
 
       if (editionsCount > 0 || articlesCount > 0) {
@@ -1254,20 +1352,14 @@ async function startServer() {
           error: `Cannot delete event '${ev.name}': has ${editionsCount} staged editions and ${articlesCount} articles. Remove them first to prevent data corruption.`,
         });
       }
+      // PHASE E5: Event-scoped FAQ entries are editorial content; never drop them silently.
+      if (faqCount > 0) {
+        return res.status(400).json({ error: `Cannot delete event '${ev.name}': it has ${faqCount} FAQ ${faqCount === 1 ? 'entry' : 'entries'}. Move or delete them in FAQ first.` });
+      }
 
       await prisma.sportEvent.delete({ where: { id: ev.id } });
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Deleted Permanent Event',
-          entityType: 'Event',
-          entityId: req.params.id,
-          timestamp: new Date(),
-          details: `Admin ${userName} deleted permanent event ${ev.name}.`,
-        },
-      });
+      // PHASE R.1: structured previous/new values (safe fields only).
+      await recordAudit(prisma, { userId, userName, action: 'Deleted Permanent Event', entityType: 'Event', entityId: req.params.id, details: `Admin ${userName} deleted permanent event ${ev.name}.`, before: ev as unknown as Record<string, unknown>, after: null, fields: EVENT_AUDIT_FIELDS });
 
       return res.json({ success: true, id: req.params.id });
     })
@@ -1299,7 +1391,8 @@ async function startServer() {
         validateOneOf(body.status, 'status', EDITION_STATUSES, true),
         validateText(body.title, 'title', 300),
         ...editionDetailChecks(body),
-        validateSeo(body.seo)
+        validateSeo(body.seo),
+        body.faqSchemaEnabled === undefined || typeof body.faqSchemaEnabled === 'boolean' ? { valid: true } : { valid: false, error: 'faqSchemaEnabled must be true or false.' }
       );
       if (validationError) {
         return res.status(400).json({ error: validationError });
@@ -1336,22 +1429,13 @@ async function startServer() {
           officialSourceUrl: optionalFact(body.officialSourceUrl),
           description: optionalFact(body.description) || '',
           featuredImage: optionalFact(body.featuredImage),
+          featuredMediaId: await mediaIdForUrl(optionalFact(body.featuredImage)),
+          faqSchemaEnabled: body.faqSchemaEnabled === true,
           seo: body.seo || {},
         },
       });
 
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Created Event Edition',
-          entityType: 'Edition',
-          entityId: newEdition.id,
-          timestamp: new Date(),
-          details: `Created edition ${newEdition.title} for ${newEdition.eventSlug}.`,
-        },
-      });
+      await recordAudit(prisma, { userId, userName, action: 'Created Event Edition', entityType: 'Edition', entityId: newEdition.id, details: `Created edition ${newEdition.title} for ${newEdition.eventSlug}.`, before: null, after: newEdition as unknown as Record<string, unknown>, fields: EDITION_AUDIT_FIELDS });
 
       return res.status(201).json(newEdition);
     })
@@ -1378,13 +1462,14 @@ async function startServer() {
         validateSafeUrl(updates.officialSourceUrl, 'officialSourceUrl', { required: false }),
         validateSafeUrl(updates.featuredImage, 'featuredImage', { required: false }),
         ...editionDetailChecks(updates, existing),
-        validateSeo(updates.seo)
+        validateSeo(updates.seo),
+        updates.faqSchemaEnabled === undefined || typeof updates.faqSchemaEnabled === 'boolean' ? { valid: true } : { valid: false, error: 'faqSchemaEnabled must be true or false.' }
       );
       if (validationError) {
         return res.status(400).json({ error: validationError });
       }
       if ('featuredImage' in updates && !(await imageIsManaged(updates.featuredImage))) return res.status(400).json({ error: 'featuredImage must reference a Media Library item.' });
-      const allowed = ['title', 'startDate', 'endDate', 'venue', 'location', 'status', 'quickFacts', 'prizeMoneyTotal', 'defendingChampions', 'qualificationInfo', 'participantsCount', 'officialSourceUrl', 'description', 'featuredImage', 'seo'] as const;
+      const allowed = ['title', 'startDate', 'endDate', 'venue', 'location', 'status', 'quickFacts', 'prizeMoneyTotal', 'defendingChampions', 'qualificationInfo', 'participantsCount', 'officialSourceUrl', 'description', 'featuredImage', 'seo', 'faqSchemaEnabled'] as const;
       const editionData: Record<string, unknown> = {};
       for (const key of allowed) if (key in updates) editionData[key] = updates[key];
       for (const key of ['startDate', 'endDate', 'venue', 'location', 'featuredImage'] as const) {
@@ -1397,21 +1482,11 @@ async function startServer() {
       if ('participantsCount' in updates) editionData.participantsCount = updates.participantsCount ?? null;
       if ('officialSourceUrl' in updates) editionData.officialSourceUrl = updates.officialSourceUrl?.trim() || null;
       if ('prizeMoneyTotal' in updates) editionData.prizeMoneyTotal = updates.prizeMoneyTotal?.trim() || null;
+      if ('featuredImage' in updates) editionData.featuredMediaId = await mediaIdForUrl(editionData.featuredImage as string | null);
 
       const updated = await prisma.eventEdition.update({ where: { id: existing.id }, data: editionData });
 
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Updated Event Edition',
-          entityType: 'Edition',
-          entityId: req.params.id,
-          timestamp: new Date(),
-          details: `Updated edition ${updated.title}.`,
-        },
-      });
+      await recordAudit(prisma, { userId, userName, action: 'Updated Event Edition', entityType: 'Edition', entityId: req.params.id, details: `Updated edition ${updated.title}.`, before: existing as unknown as Record<string, unknown>, after: updated as unknown as Record<string, unknown>, fields: EDITION_AUDIT_FIELDS });
 
       return res.json(updated);
     })
@@ -1441,20 +1516,12 @@ async function startServer() {
           error: `Cannot delete edition '${ed.title}': ${dependentArticles} article(s) reference it. Reassign or archive them first to prevent orphaned records.`,
         });
       }
+      const editionFaqs = await prisma.faqEntry.count({ where: { editionId: ed.id } });
+      if (editionFaqs > 0) return res.status(400).json({ error: `Cannot delete edition '${ed.title}': it has ${editionFaqs} FAQ ${editionFaqs === 1 ? 'entry' : 'entries'}. Move or delete them in FAQ first.` });
 
       await prisma.eventEdition.delete({ where: { id: ed.id } });
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Deleted Event Edition',
-          entityType: 'Edition',
-          entityId: req.params.id,
-          timestamp: new Date(),
-          details: `Admin ${userName} deleted edition ${ed.title}.`,
-        },
-      });
+      // PHASE R.1: structured previous/new values (safe fields only).
+      await recordAudit(prisma, { userId, userName, action: 'Deleted Event Edition', entityType: 'Edition', entityId: req.params.id, details: `Admin ${userName} deleted edition ${ed.title}.`, before: ed as unknown as Record<string, unknown>, after: null, fields: EDITION_AUDIT_FIELDS });
 
       return res.json({ success: true, id: req.params.id });
     })
@@ -1536,18 +1603,8 @@ async function startServer() {
         },
       });
 
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Submitted Comment',
-          entityType: 'Comment',
-          entityId: newComment.id,
-          timestamp: new Date(),
-          details: `Comment submitted for article ${newComment.articleId} (status: ${newComment.status}).`,
-        },
-      });
+      // PHASE R.1: structured previous/new values (safe fields only).
+      await recordAudit(prisma, { userId, userName, action: 'Submitted Comment', entityType: 'Comment', entityId: newComment.id, details: `Comment submitted for article ${newComment.articleId} (status: ${newComment.status}).`, before: null, after: newComment as unknown as Record<string, unknown>, fields: COMMENT_AUDIT_FIELDS });
 
       return res.status(201).json(newComment);
     })
@@ -1566,18 +1623,8 @@ async function startServer() {
 
       const updated = await prisma.comment.update({ where: { id: existing.id }, data: req.body });
 
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Moderated Comment',
-          entityType: 'Comment',
-          entityId: req.params.id,
-          timestamp: new Date(),
-          details: `Comment ${req.params.id} updated to status '${updated.status}' by ${userName}.`,
-        },
-      });
+      // PHASE R.1: structured previous/new values (safe fields only).
+      await recordAudit(prisma, { userId, userName, action: 'Moderated Comment', entityType: 'Comment', entityId: req.params.id, details: `Comment ${req.params.id} updated to status '${updated.status}' by ${userName}.`, before: existing as unknown as Record<string, unknown>, after: updated as unknown as Record<string, unknown>, fields: COMMENT_AUDIT_FIELDS });
 
       return res.json(updated);
     })
@@ -1595,18 +1642,8 @@ async function startServer() {
       }
 
       await prisma.comment.delete({ where: { id: req.params.id } });
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Deleted Comment',
-          entityType: 'Comment',
-          entityId: req.params.id,
-          timestamp: new Date(),
-          details: `Comment ${req.params.id} deleted by ${userName}.`,
-        },
-      });
+      // PHASE R.1: structured previous/new values (safe fields only).
+      await recordAudit(prisma, { userId, userName, action: 'Deleted Comment', entityType: 'Comment', entityId: req.params.id, details: `Comment ${req.params.id} deleted by ${userName}.`, before: existing as unknown as Record<string, unknown>, after: null, fields: COMMENT_AUDIT_FIELDS });
 
       return res.json({ success: true, id: req.params.id });
     })
@@ -1627,6 +1664,12 @@ async function startServer() {
   app.use('/api/ad-creatives', adCreativesRouter(getAuthLookup));
   app.use('/api/settings', settingsRouter(getAuthLookup));
   app.use('/api/seo', seoRouter(getAuthLookup, seoOrigin));
+  // PHASE R
+  app.use('/api/article-types', articleTypesRouter(getAuthLookup));
+  app.use(rumRouter());
+  app.use('/api/insights', insightsRouter(getAuthLookup));
+  app.use('/api/migration', migrationRouter(getAuthLookup));
+  app.use('/api/search-console', searchConsoleRouter(getAuthLookup, seoOrigin));
 
   // PHASE D (Spec §30): an editor confirms an article is still accurate.
   // Records reviewedAt only — never updatedAt.
@@ -1691,18 +1734,8 @@ async function startServer() {
         },
       });
 
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Created Author Profile',
-          entityType: 'Author',
-          entityId: newAuthor.id,
-          timestamp: new Date(),
-          details: `Created author ${newAuthor.name} (${newAuthor.slug}).`,
-        },
-      });
+      // PHASE R.1: structured previous/new values (safe fields only).
+      await recordAudit(prisma, { userId, userName, action: 'Created Author Profile', entityType: 'Author', entityId: newAuthor.id, details: `Created author ${newAuthor.name} (${newAuthor.slug}).`, before: null, after: newAuthor as unknown as Record<string, unknown>, fields: AUTHOR_AUDIT_FIELDS });
 
       return res.status(201).json(newAuthor);
     })
@@ -1721,18 +1754,8 @@ async function startServer() {
 
       const updated = await prisma.author.update({ where: { id: existing.id }, data: req.body });
 
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Updated Author Profile',
-          entityType: 'Author',
-          entityId: req.params.id,
-          timestamp: new Date(),
-          details: `Updated author profile ${updated.name}.`,
-        },
-      });
+      // PHASE R.1: structured previous/new values (safe fields only).
+      await recordAudit(prisma, { userId, userName, action: 'Updated Author Profile', entityType: 'Author', entityId: req.params.id, details: `Updated author profile ${updated.name}.`, before: existing as unknown as Record<string, unknown>, after: updated as unknown as Record<string, unknown>, fields: AUTHOR_AUDIT_FIELDS });
 
       return res.json(updated);
     })
@@ -1761,18 +1784,8 @@ async function startServer() {
       const oldRole = target.role;
       const updated = await prisma.user.update({ where: { id: target.id }, data: { role } });
 
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Changed User Role',
-          entityType: 'User',
-          entityId: target.id,
-          timestamp: new Date(),
-          details: `Admin ${userName} changed user ${target.name}'s role from ${oldRole} to ${role}.`,
-        },
-      });
+      // PHASE R.1: structured previous/new values (safe fields only).
+      await recordAudit(prisma, { userId, userName, action: 'Changed User Role', entityType: 'User', entityId: target.id, details: `Admin ${userName} changed user ${target.name}'s role from ${oldRole} to ${role}.`, before: target as unknown as Record<string, unknown>, after: updated as unknown as Record<string, unknown>, fields: USER_AUDIT_FIELDS });
 
       return res.json(sanitizeUser(updated));
     })
@@ -1835,18 +1848,8 @@ async function startServer() {
 
       recordStaffCreation(userId);
 
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Created Staff User',
-          entityType: 'User',
-          entityId: newUser.id,
-          timestamp: new Date(),
-          details: `Admin ${userName} created staff account "${newUser.name}" (${newUser.role}). Password not recorded in audit log.`,
-        },
-      });
+      // PHASE R.1: structured previous/new values (safe fields only).
+      await recordAudit(prisma, { userId, userName, action: 'Created Staff User', entityType: 'User', entityId: newUser.id, details: `Admin ${userName} created staff account "${newUser.name}" (${newUser.role}). Password not recorded in audit log.`, before: null, after: newUser as unknown as Record<string, unknown>, fields: USER_AUDIT_FIELDS });
 
       return res.status(201).json(sanitizeUser(newUser));
     })
@@ -1890,18 +1893,8 @@ async function startServer() {
         },
       });
 
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Updated Staff User',
-          entityType: 'User',
-          entityId: target.id,
-          timestamp: new Date(),
-          details: `Admin ${userName} updated staff account "${updated.name}".`,
-        },
-      });
+      // PHASE R.1: structured previous/new values (safe fields only).
+      await recordAudit(prisma, { userId, userName, action: 'Updated Staff User', entityType: 'User', entityId: target.id, details: `Admin ${userName} updated staff account "${updated.name}".`, before: target as unknown as Record<string, unknown>, after: updated as unknown as Record<string, unknown>, fields: USER_AUDIT_FIELDS });
 
       return res.json(sanitizeUser(updated));
     })
@@ -1937,18 +1930,8 @@ async function startServer() {
         await prisma.session.deleteMany({ where: { userId: target.id } });
       }
 
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Changed User Status',
-          entityType: 'User',
-          entityId: target.id,
-          timestamp: new Date(),
-          details: `Admin ${userName} set "${target.name}"'s status to ${status}.`,
-        },
-      });
+      // PHASE R.1: structured previous/new values (safe fields only).
+      await recordAudit(prisma, { userId, userName, action: 'Changed User Status', entityType: 'User', entityId: target.id, details: `Admin ${userName} set "${target.name}"'s status to ${status}.`, before: target as unknown as Record<string, unknown>, after: updated as unknown as Record<string, unknown>, fields: USER_AUDIT_FIELDS });
 
       return res.json(sanitizeUser(updated));
     })
@@ -1972,18 +1955,8 @@ async function startServer() {
       await prisma.session.deleteMany({ where: { userId: target.id } });
       await prisma.user.delete({ where: { id: target.id } });
 
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Deleted Staff User',
-          entityType: 'User',
-          entityId: req.params.id,
-          timestamp: new Date(),
-          details: `Admin ${userName} deleted staff account "${target.name}".`,
-        },
-      });
+      // PHASE R.1: structured previous/new values (safe fields only).
+      await recordAudit(prisma, { userId, userName, action: 'Deleted Staff User', entityType: 'User', entityId: req.params.id, details: `Admin ${userName} deleted staff account "${target.name}".`, before: target as unknown as Record<string, unknown>, after: null, fields: USER_AUDIT_FIELDS });
 
       return res.json({ success: true, id: req.params.id });
     })
@@ -2048,18 +2021,8 @@ async function startServer() {
       if ('providerSlotId' in body) data.providerSlotId = nextSlotId;
       const updated = await prisma.adSlotConfig.update({ where: { id: existing.id }, data, include: { creative: true } });
 
-      await prisma.auditLog.create({
-        data: {
-          id: `log-${Date.now()}`,
-          userId,
-          userName,
-          action: 'Configured Ad Slot',
-          entityType: 'Setting',
-          entityId: req.params.id,
-          timestamp: new Date(),
-          details: `Configured ad slot ${req.params.id} (enabled: ${updated.enabled}, provider: ${updated.provider}).`,
-        },
-      });
+      // PHASE R.1: structured previous/new values (safe fields only).
+      await recordAudit(prisma, { userId, userName, action: 'Configured Ad Slot', entityType: 'Setting', entityId: req.params.id, details: `Configured ad slot ${req.params.id} (enabled: ${updated.enabled}, provider: ${updated.provider}).`, before: existing as unknown as Record<string, unknown>, after: updated as unknown as Record<string, unknown>, fields: AD_AUDIT_FIELDS });
 
       return res.json(updated);
     })
@@ -2069,8 +2032,10 @@ async function startServer() {
   app.get(
     '/api/audit-logs',
     requireRole(getAuthLookup, ['Admin', 'Editor']),
-    asyncHandler(async (_req: Request, res: Response) => {
-      const logs = await prisma.auditLog.findMany({ orderBy: { timestamp: 'desc' } });
+    asyncHandler(async (req: Request, res: Response) => {
+      // PHASE R: paged (?page=, 200 per page) so the log never loads in full.
+      const page = Math.max(1, Math.min(10000, Number(req.query.page) || 1));
+      const logs = await prisma.auditLog.findMany({ orderBy: { timestamp: 'desc' }, take: 200, skip: (page - 1) * 200 });
       return res.json(logs);
     })
   );
@@ -2097,6 +2062,16 @@ async function startServer() {
   const nextApp = next({ dev: !deployment.production, dir: process.cwd() });
   const handleNext = nextApp.getRequestHandler();
   await nextApp.prepare();
+
+  // An async App Router notFound() can be reached after the root layout has
+  // started streaming, leaving HTTP 200 on a disabled /faq/ page. Decide the
+  // optional page's existence before rendering so visitors and crawlers get
+  // a real 404, consistent with the sitemap and the final FAQ requirement.
+  app.get(['/faq', '/faq/'], asyncHandler(async (req: Request, res: Response) => {
+    const { globalFaqPageEnabled } = await import('./server/services/public/faq');
+    if (!(await globalFaqPageEnabled())) return nextApp.render404(req, res);
+    return handleNext(req, res);
+  }));
 
   app.use((req: Request, res: Response, nextMiddleware: NextFunction) => {
     // Source/tooling paths and unknown files are plain JSON 404s, never pages.
@@ -2155,7 +2130,14 @@ async function startServer() {
     if (stopping || schedulerWork) return;
     schedulerWork = Promise.all([
       publishScheduledArticles().catch(() => console.error('[Scheduler] Publication failed. Check database availability.')),
-      applyDueSchedules().catch(() => console.error('[Scheduler] Site Experience publication failed. Check database availability.')),
+      // PHASE R.1: only when a schedule is due, the cache is bypassed while it applies and cleared afterwards.
+      (async () => {
+        if (!(await prisma.siteExperience.count({ where: { scheduledFor: { lte: new Date() } } }))) return 0;
+        const end = beginContentWrite('site experience schedule');
+        try { return await applyDueSchedules(); } finally { end(); }
+      })().catch(() => console.error('[Scheduler] Site Experience publication failed. Check database availability.')),
+      // PHASE R: daily Search Console / Bing import, only when configured (no-op otherwise).
+      runScheduledSearchSync(seoOrigin()).catch(() => console.error('[Scheduler] Search performance import failed. See Admin → Insights.')),
     ]).finally(() => { schedulerWork = undefined; });
   }, 30000);
   scheduler.unref();

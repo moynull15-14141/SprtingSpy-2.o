@@ -20,7 +20,7 @@ const RichTextEditor = dynamic(() => import('./editor/RichTextEditor'), {
 });
 const EMPTY_DOC: RichDoc = { type: 'doc', content: [{ type: 'paragraph' }] };
 import { useApp } from '../../context/AppContext';
-import { Article, ArticleType, ARTICLE_TYPES, SeoMetadata } from '../../types';
+import { Article, ArticleType, SeoMetadata } from '../../types';
 import { Button } from '../ui/Button';
 import { useArticleSearch } from './useArticleSearch';
 
@@ -59,7 +59,7 @@ const SuggestionList: React.FC<{ title: string; empty: string; items: React.Reac
 );
 
 export const AdminArticles: React.FC = () => {
-  const { articles, sports, events, editions, authors, addArticle, updateArticle, deleteArticle, navigate, mediaItems, apiCall, refreshData } =
+  const { articles, sports, events, editions, authors, addArticle, updateArticle, deleteArticle, navigate, mediaItems, apiCall, refreshData, articleTypes } =
     useApp();
   const { currentUser } = useApp();
   const isAuthor = currentUser.role === 'Author';
@@ -75,6 +75,8 @@ export const AdminArticles: React.FC = () => {
   const [eventSlug, setEventSlug] = useState<string>('');
   const [editionYear, setEditionYear] = useState<number | undefined>(undefined);
   const [articleType, setArticleType] = useState<ArticleType>('Schedule');
+  // PHASE R: FAQPage structured data for this article's reader questions (opt-in).
+  const [faqSchemaEnabled, setFaqSchemaEnabled] = useState(false);
   const [title, setTitle] = useState('');
   const [subtitle, setSubtitle] = useState('');
   const [slug, setSlug] = useState('');
@@ -143,6 +145,7 @@ export const AdminArticles: React.FC = () => {
     setStatus('draft');
     setScheduledLocal('');
     setReferences([]);
+    setFaqSchemaEnabled(false);
     setFormError(null);
     setSeoCheck(null);
     setAssistantResult(null);
@@ -255,6 +258,7 @@ export const AdminArticles: React.FC = () => {
       // PHASE H: an unambiguous UTC instant; any other status clears the schedule on the server.
       scheduledFor: statusOverride === 'scheduled' ? new Date(scheduledLocal).toISOString() : null,
       references: refs,
+      faqSchemaEnabled,
       seo: {
         ...otherSeo,
         metaTitle: metaTitle || title,
@@ -338,6 +342,7 @@ export const AdminArticles: React.FC = () => {
     setEventSlug(art.eventSlug || '');
     setEditionYear(art.editionYear);
     setArticleType(art.articleType);
+    setFaqSchemaEnabled(!!art.faqSchemaEnabled);
     setTitle(art.title);
     setSubtitle(art.subtitle || '');
     setSlug(art.slug);
@@ -528,12 +533,15 @@ export const AdminArticles: React.FC = () => {
                 onChange={(e) => setArticleType(e.target.value as ArticleType)}
                 className="w-full text-xs p-2 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 font-medium"
               >
-                {ARTICLE_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
+                {/* PHASE R: database-backed list (Admin → Article Types); an article keeps its own type even if it was deactivated. */}
+                {articleTypes.filter((t) => t.isActive || t.name === articleType).map((t) => (
+                  <option key={t.id} value={t.name}>
+                    {t.name}{t.isActive ? '' : ' (inactive)'}
                   </option>
                 ))}
+                {!articleTypes.some((t) => t.name === articleType) && <option value={articleType}>{articleType}</option>}
               </select>
+              {articleTypes.find((t) => t.name === articleType)?.description && <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400">{articleTypes.find((t) => t.name === articleType)!.description}</p>}
             </div>
 
             <div>
@@ -763,6 +771,16 @@ export const AdminArticles: React.FC = () => {
             )}
           </section>
 
+          {/* PHASE R: reader questions for this article (managed in FAQ; structured data is opt-in) */}
+          <section className="rounded-xl border border-stone-200 bg-white p-4 text-xs dark:border-stone-800 dark:bg-stone-950" aria-labelledby="article-faq-heading">
+            <h4 id="article-faq-heading" className="font-bold uppercase tracking-[0.16em] text-stone-700 dark:text-stone-200">Reader questions (FAQ)</h4>
+            <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400">Questions and answers for this article are written, reviewed and published in <strong>FAQ</strong> (choose this article as the context). Only published entries appear on the page.</p>
+            <label className="mt-3 flex items-start gap-2">
+              <input type="checkbox" checked={faqSchemaEnabled} onChange={(e) => setFaqSchemaEnabled(e.target.checked)} disabled={isAuthor} className="mt-0.5" />
+              <span><span className="font-semibold">Add FAQPage structured data</span> — only when the published questions pass validation and describe this page. Off by default.</span>
+            </label>
+          </section>
+
           {/* SOCIAL METADATA (Open Graph / Twitter-X share previews) */}
           <details className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-950">
               <summary className="cursor-pointer text-xs font-bold uppercase tracking-[0.16em] text-stone-700 dark:text-stone-200">
@@ -929,7 +947,7 @@ function ArticleRepository({ reloadKey, sports, authors, onView, onEdit, onRevie
   onDelete: (id: string, title: string) => void;
 }) {
   const [q, setQ] = useState('');
-  const { currentUser } = useApp();
+  const { currentUser, articleTypes } = useApp();
   const [queue, setQueue] = useState('');
   const [status, setStatus] = useState('');
   const [sport, setSport] = useState('');
@@ -966,7 +984,7 @@ function ArticleRepository({ reloadKey, sports, authors, onView, onEdit, onRevie
         <label className="text-[11px] font-semibold text-stone-500 dark:text-stone-400">Type
           <select value={type} onChange={set(setType)} className={`mt-1 block ${filterClass}`}>
             <option value="">All types</option>
-            {ARTICLE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            {articleTypes.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
           </select>
         </label>
         <label className="text-[11px] font-semibold text-stone-500 dark:text-stone-400">Author

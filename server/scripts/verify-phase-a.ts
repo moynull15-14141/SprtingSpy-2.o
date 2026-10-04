@@ -190,23 +190,26 @@ try {
   tested('editor-managed redirect rules resolve to the canonical target in a single hop (no slash-policy chain)');
 
   // ── 2. Article type + social metadata ──
-  assert.equal(await prisma.article.count({ where: { articleType: 'Sports Viewing Guide' } }), 0);
-  assert(!(ARTICLE_TYPES as readonly string[]).includes('Sports Viewing Guide') && ARTICLE_TYPES.includes('How to Watch'));
-  assert.equal(ARTICLE_TYPES.length, 19);
+  assert(ARTICLE_TYPES.includes('Sports Viewing Guide') && ARTICLE_TYPES.includes('How to Watch'));
+  assert.equal(ARTICLE_TYPES.length, 20);
+  const databaseTypes = (await status(editor, '/api/article-types', 200)).data;
+  assert(databaseTypes.some((t: any) => t.name === 'How to Watch' && t.isActive));
+  assert(databaseTypes.some((t: any) => t.name === 'Sports Viewing Guide' && t.isActive));
   // PHASE B: public data is server-rendered HTML; the CMS dataset is staff-only.
   const publicData = (await status(admin, '/api/cms/data', 200)).data;
   const published = publicData.articles.filter((a: any) => a.status === 'published');
   assert(published.some((a: any) => a.articleType === 'How to Watch'));
-  assert(publicData.articles.every((a: any) => (ARTICLE_TYPES as readonly string[]).includes(a.articleType)));
+  assert(publicData.articles.every((a: any) => databaseTypes.some((t: any) => t.name === a.articleType)));
   const howToWatch = published.find((a: any) => a.articleType === 'How to Watch');
   const howToWatchHtml = (await status(anon, `/${howToWatch.sportSlug}/${howToWatch.eventSlug}/${howToWatch.editionYear}/${howToWatch.slug}/`, 200)).text;
   assert(howToWatchHtml.includes('How to Watch') && !howToWatchHtml.includes('Sports Viewing Guide'));
   const byType = await status(editor, `/api/articles?type=${encodeURIComponent('How to Watch')}`, 200);
   assert(byType.data.length >= 1 && byType.data.every((a: any) => a.articleType === 'How to Watch'));
-  tested('article type: no "Sports Viewing Guide" rows; migrated article served and filterable as "How to Watch"; 19 spec types');
+  tested('article type: both viewing types exist as separate database rows; migrated How to Watch article remains served and filterable');
 
   const articleBase = { title: `${fixture} How to Watch`, sportSlug: edition.sportSlug, eventSlug: edition.eventSlug, editionYear: edition.year, content: 'Broadcasters and streams.', authorId, status: 'draft' };
-  await status(editor, '/api/articles', 400, 'POST', { ...articleBase, slug: `${fixture}-a`, articleType: 'Sports Viewing Guide' });
+  const viewing = await status(editor, '/api/articles', 201, 'POST', { ...articleBase, slug: `${fixture}-viewing`, articleType: 'Sports Viewing Guide' });
+  createdArticleIds.push(viewing.data.id);
   await status(editor, '/api/articles', 400, 'POST', { ...articleBase, slug: `${fixture}-a`, articleType: 'Streaming Guide' });
   await status(editor, '/api/articles', 400, 'POST', { ...articleBase, slug: `${fixture}-a`, articleType: 'How to Watch', seo: { ogImage: 'javascript:alert(1)' } });
   await status(editor, '/api/articles', 400, 'POST', { ...articleBase, slug: `${fixture}-a`, articleType: 'How to Watch', seo: { ogTitle: 'x'.repeat(201) } });
@@ -219,14 +222,14 @@ try {
   assert.deepEqual(created.data.seo, social);
   const plain = await status(editor, '/api/articles', 201, 'POST', { ...articleBase, slug: `${fixture}-b`, articleType: 'News' });
   createdArticleIds.push(plain.data.id);
-  await status(editor, `/api/articles/${created.data.id}`, 400, 'PUT', { articleType: 'Sports Viewing Guide' });
+  await status(editor, `/api/articles/${plain.data.id}`, 200, 'PUT', { articleType: 'Sports Viewing Guide' });
   await status(editor, `/api/articles/${created.data.id}`, 400, 'PUT', { articleType: '' });
   await status(editor, `/api/articles/${created.data.id}`, 400, 'PUT', { seo: { ...social, ogImage: 'data:text/html,x' } });
   const updated = await status(editor, `/api/articles/${created.data.id}`, 200, 'PUT', { seo: { ...social, ogTitle: 'Updated share title' } });
   assert.equal(updated.data.seo.ogTitle, 'Updated share title');
   const stored = await prisma.article.findUniqueOrThrow({ where: { id: created.data.id } });
   assert.equal((stored.seo as any).ogDescription, 'Share description');
-  tested('article API: legacy/unsupported types rejected; social metadata (ogTitle/ogDescription/ogImage) validated, saved and updated; articles without it stay valid');
+  tested('article API: both viewing types accepted, unknown type rejected; social metadata validated, saved and updated');
 
   // ── 3. Event fields ──
   const eventBase = { name: `${fixture} Open`, sportSlug: sport.slug, description: 'Fixture event.' };
@@ -379,7 +382,7 @@ try {
       await page.getByRole('button', { name: 'Articles', exact: true }).click();
       await page.getByRole('button', { name: '+ Create New Article' }).click();
       assert.equal(await page.locator('select option[value="How to Watch"]').count(), 1);
-      assert.equal(await page.locator('select option[value="Sports Viewing Guide"]').count(), 0);
+      assert.equal(await page.locator('select option[value="Sports Viewing Guide"]').count(), 1);
       await page.getByText('Social Metadata', { exact: true }).waitFor();
       await page.getByText('Social Metadata', { exact: true }).click();
       for (const label of ['Social Title', 'Social Image URL', 'Social Description']) await page.getByText(label, { exact: true }).waitFor();

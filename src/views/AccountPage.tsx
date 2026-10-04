@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSite } from '../context/SiteContext';
+import { TwoFactorSettings } from './TwoFactorSettings';
 import { Button } from '../components/ui/Button';
 import type { AccountProfile, AccountSession } from '../types';
 
@@ -141,6 +142,7 @@ const AccountDetails: React.FC = () => {
         {(['currentPassword', 'newPassword', 'confirmPassword'] as const).map((key, index) => <label key={key} className="block text-sm">{[t('Current password', 'বর্তমান পাসওয়ার্ড'), t('New password', 'নতুন পাসওয়ার্ড'), t('Confirm new password', 'নতুন পাসওয়ার্ড নিশ্চিত করুন')][index]}<input className={inputClass} type="password" required minLength={index ? 8 : 1} maxLength={200} autoComplete={index ? 'new-password' : 'current-password'} value={passwords[key]} onChange={e => setPasswords(previous => ({ ...previous, [key]: e.target.value }))} /></label>)}
         <Button type="submit" isLoading={busy === 'password'}>{t('Update password', 'পাসওয়ার্ড হালনাগাদ করুন')}</Button>
       </fieldset></form>
+      <TwoFactorSettings />
       <div className="border-t border-stone-200 dark:border-stone-800 pt-5 space-y-4">
         <h3 className="font-semibold">{t('Active sessions', 'সক্রিয় সেশন')}</h3>
         <p className="text-xs text-stone-500 dark:text-stone-400">{t('Sessions are identified by their start time. Device, location and last activity are not collected.', 'সেশন শুরুর সময় দিয়ে চিহ্নিত করা হয়। ডিভাইস, অবস্থান বা সর্বশেষ কার্যকলাপ সংগ্রহ করা হয় না।')}</p>

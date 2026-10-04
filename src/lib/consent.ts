@@ -55,15 +55,30 @@ export interface PrivacyConfig {
   ga4MeasurementId: string | null;
   /** AdSense publisher ID when third-party advertising is active, otherwise null. */
   adsenseClient: string | null;
+  /**
+   * PHASE R (Spec v2.0 §22.7): who asks for advertising consent.
+   *   "builtin"    the site's own banner covers analytics AND advertising.
+   *   "google-cmp" Google's certified CMP (AdSense Privacy & messaging,
+   *                configured by the owner in the AdSense account) asks for
+   *                advertising consent and passes IAB TCF signals to AdSense;
+   *                the site's banner then covers analytics only. The AdSense
+   *                tag loads so the CMP can show its message; ad
+   *                personalisation follows the CMP's TCF consent.
+   */
+  consentMode?: 'builtin' | 'google-cmp';
+  /** PHASE R: AdSense Auto ads in addition to the controlled slots. */
+  adsenseAutoAds?: boolean;
 }
 
 export const optionalCategories = (config: PrivacyConfig): ConsentCategory[] => [
   ...(config.ga4MeasurementId ? (['analytics'] as const) : []),
-  ...(config.adsenseClient ? (['advertising'] as const) : []),
+  // With Google's certified CMP the advertising question is asked by the CMP, not by this banner.
+  ...(config.adsenseClient && config.consentMode !== 'google-cmp' ? (['advertising'] as const) : []),
 ];
 
 /** True when this category may run: configured and consented. */
 export function allowed(category: ConsentCategory, consent: ConsentState, config: PrivacyConfig): boolean {
   const configured = category === 'analytics' ? !!config.ga4MeasurementId : !!config.adsenseClient;
+  if (category === 'advertising' && configured && config.consentMode === 'google-cmp') return true; // the certified CMP decides (TCF)
   return configured && consent?.[category] === true;
 }

@@ -36,20 +36,25 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [totpRequired, setTotpRequired] = useState(false);
+  const [totpCode, setTotpCode] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoggingIn(true);
     setLoginError(null);
-    const result = await login(loginEmail, loginPassword);
+    const result = await login(loginEmail, loginPassword, totpRequired ? totpCode.trim() : undefined);
     setIsLoggingIn(false);
     if (result.success) {
       setLoginEmail('');
       setLoginPassword('');
+      setTotpRequired(false);
+      setTotpCode('');
       setIsUserMenuOpen(false);
     } else {
-      setLoginError(result.error || 'Login failed.');
+      if (result.totpRequired) setTotpRequired(true);
+      setLoginError(result.totpRequired && !totpRequired ? null : result.error || 'Login failed.');
     }
   };
 
@@ -261,10 +266,12 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
                         onChange={(e) => setLoginPassword(e.target.value)}
                         className="w-full text-xs p-2 rounded-lg border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-950 text-stone-900 dark:text-stone-100 focus:outline-none focus:ring-1 focus:ring-amber-500"
                       />
-                      {loginError && <p className="text-[11px] text-rose-600 dark:text-rose-400">{loginError}</p>}
+                      {totpRequired && <input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required autoFocus aria-label="Authentication code" placeholder="6-digit authentication code" value={totpCode} onChange={(e) => setTotpCode(e.target.value.replace(/D/g, ''))} className="w-full text-xs p-2 rounded-lg border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-950 tracking-widest" />}
+                      {loginError && <p role="alert" className="text-[11px] text-rose-600 dark:text-rose-400">{loginError}</p>}
                       <Button type="submit" size="sm" isLoading={isLoggingIn} className="w-full justify-center">
-                        Log In
+                        {totpRequired ? 'Verify' : 'Log In'}
                       </Button>
+                      <a href="/reset-password/" className="block text-center text-[11px] font-semibold text-amber-700 hover:underline dark:text-amber-400">Forgot password?</a>
                     </form>
                   )}
                 </div>

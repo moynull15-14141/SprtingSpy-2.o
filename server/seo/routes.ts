@@ -14,7 +14,8 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import crypto from 'node:crypto';
 import { prisma } from '../db';
 import { requireRole, type AuthLookup } from '../auth';
-import { ARTICLE_TYPES } from '../../src/types';
+import { allArticleTypes } from '../articleTypes';
+import { recordAudit } from '../audit';
 import { RULES_BY_KEY, SEVERITIES } from './rules';
 import { checkArticleDraft, loadRuleSettings, runScan } from './engine';
 import { coverageGaps, externalSourceSuggestions, internalLinkSuggestions } from './suggestions';
@@ -91,7 +92,8 @@ export function seoRouter(getLookup: () => AuthLookup, origin: () => string) {
     if (body.severity !== undefined && !SEVERITIES.includes(body.severity as never)) return res.status(400).json({ error: `severity must be one of ${SEVERITIES.join(', ')}.` });
     if (body.articleTypes !== undefined) {
       if (def.target !== 'article') return res.status(400).json({ error: 'Only article rules have article types.' });
-      if (!Array.isArray(body.articleTypes) || body.articleTypes.some((t) => !(ARTICLE_TYPES as readonly string[]).includes(t as string))) return res.status(400).json({ error: 'articleTypes must be a list of existing article types.' });
+      const known = new Set((await allArticleTypes()).map((t) => t.name));
+      if (!Array.isArray(body.articleTypes) || body.articleTypes.some((t) => !known.has(t as string))) return res.status(400).json({ error: 'articleTypes must be a list of existing article types.' });
     }
     if (body.config !== undefined) {
       const err = configError(def.config, body.config);
@@ -108,14 +110,14 @@ export function seoRouter(getLookup: () => AuthLookup, origin: () => string) {
         updatedAt: new Date(),
       },
     });
-    await prisma.auditLog.create({ data: { id: `log-${crypto.randomUUID()}`, userId: req.authContext!.userId, userName: req.authContext!.userName, action: 'Updated SEO Rule', entityType: 'Setting', entityId: def.key, timestamp: new Date(), details: `SEO rule "${def.key}" updated to version ${updated.version} (${Object.keys(body).join(', ')}).` } });
+    await recordAudit(prisma, { userId: req.authContext!.userId, userName: req.authContext!.userName, action: 'Updated SEO Rule', entityType: 'Setting', entityId: def.key, details: `SEO rule "${def.key}" updated to version ${updated.version} (${Object.keys(body).join(', ')}).`, before: row as unknown as Record<string, unknown>, after: updated as unknown as Record<string, unknown>, fields: ['enabled', 'severity', 'articleTypes', 'config'] });
     return res.json(updated);
   }));
 
   /** Validates the editor draft sent for checking (never saved). */
-  function draftInput(body: Record<string, unknown>) {
+  function draftInput(body: Record<string, unknown>, knownTypes: Set<string>) {
     if (!body || typeof body !== 'object') return { error: 'Send the article draft.' };
-    if (typeof body.articleType !== 'string' || !(ARTICLE_TYPES as readonly string[]).includes(body.articleType)) return { error: 'articleType is required.' };
+    if (typeof body.articleType !== 'string' || !knownTypes.has(body.articleType)) return { error: 'articleType is required.' };
     if (typeof body.sportSlug !== 'string') return { error: 'sportSlug is required.' };
     let doc = null;
     if (body.body !== undefined && body.body !== null) {
@@ -137,7 +139,7 @@ export function seoRouter(getLookup: () => AuthLookup, origin: () => string) {
   }
 
   router.post('/article-check', requireRole(getLookup, ['Admin', 'Editor', 'Author']), wrap(async (req, res) => {
-    const parsed = draftInput(req.body);
+    const parsed = draftInput(req.body, new Set((await allArticleTypes()).map((t) => t.name)));
     if ('error' in parsed) return res.status(400).json({ error: parsed.error });
     const { ctx, subject, checklist } = await checkArticleDraft(origin(), parsed.input as never);
     const coverage = (await loadRuleSettings()).get('edition-coverage')!;
@@ -155,7 +157,7 @@ export function seoRouter(getLookup: () => AuthLookup, origin: () => string) {
   router.post('/assistant', requireRole(getLookup, ['Admin', 'Editor', 'Author']), wrap(async (req, res) => {
     const state = assistantState();
     if (!state.configured) return res.status(503).json({ error: state.reason, configured: false });
-    const parsed = draftInput(req.body);
+    const parsed = draftInput(req.body, new Set((await allArticleTypes()).map((t) => t.name)));
     if ('error' in parsed) return res.status(400).json({ error: parsed.error });
     const { ctx, subject } = await checkArticleDraft(origin(), parsed.input as never);
     const result = await aiSuggestions(subject, ctx);

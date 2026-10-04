@@ -11,21 +11,10 @@ import Link from 'next/link';
 import { Breadcrumbs } from '../components/ui/Breadcrumbs';
 import { ArticleCard } from '../components/editorial/ArticleCard';
 import { FilterSelect } from '../components/ui/FilterSelect';
-import { ArticleType } from '../types';
 import type { getLatest } from '../../server/services/public/content';
 
 type LatestData = Awaited<ReturnType<typeof getLatest>>;
 
-export const LATEST_FILTER_TYPES: ArticleType[] = [
-  'Schedule',
-  'How to Watch',
-  'Prize Money',
-  'Rules & Format',
-  'Analysis',
-  'Event Guide',
-  'Results',
-  'Preview',
-];
 
 const selectClass =
   'text-xs py-1.5 px-3 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-800 dark:text-stone-200 focus:outline-none focus:ring-1 focus:ring-amber-500';
@@ -55,7 +44,7 @@ export const LatestArticlesPage: React.FC<{ data: LatestData; selectedSport: str
         <span className="text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-500">Editorial Wire</span>
         <h1 className="font-serif text-3xl sm:text-4xl font-bold text-stone-900 dark:text-stone-100 mt-1">Latest Sports Journalism</h1>
         <p className="mt-2 text-stone-600 dark:text-stone-400 max-w-2xl text-sm sm:text-base">
-          Chronological record of verified sports dossiers, tournament timetables, purse records, and tactical explanations.
+          The newest SportingSpy articles across every sport: schedules, results, viewing guides, prize money and analysis.
         </p>
 
         {/* Filters */}
@@ -71,7 +60,7 @@ export const LatestArticlesPage: React.FC<{ data: LatestData; selectedSport: str
 
           <FilterSelect param="type" value={selectedType} className={selectClass} label="Filter by article type">
             <option value="">All Article Formats</option>
-            {LATEST_FILTER_TYPES.map((t) => (
+            {data.types.map((t) => (
               <option key={t} value={t}>
                 {t}
               </option>

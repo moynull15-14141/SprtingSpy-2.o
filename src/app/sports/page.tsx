@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { SportsDirectoryPage } from '../../views/SportsDirectoryPage';
 import { getSportsDirectory } from '../../lib/data';
 import { pageMetadata } from '../../lib/seo';
+import { RumPageType } from '../../components/analytics/RumPageType';
 
 export function generateMetadata(): Promise<Metadata> {
   return pageMetadata({
@@ -12,5 +13,5 @@ export function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function Page() {
-  return <SportsDirectoryPage sports={await getSportsDirectory()} />;
+  return <><RumPageType type="sports" /><SportsDirectoryPage sports={await getSportsDirectory()} /></>;
 }

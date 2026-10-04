@@ -19,6 +19,7 @@ import { firstError, validateRedirectSource, validateSafeUrl, validateText } fro
 import { stripTrailingSlash } from '../src/config/urls';
 import { siteOrigin } from '../src/lib/paths';
 import { loadSiteIndex } from './seo/siteIndex';
+import { recordAudit } from './audit';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -53,7 +54,7 @@ export interface RedirectInput {
   statusCode?: number;
   isActive?: boolean;
   notes?: string | null;
-  origin?: 'manual' | 'article-slug' | 'migration';
+  origin?: 'manual' | 'article-slug' | 'slug-change' | 'migration';
 }
 
 /**
@@ -150,8 +151,9 @@ export function redirectRouter(getLookup: () => AuthLookup) {
   const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => {
     fn(req, res).catch((err) => (err instanceof RedirectConflict ? res.status(err.status).json({ error: err.message }) : next(err)));
   };
-  const audit = (req: Request, action: string, entityId: string, details: string) =>
-    prisma.auditLog.create({ data: { id: `log-${crypto.randomUUID()}`, userId: req.authContext!.userId, userName: req.authContext!.userName, action, entityType: 'Redirect', entityId, timestamp: new Date(), details } });
+  // PHASE R.1: structured previous/new rule values.
+  const audit = (req: Request, action: string, entityId: string, details: string, before?: object | null, after?: object | null) =>
+    recordAudit(prisma, { userId: req.authContext!.userId, userName: req.authContext!.userName, action, entityType: 'Redirect', entityId, details, before: before as Record<string, unknown> | null | undefined, after: after as Record<string, unknown> | null | undefined, fields: ['sourceUrl', 'targetUrl', 'statusCode', 'isActive', 'origin', 'notes'] });
   const validate = (body: Record<string, unknown>, partial: boolean) =>
     firstError(
       body.sourceUrl !== undefined || !partial ? validateRedirectSource(body.sourceUrl, 'sourceUrl') : { valid: true },
@@ -168,7 +170,7 @@ export function redirectRouter(getLookup: () => AuthLookup) {
     const rule = await prisma.$transaction((tx) =>
       saveRedirect(tx, { sourceUrl: String(body.sourceUrl), targetUrl: String(body.targetUrl), statusCode: body.statusCode as number, isActive: body.isActive as boolean, notes: (body.notes as string) || null, origin: 'manual' }, 'create')
     );
-    await audit(req, 'Created Redirect Rule', rule.id, `Admin ${req.authContext!.userName} created ${rule.statusCode} redirect: ${rule.sourceUrl} -> ${rule.targetUrl}.`);
+    await audit(req, 'Created Redirect Rule', rule.id, `Admin ${req.authContext!.userName} created ${rule.statusCode} redirect: ${rule.sourceUrl} -> ${rule.targetUrl}.`, null, rule);
     return res.status(201).json(rule);
   }));
 
@@ -214,7 +216,7 @@ export function redirectRouter(getLookup: () => AuthLookup) {
     }
     const errors = results.filter((r) => r.error);
     const applied = body.dryRun === false && !errors.length;
-    if (applied) await audit(req, 'Imported Redirects', 'bulk', `Admin ${req.authContext!.userName} imported ${results.length} migration redirects.`);
+    if (applied) await audit(req, 'Imported Redirects', 'bulk', `Admin ${req.authContext!.userName} imported ${results.length} migration redirects.`, null, { sourceUrl: results.map((r) => r.sourceUrl).slice(0, 200), targetUrl: results.map((r) => r.targetUrl).slice(0, 200) });
     return res.status(errors.length ? 400 : applied ? 201 : 200).json({ dryRun: body.dryRun !== false, applied, total: results.length, valid: results.length - errors.length, results });
   }));
 
@@ -245,7 +247,7 @@ export function redirectRouter(getLookup: () => AuthLookup) {
         existing.id
       )
     );
-    await audit(req, 'Updated Redirect Rule', rule.id, `Admin ${req.authContext!.userName} updated redirect rule ${rule.id}: ${rule.sourceUrl} -> ${rule.targetUrl} (${rule.isActive ? 'active' : 'inactive'}).`);
+    await audit(req, 'Updated Redirect Rule', rule.id, `Admin ${req.authContext!.userName} updated redirect rule ${rule.id}: ${rule.sourceUrl} -> ${rule.targetUrl} (${rule.isActive ? 'active' : 'inactive'}).`, existing, rule);
     return res.json(rule);
   }));
 
@@ -253,7 +255,7 @@ export function redirectRouter(getLookup: () => AuthLookup) {
     const existing = await prisma.redirectRule.findUnique({ where: { id: req.params.id } });
     if (!existing) return res.status(404).json({ error: 'Redirect rule not found.' });
     await prisma.redirectRule.delete({ where: { id: existing.id } });
-    await audit(req, 'Deleted Redirect Rule', existing.id, `Admin ${req.authContext!.userName} deleted redirect rule ${existing.id}.`);
+    await audit(req, 'Deleted Redirect Rule', existing.id, `Admin ${req.authContext!.userName} deleted redirect rule ${existing.id}.`, existing, null);
     return res.json({ success: true, id: existing.id });
   }));
 

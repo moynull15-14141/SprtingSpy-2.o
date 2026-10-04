@@ -27,6 +27,9 @@ import { AdminSettings } from './AdminSettings';
 import { AdminSiteExperience } from './site/AdminSiteExperience';
 import { AdminFaq } from './AdminFaq';
 import { AdminInbox } from './AdminInbox';
+import { AdminArticleTypes } from './AdminArticleTypes';
+import { AdminInsights } from './AdminInsights';
+import { AdminMigration } from './AdminMigration';
 
 export function AdminApp() {
   return (
@@ -68,6 +71,12 @@ export function AdminApp() {
                 return <AdminFaq />;
               case 'inbox':
                 return <AdminInbox />;
+              case 'types':
+                return <AdminArticleTypes />;
+              case 'insights':
+                return <AdminInsights />;
+              case 'migration':
+                return <AdminMigration />;
               default:
                 return <AdminDashboard setActiveTab={setActiveTab} />;
             }

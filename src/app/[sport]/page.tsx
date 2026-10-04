@@ -13,7 +13,7 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
   if (!data) return {};
   const { sport } = data;
   // PHASE D: same rule as the sitemap — a hub with no content is thin (noindex).
-  const indexability = sportIndexability({ isVisible: true, seo: sport.seo, publishedArticleCount: data.articles.length, visibleEventCount: data.events.length });
+  const indexability = sportIndexability({ isVisible: true, seo: sport.seo, publishedArticleCount: data.articleTotal, visibleEventCount: data.eventTotal });
   return pageMetadata({
     noindex: !indexability.indexable,
     title: `${sport.name} Guides, Tournament Schedules & Records | SportingSpy`,

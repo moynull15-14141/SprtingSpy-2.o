@@ -44,6 +44,10 @@ export const AdminEvents: React.FC = () => {
   const [eventName, setEventName] = useState('');
   const [eventSlug, setEventSlug] = useState('');
   const [eventShortName, setEventShortName] = useState('');
+  // PHASE R: alternative names for search; FAQPage structured-data opt-ins.
+  const [eventAltNames, setEventAltNames] = useState('');
+  const [eventFaqSchema, setEventFaqSchema] = useState(false);
+  const [editionFaqSchema, setEditionFaqSchema] = useState(false);
   const [eventSportSlug, setEventSportSlug] = useState(sports[0]?.slug || 'tennis');
   const [eventDesc, setEventDesc] = useState('');
   const [eventHistory, setEventHistory] = useState('');
@@ -100,6 +104,8 @@ export const AdminEvents: React.FC = () => {
     setEventName('');
     setEventSlug('');
     setEventShortName('');
+    setEventAltNames('');
+    setEventFaqSchema(false);
     setEventSportSlug(sports[0]?.slug || 'tennis');
     setEventDesc('');
     setEventHistory('');
@@ -126,6 +132,8 @@ export const AdminEvents: React.FC = () => {
     setEventName(evt.name);
     setEventSlug(evt.slug);
     setEventShortName(evt.shortName);
+    setEventAltNames(evt.alternativeNames || '');
+    setEventFaqSchema(!!evt.faqSchemaEnabled);
     setEventSportSlug(evt.sportSlug);
     setEventDesc(evt.description);
     setEventHistory(evt.history || '');
@@ -183,9 +191,14 @@ export const AdminEvents: React.FC = () => {
     }
     const customPayload = !editingEventId || eventValuesDirty ? { sportSpecificValues: eventValues } : {};
 
+    // PHASE R: a slug or sport change moves this event's URLs (old URLs redirect 301 automatically).
+    if (originalEvent && (originalEvent.slug !== eventSlug || originalEvent.sportSlug !== eventSportSlug)
+      && !confirm(`Change the URL from /${originalEvent.sportSlug}/${originalEvent.slug}/ to /${eventSportSlug}/${eventSlug}/? The event, its editions and its articles move; old URLs will redirect (301) to the new ones.`)) return;
     setEventSaving(true);
     const ok = editingEventId
       ? await updateEvent(editingEventId, {
+          alternativeNames: eventAltNames,
+          faqSchemaEnabled: eventFaqSchema,
           name: eventName,
           slug: eventSlug,
           shortName: eventShortName || eventName,
@@ -219,6 +232,8 @@ export const AdminEvents: React.FC = () => {
           allEditionYears: [],
           featured: true,
           isVisible: true,
+          alternativeNames: eventAltNames,
+          faqSchemaEnabled: eventFaqSchema,
           seo,
           ...customPayload,
         });
@@ -248,6 +263,7 @@ export const AdminEvents: React.FC = () => {
     setEditionParticipants('');
     setEditionFacts([]);
     setEditionChampions([]);
+    setEditionFaqSchema(false);
     setEditionSeo(EMPTY_SEO_DRAFT);
     setEditionSeoExisting(null);
     setFormError(null);
@@ -280,6 +296,7 @@ export const AdminEvents: React.FC = () => {
     setEditionPurse(ed.prizeMoneyTotal || '');
     setEditionStatus(ed.status);
     setEditionDesc(ed.description);
+    setEditionFaqSchema(!!ed.faqSchemaEnabled);
   };
 
   const handleSaveEdition = async (e: React.FormEvent) => {
@@ -314,6 +331,7 @@ export const AdminEvents: React.FC = () => {
       quickFacts: facts.value as { label: string; value: string }[],
       defendingChampions: champions.value as { category: string; name: string }[],
       seo: draftToSeo(editionSeo, editionSeoExisting),
+      faqSchemaEnabled: editionFaqSchema,
     };
     setEditionSaving(true);
     const ok = editingEditionId
@@ -464,6 +482,8 @@ export const AdminEvents: React.FC = () => {
                     placeholder="e.g. US Open"
                     className="w-full p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"
                   />
+                  <label htmlFor="event-alt-names" className="mt-3 block font-semibold mb-1">Alternative names <span className="font-normal text-stone-500">(one per line — used by search)</span></label>
+                  <textarea id="event-alt-names" rows={2} maxLength={1000} value={eventAltNames} onChange={(e) => setEventAltNames(e.target.value)} placeholder={'e.g. Roland Garros\nRoland-Garros'} className="w-full p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950" />
                 </div>
                 <div>
                   <label htmlFor="event-editor-field-5" className="block font-semibold mb-1">Default Venue Ground</label>
@@ -543,6 +563,7 @@ export const AdminEvents: React.FC = () => {
               {!dynamicLoading && !dynamicError && <DynamicEventFields fields={dynamicFields} values={eventValues} legacyMissing={Boolean(editingEventId)} onChange={(values) => { setEventValues(values); setEventValuesDirty(true); }} />}
               {Object.keys(eventValues).some((key) => !dynamicFields.some((field) => field.key === key)) && !dynamicLoading && <p className="text-xs text-amber-700">This Event contains legacy values with no current field definition. Common-field edits preserve them. Restore the definition before changing custom values.</p>}
               <SeoFields idPrefix="event-seo" value={eventSeo} onChange={setEventSeo} defaults={eventSeoDefaults(eventName, eventDesc)} />
+              <label className="flex items-start gap-2 text-xs"><input type="checkbox" checked={eventFaqSchema} onChange={(e) => setEventFaqSchema(e.target.checked)} className="mt-0.5" /><span><span className="font-semibold">FAQPage structured data</span> for this event&apos;s published FAQ (manage questions in FAQ; only output when they pass validation).</span></label>
 
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="outline" size="sm" onClick={resetEventForm} disabled={eventSaving}>
@@ -762,6 +783,7 @@ export const AdminEvents: React.FC = () => {
               </div>
 
               <SeoFields idPrefix="edition-seo" value={editionSeo} onChange={setEditionSeo} defaults={editionSeoDefaults(editionTitle || `${editionYear} ${events.find((ev) => ev.slug === editionEventSlug)?.name ?? ''}`, editionDesc)} />
+              <label className="flex items-start gap-2 text-xs"><input type="checkbox" checked={editionFaqSchema} onChange={(e) => setEditionFaqSchema(e.target.checked)} className="mt-0.5" /><span><span className="font-semibold">FAQPage structured data</span> for this edition&apos;s published FAQ (manage questions in FAQ; only output when they pass validation).</span></label>
 
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="outline" size="sm" onClick={resetEditionForm} disabled={editionSaving}>

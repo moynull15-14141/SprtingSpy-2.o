@@ -19,6 +19,7 @@ Allow: /
 Disallow: /admin/
 Disallow: /account/
 Disallow: /api/
+Disallow: /reset-password/
 
 Sitemap: ${origin}/sitemap.xml
 `;

@@ -99,10 +99,23 @@ async function checkIntroImages(area: SiteArea, doc: unknown) {
   if (images.length !== ids.length) throw new SiteExperienceError('A banner image is missing or copyright-restricted. Choose another image from Media Library.');
 }
 
+/** PHASE R: "category" sources must name an existing (database) Article Type. */
+async function checkArticleTypes(area: SiteArea, doc: unknown) {
+  if (area !== 'homepage') return;
+  const names = new Set<string>();
+  JSON.stringify(doc, (key, value) => { if (value && typeof value === 'object' && value.kind === 'type' && typeof value.value === 'string') names.add(value.value); return value; });
+  if (!names.size) return;
+  const { allArticleTypes } = await import('./articleTypes');
+  const known = new Set((await allArticleTypes()).map((t) => t.name));
+  const unknown = [...names].filter((n) => !known.has(n));
+  if (unknown.length) throw new SiteExperienceError(`Unknown article category: ${unknown.join(', ')}. Choose an existing Article Type.`);
+}
+
 export async function saveDraft(area: SiteArea, doc: unknown, actor: Actor) {
   const checked = checkDocument(area, doc);
   if (!checked.ok) throw new SiteExperienceError(checked.error);
   await checkIntroImages(area, checked.value);
+  await checkArticleTypes(area, checked.value);
   const now = new Date();
   await prisma.siteExperience.upsert({
     where: { area },

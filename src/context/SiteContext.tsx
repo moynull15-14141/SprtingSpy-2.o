@@ -32,7 +32,7 @@ export interface AppNotification {
   message: string;
 }
 
-export type ApiCall = <T>(endpoint: string, options?: { method?: string; body?: unknown }) => Promise<{ data: T | null; error: string | null; status?: number }>;
+export type ApiCall = <T>(endpoint: string, options?: { method?: string; body?: unknown }) => Promise<{ data: T | null; error: string | null; status?: number; details?: Record<string, unknown> }>;
 
 export interface SiteContextType {
   theme: 'light' | 'dark';
@@ -45,7 +45,7 @@ export interface SiteContextType {
   authUser: SafeUser | null;
   isAuthenticated: boolean;
   authLoading: boolean;
-  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  login: (email: string, password: string, totpCode?: string) => Promise<{ success: boolean; error?: string; totpRequired?: boolean }>;
   logout: () => Promise<boolean>;
   apiCall: ApiCall;
   updateAccountIdentity: (user: SafeUser) => void;
@@ -156,7 +156,7 @@ export const SiteProvider: React.FC<{ features: FeatureFlags; children: React.Re
         const errorMessage = errorJson.error || `HTTP ${res.status}`;
         // 401s are routine for logged-out visitors (e.g. /api/auth/me).
         if (res.status !== 401) showNotification(errorMessage, 'error');
-        return { data: null, error: errorMessage, status: res.status };
+        return { data: null, error: errorMessage, status: res.status, details: errorJson };
       }
       const json = await res.json();
       if (generation !== authGeneration.current) return { data: null, error: 'Session changed. Please try again.' };
@@ -167,15 +167,16 @@ export const SiteProvider: React.FC<{ features: FeatureFlags; children: React.Re
     }
   };
 
-  const login = async (email: string, password: string) => {
-    const res = await apiCall<{ user: SafeUser }>('/api/auth/login', { method: 'POST', body: { email, password } });
+  const login = async (email: string, password: string, totpCode?: string) => {
+    // PHASE R: accounts with two-factor authentication also send the 6-digit code.
+    const res = await apiCall<{ user: SafeUser }>('/api/auth/login', { method: 'POST', body: { email, password, ...(totpCode ? { totpCode } : {}) } });
     if (res.data?.user) {
       clearPrivateData();
       setAuthUser(res.data.user);
       showNotification(`Welcome back, ${res.data.user.name}.`, 'success');
       return { success: true };
     }
-    return { success: false, error: res.error || 'Login failed.' };
+    return { success: false, error: res.error || 'Login failed.', totpRequired: res.details?.totpRequired === true };
   };
 
   const logout = async () => {

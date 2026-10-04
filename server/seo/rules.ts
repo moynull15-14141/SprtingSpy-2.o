@@ -59,9 +59,36 @@ const isInternal = (href: string, origin: string) => {
 const internalPath = (href: string, origin: string) => new URL(href, origin).pathname;
 const hostOf = (url?: string | null) => { try { return url ? new URL(url).hostname.replace(/^www\./, '') : null; } catch { return null; } };
 
-const EVENT_TYPES = ['Event Guide', 'Schedule', 'Results', 'How to Watch', 'Preview', 'Past Winners', 'Prize Money', 'Players', 'Teams', 'Venue', 'Qualification'];
-const EDITION_TYPES = ['Schedule', 'Results', 'How to Watch', 'Preview', 'Prize Money', 'Players', 'Teams', 'Qualification'];
-const TIME_SENSITIVE = ['Schedule', 'How to Watch', 'Prize Money', 'Players', 'Teams', 'Venue', 'Qualification', 'Preview'];
+// PHASE R: "How to Watch" (v1.1) and "Sports Viewing Guide" (v2.0) are separate types with the same viewing checks.
+const EVENT_TYPES = ['Event Guide', 'Schedule', 'Results', 'How to Watch', 'Sports Viewing Guide', 'Preview', 'Past Winners', 'Prize Money', 'Players', 'Teams', 'Venue', 'Qualification'];
+const EDITION_TYPES = ['Schedule', 'Results', 'How to Watch', 'Sports Viewing Guide', 'Preview', 'Prize Money', 'Players', 'Teams', 'Qualification'];
+const TIME_SENSITIVE = ['Schedule', 'How to Watch', 'Sports Viewing Guide', 'Prize Money', 'Players', 'Teams', 'Venue', 'Qualification', 'Preview'];
+const VIEWING_TOPICS = [
+  { label: 'broadcaster / TV channel', terms: ['broadcaster', 'broadcast', 'tv', 'channel', 'television'] },
+  { label: 'official streaming option', terms: ['stream', 'streaming', 'live stream', 'app', 'official platform'] },
+  { label: 'regional availability', terms: ['uk', 'us', 'usa', 'australia', 'canada', 'india', 'europe', 'region', 'country', 'countries'] },
+  { label: 'viewing time / timezone', terms: ['bst', 'gmt', 'utc', 'cet', 'cest', 'et', 'pt', 'aest', 'ist', 'local time', 'time zone', 'timezone'] },
+];
+
+/**
+ * PHASE R: a per-type setting for this article: its own type first, else any
+ * type sharing its SEO profile (so a custom type with the "viewing" profile
+ * gets the viewing checks without editing every rule).
+ */
+function byTypeFor<T>(map: Record<string, T> | undefined, s: ArticleSubject, ctx: Ctx): T | undefined {
+  if (!map) return undefined;
+  if (map[s.articleType] !== undefined) return map[s.articleType];
+  const profile = ctx.typeProfiles?.get(s.articleType);
+  if (!profile || profile === 'general') return undefined;
+  const peer = Object.keys(map).find((t) => ctx.typeProfiles?.get(t) === profile);
+  return peer ? map[peer] : undefined;
+}
+/** True when the article's type (or a type with the same SEO profile) is in the list. */
+export function typeMatches(list: string[], articleType: string, profiles?: Map<string, string>): boolean {
+  if (list.includes(articleType)) return true;
+  const profile = profiles?.get(articleType);
+  return !!profile && profile !== 'general' && list.some((t) => profiles?.get(t) === profile);
+}
 
 export const RULES: RuleDef[] = [
   // ── On-page ──
@@ -118,8 +145,8 @@ export const RULES: RuleDef[] = [
     check: (s, ctx, cfg) => {
       const out: Issue[] = [];
       if (!ctx.sports.get(s.sportSlug)) out.push({ message: `Sport "${s.sportSlug}" does not exist.` });
-      if ((cfg.requireEvent as string[]).includes(s.articleType) && !s.eventSlug) out.push({ message: `${s.articleType} articles should be connected to an Event.` });
-      else if ((cfg.requireEdition as string[]).includes(s.articleType) && !s.editionYear) out.push({ message: `${s.articleType} articles should be connected to an Edition (year).` });
+      if (typeMatches(cfg.requireEvent as string[], s.articleType, ctx.typeProfiles) && !s.eventSlug) out.push({ message: `${s.articleType} articles should be connected to an Event.` });
+      else if (typeMatches(cfg.requireEdition as string[], s.articleType, ctx.typeProfiles) && !s.editionYear) out.push({ message: `${s.articleType} articles should be connected to an Edition (year).` });
       if (s.eventSlug && !eventOf(s, ctx)) out.push({ message: `Event "${s.eventSlug}" does not exist.` });
       if (s.editionYear && !editionOf(s, ctx)) out.push({ message: `Edition ${s.editionYear} does not exist for this event.` });
       return out;
@@ -151,11 +178,11 @@ export const RULES: RuleDef[] = [
   // ── Content ──
   rule({
     key: 'min-words', name: 'Substantive content', category: 'content', target: 'article', severity: 'warning',
-    config: { default: 250, byType: { News: 150, Update: 120, Results: 150, 'How to Watch': 250, Schedule: 200 } },
+    config: { default: 250, byType: { News: 150, Update: 120, Results: 150, 'How to Watch': 250, 'Sports Viewing Guide': 250, Schedule: 200 } },
     why: 'Thin pages rarely satisfy searchers (Spec §36: no thin pages for SEO).',
     fix: 'Add useful detail readers need for this article type.',
     check: (s, _c, cfg) => {
-      const min = Number(cfg.byType?.[s.articleType] ?? cfg.default);
+      const min = Number(byTypeFor(cfg.byType, s, _c) ?? cfg.default);
       return s.a.words < min ? issue(`Body has ${s.a.words} words (at least ${min} expected for ${s.articleType}).`) : [];
     },
   }),
@@ -163,12 +190,8 @@ export const RULES: RuleDef[] = [
     key: 'type-topics', name: 'Article-type essentials', category: 'content', target: 'article', severity: 'warning',
     config: {
       byType: {
-        'How to Watch': [
-          { label: 'broadcaster / TV channel', terms: ['broadcaster', 'broadcast', 'tv', 'channel', 'television'] },
-          { label: 'official streaming option', terms: ['stream', 'streaming', 'live stream', 'app'] },
-          { label: 'regional availability', terms: ['uk', 'us', 'usa', 'australia', 'canada', 'india', 'europe', 'region', 'country', 'countries'] },
-          { label: 'viewing time / timezone', terms: ['bst', 'gmt', 'utc', 'cet', 'cest', 'et', 'pt', 'aest', 'ist', 'local time', 'time zone', 'timezone'] },
-        ],
+        'How to Watch': VIEWING_TOPICS,
+        'Sports Viewing Guide': VIEWING_TOPICS,
         Schedule: [
           { label: 'sessions / rounds / fixtures', terms: ['round', 'session', 'fixture', 'match', 'final', 'semifinal', 'quarterfinal', 'qualifying', 'practice', 'race', 'heat', 'day'] },
           { label: 'timezone for times', terms: ['bst', 'gmt', 'utc', 'cet', 'cest', 'et', 'pt', 'aest', 'ist', 'local time', 'time zone', 'timezone'] },
@@ -190,15 +213,15 @@ export const RULES: RuleDef[] = [
     },
     why: 'Each article type answers specific reader questions; missing essentials make the page incomplete (Spec §5, §14).',
     fix: 'Add a section covering the missing topic(s), if they apply to this event.',
-    check: (s, _c, cfg) => {
-      const groups = (cfg.byType?.[s.articleType] || []) as { label: string; terms: string[] }[];
+    check: (s, ctx, cfg) => {
+      const groups = (byTypeFor(cfg.byType, s, ctx) || []) as { label: string; terms: string[] }[];
       const text = `${s.title} ${s.excerpt} ${s.a.text}`;
       return groups.filter((g) => !containsAny(text, g.terms)).map((g) => ({ message: `No mention of ${g.label}.` }));
     },
   }),
   rule({
     key: 'dates-present', name: 'Dates stated', category: 'content', target: 'article', severity: 'warning',
-    articleTypes: ['Schedule', 'Results', 'How to Watch', 'Event Guide', 'Preview'], config: {},
+    articleTypes: ['Schedule', 'Results', 'How to Watch', 'Sports Viewing Guide', 'Event Guide', 'Preview'], config: {},
     why: 'Time-bound articles are only useful if readers can see the dates they refer to.',
     fix: 'State the relevant dates explicitly (e.g. "23 May 2027").',
     check: (s) => (mentionsDates(`${s.excerpt} ${s.a.text}`) ? [] : issue('No dates are mentioned.')),
@@ -242,7 +265,7 @@ export const RULES: RuleDef[] = [
   // ── External links ──
   rule({
     key: 'official-source', name: 'Official source cited', category: 'external-links', target: 'article', severity: 'warning',
-    articleTypes: ['Schedule', 'Results', 'How to Watch', 'Prize Money', 'Qualification', 'Players', 'Past Winners'], config: {},
+    articleTypes: ['Schedule', 'Results', 'How to Watch', 'Sports Viewing Guide', 'Prize Money', 'Qualification', 'Players', 'Past Winners'], config: {},
     why: 'Time-sensitive facts should point readers to the primary source (Spec §13).',
     fix: 'Add the official event/organiser link in the body or in Sources & References.',
     check: (s, ctx) => {
@@ -408,7 +431,7 @@ export const RULES: RuleDef[] = [
   }),
   rule({
     key: 'ai-structured-info', name: 'Structured information', category: 'ai-readiness', target: 'article', severity: 'info',
-    articleTypes: ['Schedule', 'Results', 'Prize Money', 'Past Winners', 'Records', 'Players', 'Teams', 'Qualification', 'How to Watch'], config: {},
+    articleTypes: ['Schedule', 'Results', 'Prize Money', 'Past Winners', 'Records', 'Players', 'Teams', 'Qualification', 'How to Watch', 'Sports Viewing Guide'], config: {},
     why: 'Lists and tables present facts in a form that is easy to scan and extract.',
     fix: 'Present the key facts as a table or list.',
     check: (s) => (s.a.tables + s.a.lists + s.structuredTables === 0 ? issue('No table or list presents the key facts.') : []),
@@ -475,8 +498,9 @@ export const RULES: RuleDef[] = [
     fix: 'Consider creating the missing article types. These are suggestions; nothing is created automatically.',
     check: (ed, ctx, cfg) => {
       const expected = (cfg[ed.status] || []) as string[];
-      const have = new Set(ctx.published.filter((a) => a.sportSlug === ed.sportSlug && a.eventSlug === ed.eventSlug && a.editionYear === ed.year).map((a) => a.articleType));
-      const missing = expected.filter((t) => !have.has(t));
+      const have = [...new Set(ctx.published.filter((a) => a.sportSlug === ed.sportSlug && a.eventSlug === ed.eventSlug && a.editionYear === ed.year).map((a) => a.articleType))];
+      // PHASE R: any type with the same SEO profile covers it ("How to Watch" = "Sports Viewing Guide").
+      const missing = expected.filter((t) => !have.some((h) => typeMatches([t], h, ctx.typeProfiles)));
       return missing.length ? issue(`No published ${missing.join(', ')} article for ${ed.title}.`) : [];
     },
   }),
@@ -525,6 +549,20 @@ export const RULES: RuleDef[] = [
       if (!ctx.settings.indexNowKey) out.push({ message: 'IndexNow is not configured.' });
       return out;
     },
+  }),
+  // PHASE R (Spec §13): deterministic collision rule — an event owns /{sport}/{slug}/.
+  rule({
+    key: 'url-collision', name: 'URL collisions', category: 'technical', target: 'site', severity: 'blocking', config: {},
+    why: 'An article without an edition lives at /{sport}/{slug}/. If an event uses the same slug, the event page is served and the article cannot be reached.',
+    fix: 'Change the article slug (a 301 is created automatically if it was published) or move the article under its edition.',
+    check: (_s, ctx) => (ctx.shadowed || []).map((a) => ({ message: `"${a.title}" (${a.status}) at /${a.sportSlug}/${a.slug}/ is hidden by the event "${a.event}".` })),
+  }),
+  // PHASE R (Spec §19.5): repeated no-result searches are content opportunities.
+  rule({
+    key: 'search-no-results', name: 'Searches with no results', category: 'content', target: 'site', severity: 'info', config: {},
+    why: 'Readers searched for these terms repeatedly in the last 28 days and found nothing (aggregate site search data).',
+    fix: 'Consider whether an article, event or alternative event name would answer them. Suggestion only.',
+    check: (_s, ctx) => (ctx.noResults || []).slice(0, 15).map((q) => ({ message: `"${q.query}" — ${q.searches} search(es) with no results.` })),
   }),
 ];
 

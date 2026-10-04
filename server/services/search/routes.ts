@@ -1,6 +1,9 @@
 /**
  * Search API (PHASE E). All three endpoints use the same search service.
- *   GET /api/search                 public article search (published only)    anyone, rate limited
+ *   GET /api/search                 public Article + Event search (visible only)  anyone, rate limited
+ *       PHASE M: `kind` = article | event (omitted = both). `total`/`results` remain the
+ *       Article count/page; `events`/`eventTotal` add Events; `totalPages` counts pages of
+ *       the paginated type (Events when kind=event).
  *   GET /api/search/suggestions     public autocomplete (titles + sports)     anyone, rate limited
  *   GET /api/cms/articles/search    CMS article search, every status          Admin, Editor, Author
  *
@@ -9,6 +12,7 @@
  * unknown or malformed parameters are rejected with 400.
  */
 
+import { allArticleTypes } from '../../articleTypes';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { prisma } from '../../db';
 import { requireRole, type AuthLookup } from '../../auth';
@@ -44,9 +48,12 @@ export function searchRouter(getAuthLookup: () => AuthLookup) {
     const parsed = parseSearchQuery(req.query as Record<string, unknown>, { strict: true, defaultLimit: 12 });
     if (!parsed.ok) return res.status(400).json({ error: (parsed as { error: string }).error });
     const p = parsed.value;
-    const data = await searchPublic({ q: p.q, sport: p.sport, type: p.type, author: p.author, from: p.from, to: p.to, sort: p.sort, page: p.page, limit: p.limit });
+    // PHASE R: Article Types are database-backed; the strict API still rejects unknown names.
+    if (p.type && !(await allArticleTypes()).some((t) => t.name === p.type)) return res.status(400).json({ error: 'type is not a known article type.' });
+    const data = await searchPublic({ q: p.q, kind: p.kind, sport: p.sport, type: p.type, author: p.author, from: p.from, to: p.to, sort: p.sort, page: p.page, limit: p.limit });
     return res.json({
       query: data.query,
+      kind: data.kind || 'all',
       page: data.page,
       pageSize: data.pageSize,
       total: data.articleTotal,
@@ -56,6 +63,12 @@ export function searchRouter(getAuthLookup: () => AuthLookup) {
         id: a.id, title: a.title, excerpt: a.excerpt, url: a.url, sport: a.sportSlug, sportName: a.sportName,
         articleType: a.articleType, publishedAt: a.publishedAt, authorName: a.authorName ?? null,
         image: a.image?.url ?? a.featuredImage ?? null,
+      })),
+      eventTotal: data.eventTotal,
+      events: data.events.map((e) => ({
+        id: e.id, name: e.name, shortName: e.shortName, url: e.url, sport: e.sportSlug, sportName: e.sportName,
+        description: e.description, venue: e.defaultVenue ?? null, location: e.defaultLocation ?? null,
+        matchedEdition: e.matchedEdition ?? null,
       })),
     });
   }));

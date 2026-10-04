@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { HomePage } from '../views/HomePage';
 import { getHomepage, getSiteIdentity } from '../lib/data';
 import { pageMetadata } from '../lib/seo';
+import { RumPageType } from '../components/analytics/RumPageType';
 
 // Spec v1.1 §7.1: recommended homepage SEO title and multi-sport description.
 export async function generateMetadata(): Promise<Metadata> {
@@ -20,5 +21,5 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function Page() {
   // PHASE F.1: sections come from the Site Experience (published, or draft in preview).
   const [sections, identity] = await Promise.all([getHomepage(), getSiteIdentity()]);
-  return <HomePage sections={sections} identity={identity} />;
+  return <><RumPageType type="home" /><HomePage sections={sections} identity={identity} /></>;
 }

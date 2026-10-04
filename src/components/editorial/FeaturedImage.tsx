@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 
 /** Article featured image; the whole figure is removed if the image fails to load. */
-export function FeaturedImage({ src, alt, caption = 'SportingSpy Editorial Archive', credit = 'Verified Sports Photography' }: { src: string; alt: string; caption?: string; credit?: string }) {
+export function FeaturedImage({ src, alt, caption = '', credit = '' }: { src: string; alt: string; caption?: string; credit?: string }) {
   const [failed, setFailed] = useState(false);
   if (failed) return null;
   return (

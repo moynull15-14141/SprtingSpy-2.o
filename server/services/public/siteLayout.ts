@@ -11,7 +11,7 @@ import type { Prisma } from '../../generated/prisma/client';
 import {
   _db as db, _listArticles as listArticles, _countArticles as countArticles, _summarize as summarize, _summarySelect as summarySelect,
   _publishedArticleWhere as publishedArticleWhere, _summarizeEvents as summarizeEvents, _visibleEventWhere as visibleEventWhere,
-  _toSport as toSport, _toEdition as toEdition, type ArticleSummary, type EventSummary,
+  _toSport as toSport, _toEdition as toEdition, editionTimingWhere, editionTimingOrder, type ArticleSummary, type EventSummary,
 } from './content';
 import { editionPath } from '../../../src/lib/paths';
 import { effectiveDocuments } from '../../siteExperience';
@@ -87,7 +87,7 @@ export async function getHomepageSections(docs: SiteExperienceDocs, layout: Site
     publicArticles(manualIds),
     has('featuredEvents') ? prisma.sportEvent.findMany({ where: visibleEventWhere({ featured: true }) }) : Promise.resolve([]),
     has('sportsGrid') || has('upcomingEditions') ? prisma.sport.findMany({ where: { isVisible: true }, orderBy: { order: 'asc' } }) : Promise.resolve([]),
-    has('upcomingEditions') ? prisma.eventEdition.findMany({ where: { status: 'upcoming', event: visibleEventWhere() }, take: 12 }) : Promise.resolve([]),
+    has('upcomingEditions') ? prisma.eventEdition.findMany({ where: { AND: [{ event: visibleEventWhere() }, editionTimingWhere('upcoming')] }, orderBy: editionTimingOrder('upcoming'), take: 12 }) : Promise.resolve([]),
     Promise.all(sources.map((auto) => prisma.article.findMany({ where: { AND: [publicWhere, autoWhere(auto)] }, select: summarySelect, orderBy: [{ publishedAt: 'desc' }, { id: 'asc' }], take }))),
     Promise.all(sources.map((auto) => articleSections.some((s) => s.type === 'articles' && s.moreLink && sourceKey(s.source.auto) === sourceKey(auto)) ? prisma.article.count({ where: { AND: [publicWhere, autoWhere(auto)] } }) : Promise.resolve(0))),
   ]);

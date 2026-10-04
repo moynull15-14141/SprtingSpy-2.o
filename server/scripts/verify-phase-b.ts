@@ -192,6 +192,7 @@ try {
   assertSeo(html.sport, '/tennis/', { title: (tennis.seo as any).metaTitle || undefined, ld: ['BreadcrumbList', 'CollectionPage'] });
   // E4: a permanent Event page may emit SportsEvent only for its explicitly
   // selected current Edition when that Edition has an authoritative start date.
+  // PHASE R (v2.2): no automatic FAQ; FAQPage only for published editor FAQ with the per-event opt-in (off here).
   assertSeo(html.event, '/tennis/french-open/', { ld: ['BreadcrumbList', 'SportsEvent'] });
   const eventLd = jsonLd(html.event).find((d: any) => d['@type'] === 'SportsEvent');
   assert.equal(eventLd.startDate, edition.startDate); assert.equal(eventLd.endDate, edition.endDate);

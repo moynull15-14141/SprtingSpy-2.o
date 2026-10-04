@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { EventPage } from '../../../views/EventPage';
 import { getArticlePage, getEventPage } from '../../../lib/data';
-import { pageMetadata } from '../../../lib/seo';
+import { descriptionFrom, pageMetadata } from '../../../lib/seo';
 import { eventPath } from '../../../lib/paths';
 import { articleMetadata, renderArticle } from '../../../lib/articleRoute';
 
@@ -27,7 +27,7 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
   const { event, sport } = found.data;
   return pageMetadata({
     title: `${event.name} – History, Editions & Guides | SportingSpy`,
-    description: event.description,
+    description: descriptionFrom(event.description, `${event.name} – ${sport.name} event guide on SportingSpy.`),
     path: eventPath(sport.slug, event.slug),
     seo: event.seo,
     image: event.featuredImage,

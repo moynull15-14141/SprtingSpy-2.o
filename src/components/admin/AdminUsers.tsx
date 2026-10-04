@@ -18,7 +18,9 @@ import { Button } from '../ui/Button';
 import { Avatar } from '../ui/Avatar';
 
 export const AdminUsers: React.FC = () => {
-  const { users, currentUser, createStaffUser, updateUserRole, updateUserStatus, deleteStaffUser, features } = useApp();
+  const { users, currentUser, createStaffUser, updateUserRole, updateUserStatus, deleteStaffUser, features, apiCall, showNotification, refreshData } = useApp();
+  // PHASE R: a reset link is shown once to the Admin, who delivers it to the person.
+  const [resetLink, setResetLink] = useState<{ name: string; url: string } | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -62,6 +64,18 @@ export const AdminUsers: React.FC = () => {
     updateUserStatus(id, currentStatus === 'inactive' ? 'active' : 'inactive');
   };
 
+  const issueResetLink = async (id: string, name: string) => {
+    if (!window.confirm(`Create a password reset link for ${name}? It works once and expires in 24 hours.`)) return;
+    const res = await apiCall<{ url: string }>(`/api/auth/admin/users/${id}/reset-link`, { method: 'POST', body: {} });
+    if (res.data) setResetLink({ name, url: res.data.url });
+  };
+
+  const resetTwoFactor = async (id: string, name: string) => {
+    if (!window.confirm(`Remove two-factor authentication for ${name} (lost device)? Their sessions are signed out.`)) return;
+    const res = await apiCall(`/api/auth/totp/admin/${id}/reset`, { method: 'POST', body: {} });
+    if (res.data) { showNotification(`Two-factor authentication removed for ${name}.`, 'success'); void refreshData(); }
+  };
+
   const handleDelete = (id: string, name: string) => {
     if (window.confirm(`Permanently delete the staff account "${name}"? This cannot be undone.`)) {
       deleteStaffUser(id);
@@ -70,6 +84,13 @@ export const AdminUsers: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {resetLink && (
+        <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs dark:border-amber-800 dark:bg-amber-950/40">
+          <p className="font-semibold">Reset link for {resetLink.name} (shown once, valid 24 hours, single use). Send it privately:</p>
+          <input readOnly value={resetLink.url} onFocus={(e) => e.currentTarget.select()} className="mt-2 w-full rounded border border-stone-300 bg-white p-2 font-mono text-[11px] dark:border-stone-700 dark:bg-stone-950" />
+          <button type="button" onClick={() => setResetLink(null)} className="mt-2 font-semibold underline">Done</button>
+        </div>
+      )}
       <div className="flex items-center justify-between pb-4 border-b border-stone-200 dark:border-stone-800">
         <div>
           <h2 className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">
@@ -231,6 +252,8 @@ export const AdminUsers: React.FC = () => {
                       >
                         {status === 'active' ? 'Deactivate' : 'Reactivate'}
                       </button>
+                      <button onClick={() => void issueResetLink(u.id, u.name)} className="text-stone-700 dark:text-stone-300 hover:underline font-semibold cursor-pointer">Reset link</button>
+                      {(u as { totpEnabled?: boolean }).totpEnabled && <button onClick={() => void resetTwoFactor(u.id, u.name)} className="text-stone-700 dark:text-stone-300 hover:underline font-semibold cursor-pointer">Reset 2FA</button>}
                       <button
                         onClick={() => handleDelete(u.id, u.name)}
                         className="text-rose-600 dark:text-rose-400 hover:underline font-semibold cursor-pointer"

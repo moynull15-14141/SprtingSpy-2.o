@@ -10,7 +10,6 @@ import {
   type FooterConfig, type HomeSection, type HomepageConfig, type NavigationConfig, type SiteArea, type SiteExperienceDocs,
 } from './types';
 import { validateSafeUrl } from '../../../server/validation';
-import { ARTICLE_TYPES } from '../../types';
 
 export class ConfigError extends Error {}
 const fail = (path: string, message: string): never => { throw new ConfigError(`${path}: ${message}`); };
@@ -101,7 +100,8 @@ function autoSource(v: unknown, path: string): AutoSource {
   const value = text(o.value, `${path}.value`, 120, true);
   if (kind === 'sport' && !SLUG.test(value)) fail(`${path}.value`, 'must be a sport slug');
   if (kind === 'event' && !/^[a-z0-9-]+\/[a-z0-9-]+$/.test(value)) fail(`${path}.value`, 'must be "<sport>/<event>"');
-  if (kind === 'type' && !(ARTICLE_TYPES as readonly string[]).includes(value)) fail(`${path}.value`, 'must be an existing article category');
+  // PHASE R: Article Types are database-backed; the server route checks the name exists.
+  if (kind === 'type' && !/^[\p{L}\p{N}][\p{L}\p{N} &'’/().,-]{0,58}[\p{L}\p{N})]$/u.test(value)) fail(`${path}.value`, 'must be an article category name');
   return { kind, value } as AutoSource;
 }
 function source(v: unknown, path: string): ArticleSource {

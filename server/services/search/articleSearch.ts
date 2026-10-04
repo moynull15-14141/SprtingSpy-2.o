@@ -13,8 +13,10 @@
  *   `-exclude`, `or`) go through websearch_to_tsquery instead.
  * - Ranking: ts_rank_cd over the weighted vector (A 1.0, B 0.4, C 0.2, D 0.1,
  *   length-normalized so long bodies do not dominate), plus title bonuses
- *   (exact title > title prefix > title contains the whole query). Ties break
- *   on publishedAt DESC, then id, so paging is deterministic.
+ *   (exact title > title prefix > title contains the whole query) and, for
+ *   multi-word queries, a phrase bonus when the words appear adjacent and in
+ *   order anywhere in the document (PHASE M). Ties break on publishedAt DESC,
+ *   then id, so paging is deterministic.
  * - Only when full-text finds nothing, a pg_trgm word-similarity match on the
  *   title (GIN trigram index) provides typo tolerance (`Rolan Garos`).
  *
@@ -27,7 +29,7 @@ import { SEARCH_MAX_QUERY, normalizeQuery, queryTerms } from '../../../src/lib/s
 
 export { SEARCH_MAX_QUERY, normalizeQuery, queryTerms };
 export const SEARCH_MAX_LIMIT = 50;
-const FUZZY_THRESHOLD = 0.45;
+export const FUZZY_THRESHOLD = 0.45;
 
 export type SearchSort = 'relevance' | 'newest' | 'oldest';
 export type SearchScope = 'public' | 'staff';
@@ -66,7 +68,7 @@ export interface ArticleSearchResult {
 const db = async () => (await import('../../db')).prisma;
 
 /** Web-search syntax: a quoted phrase, a -excluded word, or an OR between words. */
-const usesWebSyntax = (q: string) => /"|(^|\s)-[\p{L}\p{N}]|\sor\s/iu.test(q);
+export const usesWebSyntax = (q: string) => /"|(^|\s)-[\p{L}\p{N}]|\sor\s/iu.test(q);
 
 /** The tsquery for `q`, or null when it contains no searchable term. */
 export function tsQuery(q: string): Prisma.Sql | null {
@@ -77,7 +79,28 @@ export function tsQuery(q: string): Prisma.Sql | null {
   return Prisma.sql`to_tsquery('english', ${terms.map((t) => `${t}:*`).join(' & ')})`;
 }
 
-const likeEscape = (value: string) => value.replace(/[\\%_]/g, (c) => `\\${c}`);
+export const likeEscape = (value: string) => value.replace(/[\\%_]/g, (c) => `\\${c}`);
+
+/**
+ * PHASE M: bonus when a multi-word plain query appears as an exact phrase
+ * (adjacent, in order) in `vector`. Single words and web-search syntax get none.
+ */
+export function phraseBonus(vector: Prisma.Sql, q: string, weight = 0.3): Prisma.Sql {
+  if (queryTerms(q).length < 2 || usesWebSyntax(q)) return Prisma.sql`0`;
+  // The weight is a fixed constant from this codebase, inlined so PostgreSQL types the CASE as numeric.
+  return Prisma.sql`(CASE WHEN ${vector} @@ phraseto_tsquery('english', ${q}) THEN ${Prisma.raw(weight.toFixed(2))} ELSE 0 END)`;
+}
+
+/**
+ * Query words the 'english' configuration keeps (stop words such as "the" or
+ * "us" carry no meaning for similarity), in query order. Shared by the Article
+ * and Event typo fallbacks.
+ */
+export async function meaningfulTerms(q: string): Promise<string[]> {
+  const prisma = await db();
+  const kept = await prisma.$queryRaw<{ t: string }[]>`SELECT t FROM unnest(${queryTerms(q)}::text[]) WITH ORDINALITY AS u(t, n) WHERE numnode(to_tsquery('english', t || ':*')) > 0 ORDER BY n`;
+  return kept.map((r) => r.t);
+}
 
 function filters(p: ArticleSearchParams): Prisma.Sql[] {
   const where: Prisma.Sql[] = [];
@@ -147,7 +170,7 @@ export async function searchArticleIds(params: ArticleSearchParams): Promise<Art
     ? staffExact ? Prisma.sql`(a."searchVector" @@ ${query} OR ${staffExact})` : Prisma.sql`a."searchVector" @@ ${query}`
     : staffExact!;
   const score = query
-    ? Prisma.sql`ts_rank_cd(a."searchVector", ${query}, 1) + ${titleBonus}${staffExact ? Prisma.sql` + (CASE WHEN ${staffExact} THEN 5 ELSE 0 END)` : Prisma.empty}`
+    ? Prisma.sql`ts_rank_cd(a."searchVector", ${query}, 1) + ${titleBonus} + ${phraseBonus(Prisma.sql`a."searchVector"`, q)}${staffExact ? Prisma.sql` + (CASE WHEN ${staffExact} THEN 5 ELSE 0 END)` : Prisma.empty}`
     : Prisma.sql`5`;
   const order = params.sort === 'newest' || params.sort === 'oldest' ? dateOrder(params.sort) : Prisma.sql`score DESC, ${dateOrder('newest')}`;
   const where = whereSql([...base, match]);
@@ -168,8 +191,7 @@ export async function searchArticleIds(params: ArticleSearchParams): Promise<Art
   if (usesWebSyntax(q)) return { ids: [], total: 0, page, pageSize, mode: 'fulltext' };
   // English stop words ("the", "of") carry no meaning for similarity; the
   // search configuration's own stop-word list decides which words to keep.
-  const kept = await prisma.$queryRaw<{ t: string }[]>`SELECT t FROM unnest(${queryTerms(q)}::text[]) WITH ORDINALITY AS u(t, n) WHERE numnode(to_tsquery('english', t || ':*')) > 0 ORDER BY n`;
-  const terms = kept.map((r) => r.t);
+  const terms = await meaningfulTerms(q);
   if (!terms.length) return { ids: [], total: 0, page, pageSize, mode: 'fulltext' };
   const termMatch = terms.map((t) => Prisma.sql`(a."searchVector" @@ to_tsquery('english', ${`${t}:*`}) OR ${t} <% a."title" OR ${t} <% a."excerpt")`);
   const termScore = Prisma.join(terms.map((t) => Prisma.sql`greatest(word_similarity(${t}, a."title"), word_similarity(${t}, a."excerpt") * 0.8)`), ' + ');

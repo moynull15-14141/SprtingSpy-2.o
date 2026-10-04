@@ -66,8 +66,32 @@ function displayFilename(name: string): string {
   return path.basename(name).replace(/[^\w.\- ()]/g, '_').slice(0, 200) || 'upload';
 }
 
-export async function createMediaFromUpload(file: { buffer: Buffer; originalname: string; mimetype: string }, meta: MediaMetadataInput) {
+/** PHASE R (Spec §18.2 duplicate detection): SHA-256 of the uploaded bytes. */
+export const contentHashOf = (buffer: Buffer) => crypto.createHash('sha256').update(buffer).digest('hex');
+
+/** An existing library item with exactly the same file, if any. */
+export async function findDuplicateMedia(buffer: Buffer) {
+  return prisma.mediaItem.findFirst({ where: { contentHash: contentHashOf(buffer) }, select: { id: true, title: true, url: true }, orderBy: { uploadedAt: 'asc' } });
+}
+
+/** The upload is a byte-identical copy of an existing library item. */
+export class DuplicateMedia extends Error {
+  constructor(readonly duplicateOf: { id: string; title: string; url: string }) {
+    super(`This exact image is already in the Media Library as "${duplicateOf.title}". Use that item, or upload again and confirm a duplicate copy.`);
+  }
+}
+
+export async function createMediaFromUpload(file: { buffer: Buffer; originalname: string; mimetype: string }, meta: MediaMetadataInput, options: { rejectDuplicates?: boolean } = {}) {
+  const contentHash = contentHashOf(file.buffer);
+  // Validation/processing first (format errors win), then the duplicate check.
   const stored = await storeImage(file.buffer, file.originalname, file.mimetype);
+  if (options.rejectDuplicates) {
+    const duplicate = await findDuplicateMedia(file.buffer);
+    if (duplicate) {
+      await Promise.all(stored.written.map((key) => mediaStorage().delete(key).catch(() => undefined)));
+      throw new DuplicateMedia(duplicate);
+    }
+  }
   try {
     return await prisma.mediaItem.create({
       data: {
@@ -79,7 +103,7 @@ export async function createMediaFromUpload(file: { buffer: Buffer; originalname
         credit: meta.credit || null,
         source: meta.source || null,
         license: meta.license || null,
-        creationType: meta.creationType || 'Original',
+        creationType: meta.creationType || 'SportingSpy Original',
         aiTool: meta.aiTool || null,
         humanEditing: meta.humanEditing || null,
         copyrightReview: 'pending',
@@ -94,6 +118,7 @@ export async function createMediaFromUpload(file: { buffer: Buffer; originalname
         variants: stored.variants as unknown as object,
         fileSize: `${Math.round(stored.sizeBytes / 1024)} KB`,
         dimensions: `${stored.width}x${stored.height}`,
+        contentHash,
       },
     });
   } catch (err) {

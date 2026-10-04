@@ -164,9 +164,8 @@ async function main() {
     for (const ed of db.editions) {
       if ((ed.status as string) === 'ongoing') ed.status = 'active';
     }
-    for (const art of db.articles) {
-      if ((art.articleType as string) === 'Sports Viewing Guide') art.articleType = 'How to Watch';
-    }
+    // PHASE R: "Sports Viewing Guide" is a valid type of its own now; legacy
+    // rows keep their exact type (no conversion to "How to Watch").
 
     console.log('[migrate] Event Editions...');
     for (const ed of db.editions) {

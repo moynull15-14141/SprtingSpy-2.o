@@ -7,13 +7,18 @@
 import type { ArticleReviewFields } from '../lib/editorialWorkflow';
 export type Role = 'Admin' | 'Editor' | 'Author' | 'Reader';
 
-// Spec v1.1 §5: the standard article types. "How to Watch" is one normal
-// type; there are deliberately no "viewing/streaming/TV guide" variants.
+// PHASE R: the Article Type list is database-backed (ArticleType table,
+// managed in Admin → Article Types; Spec v2.0 §9.3 "editable and
+// expandable"). This constant is only the SEEDED specification list, used as
+// a fallback when the database list cannot be read. Both "How to Watch"
+// (Blueprint v1.1) and "Sports Viewing Guide" (Spec v2.0) are normal,
+// separate types — neither is an alias of the other.
 export const ARTICLE_TYPES = [
   'Event Guide',
   'Schedule',
   'Results',
   'How to Watch',
+  'Sports Viewing Guide',
   'Preview',
   'Update',
   'News',
@@ -31,7 +36,33 @@ export const ARTICLE_TYPES = [
   'Other',
 ] as const;
 
-export type ArticleType = (typeof ARTICLE_TYPES)[number];
+/** An Article Type name (one of the ArticleType rows; custom types are allowed). */
+export type ArticleType = string;
+
+/** SEO profiles a type can inherit type-aware checks from (server/seo/rules.ts). */
+export const ARTICLE_TYPE_SEO_PROFILES = [
+  'general', 'event-guide', 'schedule', 'results', 'viewing', 'preview', 'news', 'past-winners', 'records',
+  'prize-money', 'players', 'teams', 'venue', 'qualification', 'rules-format', 'history', 'analysis',
+] as const;
+export type ArticleTypeSeoProfile = (typeof ARTICLE_TYPE_SEO_PROFILES)[number];
+
+/** Structured-data type emitted for articles of a type (Spec §17.8). */
+export const ARTICLE_SCHEMA_TYPES = ['Article', 'NewsArticle', 'BlogPosting'] as const;
+export type ArticleSchemaType = (typeof ARTICLE_SCHEMA_TYPES)[number];
+
+export interface ArticleTypeDefinition {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  sortOrder: number;
+  isActive: boolean;
+  isSystem: boolean;
+  schemaType: ArticleSchemaType;
+  seoProfile: ArticleTypeSeoProfile;
+  /** CMS only: how many articles use the type. */
+  articleCount?: number;
+}
 
 // Spec v1.1 §4.3: Event Edition lifecycle.
 export const EDITION_STATUSES = ['upcoming', 'active', 'completed', 'archived'] as const;
@@ -93,6 +124,10 @@ export interface Sport {
   eventConfiguration?: SportEventConfiguration | null;
   /** Chosen from src/config/sportIcons.ts; null/undefined = suggested from the name. */
   icon?: string | null;
+  /** PHASE R: Media Library item behind heroImage. */
+  heroMediaId?: string | null;
+  /** PHASE R: FAQPage structured data for this sport's FAQ (opt-in). */
+  faqSchemaEnabled?: boolean;
 }
 
 export interface SportEvent {
@@ -115,6 +150,10 @@ export interface SportEvent {
   eventType?: string; // e.g. "Grand Slam", "League", "Major", "Grand Prix"
   seo: SeoMetadata;
   sportSpecificValues?: SportEventFieldValues | null;
+  /** PHASE R: other names readers search for, one per line. */
+  alternativeNames?: string;
+  featuredMediaId?: string | null;
+  faqSchemaEnabled?: boolean;
 }
 
 export interface QuickFact {
@@ -145,6 +184,8 @@ export interface EventEdition {
   description: string;
   featuredImage: string | null;
   seo: SeoMetadata;
+  featuredMediaId?: string | null;
+  faqSchemaEnabled?: boolean;
 }
 
 export interface StructuredTable {
@@ -182,6 +223,8 @@ export interface Article extends ArticleReviewFields {
   body?: import('../lib/richText').RichDoc | null;
   /** PHASE C: featured image as a Media Library item. */
   featuredMediaId?: string | null;
+  /** PHASE R: FAQPage structured data for this article's FAQ (opt-in). */
+  faqSchemaEnabled?: boolean;
 }
 
 export interface Author {
@@ -259,9 +302,10 @@ export interface Comment {
 }
 
 export type MediaCreationType =
-  | 'Original'
-  | 'AI-created'
-  | 'AI-assisted'
+  // PHASE R: Spec v2.0 §18.3 wording.
+  | 'SportingSpy Original'
+  | 'SportingSpy AI-Created'
+  | 'SportingSpy AI-Assisted/Edited'
   | 'Licensed'
   | 'Official Source'
   | 'Creative Commons'
@@ -356,10 +400,13 @@ export interface AuditLog {
   userId: string;
   userName: string;
   action: string;
-  entityType: 'Sport' | 'Event' | 'Edition' | 'Article' | 'Comment' | 'Setting' | 'User' | 'Author' | 'Redirect';
+  entityType: 'Sport' | 'Event' | 'Edition' | 'Article' | 'Comment' | 'Setting' | 'User' | 'Author' | 'Redirect' | 'Faq' | 'ContactMessage' | 'ArticleType' | 'Migration' | 'Media' | 'Integration';
   entityId: string;
   timestamp: string;
   details: string;
+  /** PHASE R: changed fields only (secrets redacted). */
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
 }
 
 export interface RedirectRule {

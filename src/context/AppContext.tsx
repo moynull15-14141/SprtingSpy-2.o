@@ -16,6 +16,7 @@ import {
   AdSlotConfig,
   AdSlotId,
   Article,
+  ArticleTypeDefinition,
   AuditLog,
   Author,
   Comment,
@@ -50,6 +51,8 @@ interface AdminDataContextType {
   redirectRules: RedirectRule[];
   /** PHASE C: where each media item is used (by media id). */
   mediaUsage: Record<string, MediaUsage[]>;
+  /** PHASE R: database-backed Article Types (active and inactive, display order). */
+  articleTypes: ArticleTypeDefinition[];
 
   // Actions for Editorial CMS
   addSport: (sport: Omit<Sport, 'id'>) => Promise<boolean>;
@@ -126,6 +129,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [adSlots, setAdSlots] = useState<AdSlotConfig[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [mediaUsage, setMediaUsage] = useState<Record<string, MediaUsage[]>>({});
+  const [articleTypes, setArticleTypes] = useState<ArticleTypeDefinition[]>([]);
 
   // Discard everything private whenever the session ends or changes.
   useEffect(() => {
@@ -156,6 +160,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       redirectRules: RedirectRule[];
       features: FeatureFlags;
       mediaUsage: Record<string, MediaUsage[]>;
+      articleTypes: ArticleTypeDefinition[];
     }>('/api/cms/data');
 
     if (res.data && generation === authGeneration.current && request === dataGeneration.current) {
@@ -171,6 +176,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setAuditLogs(res.data.auditLogs);
       setRedirectRules(res.data.redirectRules);
       setMediaUsage(res.data.mediaUsage || {});
+      setArticleTypes(res.data.articleTypes || []);
     }
   };
 
@@ -207,7 +213,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
     if (res.data) {
       setSports((prev) => prev.map((s) => (s.id === id ? res.data! : s)));
-      showNotification('Sport updated successfully.', 'success');
+      // PHASE R: a slug change moves URLs; the server reports how many got 301 redirects.
+      const moved = (res.data as Sport & { movedUrls?: number }).movedUrls || 0;
+      showNotification(moved ? `Sport updated. ${moved} URL(s) changed and now redirect (301) to their new address.` : 'Sport updated successfully.', 'success');
       refreshData();
       return true;
     }
@@ -248,7 +256,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
     if (res.data) {
       setEvents((prev) => prev.map((e) => (e.id === id ? res.data! : e)));
-      showNotification('Permanent event updated.', 'success');
+      const moved = (res.data as SportEvent & { movedUrls?: number }).movedUrls || 0;
+      showNotification(moved ? `Event updated. ${moved} URL(s) changed and now redirect (301) to their new address.` : 'Permanent event updated.', 'success');
       refreshData();
       return true;
     }
@@ -531,6 +540,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         headers: csrf ? { 'x-csrf-token': decodeURIComponent(csrf) } : {},
       });
       const json = await res.json().catch(() => ({ error: `Upload failed (HTTP ${res.status}).` }));
+      // PHASE R: duplicate detection — the same file is already in the library.
+      if (res.status === 409 && json.duplicateOf && !metadata.allowDuplicate) {
+        if (confirm(`${json.error}
+
+Upload a separate copy anyway?`)) return uploadMedia(file, { ...metadata, allowDuplicate: 'true' });
+        showNotification(`Not uploaded: use the existing item "${json.duplicateOf.title}".`, 'info');
+        return null;
+      }
       if (!res.ok) {
         showNotification(json.error || 'Upload failed.', 'error');
         return null;
@@ -622,6 +639,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         auditLogs,
         redirectRules,
         mediaUsage,
+        articleTypes,
         uploadMedia,
         addSport,
         updateSport,

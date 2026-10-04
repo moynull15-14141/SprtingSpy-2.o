@@ -1,9 +1,9 @@
 /**
  * SportingSpy Unified Editorial Article Page
- * Reusable template supporting all 18 Article Types:
- * - Schedule, Event Guide, Results, How to Watch, Preview, Update, News,
- *   Past Winners, Records, Prize Money, Players, Teams, Venue, Qualification,
- *   Rules & Format, History, Analysis, General Information.
+ * One reusable template for every Article Type (database-backed list,
+ * including both "How to Watch" and "Sports Viewing Guide").
+ * Structure (Spec §9.7): breadcrumbs · title · author/dates · featured image ·
+ * body · sources · FAQ · related articles · latest articles · author info.
  *
  * Implements:
  * - Museum/Editorial typography and reading cadence
@@ -32,16 +32,17 @@ import { ArticleAnalytics } from '../components/editorial/ArticleAnalytics';
 import type { getArticlePage } from '../../server/services/public/content';
 import { Avatar } from '../components/ui/Avatar';
 import { PlacedBlocks } from '../components/site/GlobalBlocks';
+import { ContextFaq } from '../components/editorial/ContextFaq';
+import { RumPageType } from '../components/analytics/RumPageType';
 
 type ArticlePageData = NonNullable<Awaited<ReturnType<typeof getArticlePage>>>;
 
-// Spec §15: News-style types are NewsArticle; guides/reference content is Article.
-const NEWS_ARTICLE_TYPES = ['News', 'Update', 'Results', 'Preview'];
 
 export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] | null; preview?: boolean }> = ({ data, comments, preview = false }) => {
-  const { article, sport, event, edition, author, related: relatedArticles, body, media, featuredImage } = data;
-  const imageCaption = body.attrs?.featuredCaption ?? (featuredImage?.caption || 'SportingSpy Editorial Archive');
-  const imageCredit = body.attrs?.featuredCredit ?? (featuredImage?.credit || 'Verified Sports Photography');
+  const { article, sport, event, edition, author, related: relatedArticles, latest: latestArticles, body, media, featuredImage, faqs, faqSchemaEnabled, schemaType } = data;
+  // PHASE R: no invented caption/credit — only what the editor or the Media Library record says.
+  const imageCaption = body.attrs?.featuredCaption ?? (featuredImage?.caption || '');
+  const imageCredit = body.attrs?.featuredCredit ?? (featuredImage?.credit || '');
 
   // Compute breadcrumbs
   const breadcrumbItems = [];
@@ -75,7 +76,8 @@ export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] 
   const imageUrl = article.featuredImage ? new URL(article.featuredImage, absoluteUrl('/')).toString() : undefined;
   const structuredData = {
     '@context': 'https://schema.org',
-    '@type': NEWS_ARTICLE_TYPES.includes(article.articleType) ? 'NewsArticle' : 'Article',
+    // PHASE R: Article / NewsArticle / BlogPosting is configured per Article Type (Admin → Article Types).
+    '@type': schemaType,
     headline: article.title,
     description: article.excerpt,
     mainEntityOfPage: canonicalUrl,
@@ -107,6 +109,7 @@ export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] 
         </div>
       ) : (
         <>
+          <RumPageType type="article" />
           <JsonLd data={structuredData} />
           <ArticleAnalytics id={article.id} sport={article.sportSlug} category={article.articleType} author={author?.slug} event={article.eventSlug || undefined} publishedAt={new Date(article.publishedAt).toISOString()} />
         </>
@@ -212,7 +215,7 @@ export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] 
       {article.references && article.references.length > 0 && (
         <div className="p-4 rounded-xl bg-stone-50 dark:bg-stone-900/60 border border-stone-200 dark:border-stone-800 text-xs">
           <h4 className="font-semibold text-stone-900 dark:text-stone-100 uppercase tracking-wider mb-2">
-            Authoritative Sources & Regulatory References
+            Sources &amp; references
           </h4>
           <ul className="space-y-1">
             {article.references.map((ref, idx) => (
@@ -232,8 +235,45 @@ export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] 
         </div>
       )}
 
+      {/* READER QUESTIONS (published, editor-approved; FAQPage markup only when enabled) */}
+      <ContextFaq items={faqs} heading="Frequently asked questions" schemaEnabled={faqSchemaEnabled && !preview} />
+
       {!preview && <PlacedBlocks placement="article_end" />}
       <AdSlot id="ARTICLE_BOTTOM" />
+
+      {/* COMMENTS (launch-disabled unless the server enables them) */}
+      {comments && <CommentsSection articleId={article.id} initialComments={comments} />}
+
+      {/* RELATED ARTICLES */}
+      {relatedArticles.length > 0 && (
+        <section aria-labelledby="related-heading" className="pt-8 border-t border-stone-200 dark:border-stone-800">
+          <div className="mb-4">
+            <span className="text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-500">
+              Related articles
+            </span>
+            <h3 id="related-heading" className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">
+              Related {sport.name} articles
+            </h3>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+            {relatedArticles.map((rel) => (
+              <ArticleCard key={rel.id} article={rel} variant="standard" />
+            ))}
+          </div>
+        </section>
+      )}
+      {/* LATEST ARTICLES (Spec §9.7) */}
+      {!preview && latestArticles.length > 0 && (
+        <section aria-labelledby="latest-heading" className="pt-8 border-t border-stone-200 dark:border-stone-800">
+          <div className="mb-4">
+            <span className="text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-500">Latest articles</span>
+            <h3 id="latest-heading" className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">Latest {sport.name} articles</h3>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {latestArticles.map((a) => <ArticleCard key={a.id} article={a} variant="standard" />)}
+          </div>
+        </section>
+      )}
 
       {/* AUTHOR SIGNATURE CARD */}
       {author && (
@@ -252,34 +292,13 @@ export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] 
             <div className="mt-3 flex items-center justify-center sm:justify-start gap-3 text-xs text-stone-500 dark:text-stone-400">
               {author.twitter && <span>{author.twitter}</span>}
               <Link href={authorPath(author.slug)} className="text-amber-700 dark:text-amber-400 hover:underline font-semibold">
-                View all articles ({author.articleCount}) &rarr;
+                View all articles by {author.name} &rarr;
               </Link>
             </div>
           </div>
         </div>
       )}
 
-      {/* COMMENTS (launch-disabled unless the server enables them) */}
-      {comments && <CommentsSection articleId={article.id} initialComments={comments} />}
-
-      {/* RELATED ARTICLES */}
-      {relatedArticles.length > 0 && (
-        <section aria-labelledby="related-heading" className="pt-8 border-t border-stone-200 dark:border-stone-800">
-          <div className="mb-4">
-            <span className="text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-500">
-              Continue Reading
-            </span>
-            <h3 id="related-heading" className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">
-              Related {sport.name} Editorial
-            </h3>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-            {relatedArticles.map((rel) => (
-              <ArticleCard key={rel.id} article={rel} variant="standard" />
-            ))}
-          </div>
-        </section>
-      )}
     </article>
   );
 };

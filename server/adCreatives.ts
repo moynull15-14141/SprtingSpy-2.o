@@ -1,4 +1,5 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
+import { recordAudit } from './audit';
 import multer from 'multer';
 import sharp from 'sharp';
 import crypto from 'node:crypto';
@@ -77,7 +78,7 @@ export function adCreativesRouter(getLookup: () => AuthLookup) {
         const title = path.basename(req.file.originalname).replace(/[^\w.\- ()]/g, '_').slice(0, 200) || 'Ad media';
         const item = await prisma.$transaction(async tx => {
           const item = await tx.adCreative.create({ data: { id: `ad-${crypto.randomUUID()}`, title, storageKey: key!, url: mediaUrl(key!), kind: creative.kind, mimeType: creative.mimeType, width: creative.width, height: creative.height, durationSeconds: creative.durationSeconds, sizeBytes: creative.data.length } });
-          await tx.auditLog.create({ data: { id: `log-${crypto.randomUUID()}`, userId: req.authContext!.userId, userName: req.authContext!.userName, action: 'Uploaded Ad Media', entityType: 'Setting', entityId: item.id, timestamp: now, details: `Uploaded ${item.mimeType} ${item.width}x${item.height}.` } });
+          await recordAudit(tx, { userId: req.authContext!.userId, userName: req.authContext!.userName, action: 'Uploaded Ad Media', entityType: 'Setting', entityId: item.id, details: `Uploaded ${item.mimeType} ${item.width}x${item.height}.`, before: null, after: item as unknown as Record<string, unknown>, fields: ['title', 'kind', 'mimeType', 'width', 'height', 'durationSeconds', 'sizeBytes', 'url'] });
           return item;
         });
         return res.status(201).json(item);
@@ -90,7 +91,7 @@ export function adCreativesRouter(getLookup: () => AuthLookup) {
     try { await prisma.adCreative.delete({ where: { id: item.id } }); }
     catch (e) { if ((e as { code?: string }).code === 'P2003') return res.status(409).json({ error: 'Remove this media from its ad slots before deleting it.' }); throw e; }
     await mediaStorage().delete(item.storageKey);
-    await prisma.auditLog.create({ data: { id: `log-${crypto.randomUUID()}`, userId: req.authContext!.userId, userName: req.authContext!.userName, action: 'Deleted Ad Media', entityType: 'Setting', entityId: item.id, timestamp: new Date(), details: 'Deleted unused ad media.' } });
+    await recordAudit(prisma, { userId: req.authContext!.userId, userName: req.authContext!.userName, action: 'Deleted Ad Media', entityType: 'Setting', entityId: item.id, details: 'Deleted unused ad media.', before: item as unknown as Record<string, unknown>, after: null, fields: ['title', 'kind', 'mimeType', 'width', 'height', 'durationSeconds', 'sizeBytes', 'url'] });
     return res.json({ success: true });
   }));
   return router;

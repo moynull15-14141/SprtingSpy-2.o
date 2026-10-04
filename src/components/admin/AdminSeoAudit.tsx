@@ -10,7 +10,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { Button } from '../ui/Button';
-import { ARTICLE_TYPES } from '../../types';
 import type { AdminTab } from './AdminLayout';
 
 type Severity = 'blocking' | 'warning' | 'info';
@@ -290,7 +289,8 @@ function Integrations() {
 }
 
 function Rules({ canEdit }: { canEdit: boolean }) {
-  const { apiCall, showNotification } = useApp();
+  const { apiCall, showNotification, articleTypes } = useApp();
+  const ARTICLE_TYPES = articleTypes.map((t) => t.name);
   const [rules, setRules] = useState<Rule[] | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [configText, setConfigText] = useState('');

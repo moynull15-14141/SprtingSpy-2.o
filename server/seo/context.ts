@@ -82,6 +82,11 @@ export async function buildSeoContext(origin: string) {
     prisma.article.findMany(),
     prisma.siteSetting.findMany(),
   ]);
+  // PHASE R: Article Type SEO profiles (custom types inherit the checks of their profile),
+  // existing URL collisions and repeated no-result searches (content opportunities).
+  const [{ allArticleTypes }, { findShadowedArticles }, { noResultOpportunities }] = await Promise.all([import('../articleTypes'), import('../urlStability'), import('../searchAnalytics')]);
+  const [types, shadowed, noResults] = await Promise.all([allArticleTypes(), findShadowedArticles(), noResultOpportunities().catch(() => [])]);
+  const typeProfiles = new Map<string, string>(types.map((t) => [t.name, t.seoProfile as string]));
   const subjects = articles.map(toArticleSubject);
   const published = subjects.filter((s) => s.status === 'published');
 
@@ -113,6 +118,9 @@ export async function buildSeoContext(origin: string) {
     titleCounts: countBy(published.map((s) => (s.seo.metaTitle || s.title).trim().toLowerCase())),
     descriptionCounts: countBy(published.map((s) => (s.seo.metaDescription || s.excerpt).trim().toLowerCase()).filter(Boolean)),
     settings: Object.fromEntries(settings.map((s) => [s.key, s.value])) as Record<string, string>,
+    typeProfiles,
+    shadowed,
+    noResults,
   };
 }
 

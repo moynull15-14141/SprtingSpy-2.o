@@ -7,7 +7,7 @@ import type { Prisma, Article } from './generated/prisma/client';
 
 export class WorkflowError extends Error { constructor(public status: number, message: string) { super(message); this.name = 'WorkflowError'; } }
 const fail = (status: number, message: string): never => { throw new WorkflowError(status, message); };
-const writeFields = new Set(['title','subtitle','slug','sportSlug','eventSlug','editionYear','articleType','excerpt','content','body','featuredImage','featuredMediaId','authorId','publishedAt','readingTimeMinutes','featured','tables','references','seo','status','scheduledFor']);
+const writeFields = new Set(['title','subtitle','slug','sportSlug','eventSlug','editionYear','articleType','excerpt','content','body','featuredImage','featuredMediaId','authorId','publishedAt','readingTimeMinutes','featured','tables','references','seo','status','scheduledFor','faqSchemaEnabled']);
 const protectedFields = new Set(['reviewStatus','reviewerId','reviewComment','reviewSubmittedAt','reviewDecidedAt','reviewVersion']);
 export function checkArticlePayload(body: unknown) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, 'Article payload must be an object.');

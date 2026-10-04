@@ -5,7 +5,6 @@
 import React, { useState } from 'react';
 import { Plus } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
-import { ARTICLE_TYPES } from '../../../types';
 import { IntroAppearanceEditor } from './IntroAppearanceEditor';
 import {
   BLOCK_PLACEMENTS, SOCIAL_PLATFORMS,
@@ -40,8 +39,10 @@ function newSection(type: HomeSection['type']): HomeSection {
 }
 
 function SourceEditor({ value, onChange, max }: { value: ArticleSource; onChange: (v: ArticleSource) => void; max: number }) {
-  const { sports, events } = useApp();
+  const { sports, events, articleTypes } = useApp();
   const auto = value.auto;
+  // PHASE R: categories come from the database-backed Article Types.
+  const ARTICLE_TYPES = articleTypes.filter((t) => t.isActive || (auto.kind === 'type' && t.name === auto.value)).map((t) => t.name);
   const setAuto = (kind: AutoSource['kind']) => onChange({ ...value, auto: kind === 'latest' ? { kind } : { kind, value: kind === 'type' ? ARTICLE_TYPES[0] : kind === 'sport' ? sports[0]?.slug ?? '' : events[0] ? `${events[0].sportSlug}/${events[0].slug}` : '' } as AutoSource });
   return (
     <div className="space-y-3 rounded-lg bg-stone-50 p-3 dark:bg-stone-900/60">

@@ -5,6 +5,11 @@
  * - Edit existing sports (name, slug, tagline, description, SEO)
  * - Toggle visibility (hide/show)
  * - Reorder sport priority
+ * PHASE R (Spec §6.1): image/logo from the Media Library, SEO + social
+ * metadata (other stored SEO keys such as canonical/noindex are preserved),
+ * featured events, FAQ structured-data opt-in. An edit sends only the fields
+ * that changed, so nothing is wiped by an ordinary save. Slug changes create
+ * 301 redirects for every URL under the sport (server-side).
  */
 
 import React, { useState } from 'react';
@@ -15,9 +20,10 @@ import { useApp } from '../../context/AppContext';
 import { Sport } from '../../types';
 import { Button } from '../ui/Button';
 import { EventConfigurationEditor } from './EventConfigurationEditor';
+import { SeoFields, seoToDraft, draftToSeo, EMPTY_SEO_DRAFT, type SeoDraft } from './EntityFields';
 
 export const AdminSports: React.FC = () => {
-  const { sports, addSport, updateSport, deleteSport, navigate } = useApp();
+  const { sports, events, mediaItems, addSport, updateSport, deleteSport, navigate } = useApp();
   const [isCreating, setIsCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [configurationSportSlug, setConfigurationSportSlug] = useState<string | null>(null);
@@ -31,9 +37,12 @@ export const AdminSports: React.FC = () => {
   const [isVisible, setIsVisible] = useState(true);
   // null = use the top suggestion for the name.
   const [icon, setIcon] = useState<string | null>(null);
-  const [metaTitle, setMetaTitle] = useState('');
-  const [metaDescription, setMetaDescription] = useState('');
+  const [seoDraft, setSeoDraft] = useState<SeoDraft>(EMPTY_SEO_DRAFT);
+  const [heroImage, setHeroImage] = useState('');
+  const [featuredEventIds, setFeaturedEventIds] = useState<string[]>([]);
+  const [faqSchemaEnabled, setFaqSchemaEnabled] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const editingSport = sports.find((s) => s.id === editingId);
 
   const resetForm = () => {
     setName('');
@@ -43,8 +52,10 @@ export const AdminSports: React.FC = () => {
     setOrder(sports.length + 1);
     setIsVisible(true);
     setIcon(null);
-    setMetaTitle('');
-    setMetaDescription('');
+    setSeoDraft(EMPTY_SEO_DRAFT);
+    setHeroImage('');
+    setFeaturedEventIds([]);
+    setFaqSchemaEnabled(false);
     setIsCreating(false);
     setEditingId(null);
   };
@@ -60,7 +71,7 @@ export const AdminSports: React.FC = () => {
     e.preventDefault();
     if (!name.trim() || !slug.trim()) return;
 
-    const payload = {
+    const full = {
       name,
       slug,
       tagline,
@@ -69,18 +80,23 @@ export const AdminSports: React.FC = () => {
       isVisible,
       // Store the concrete icon (chosen, or the current top suggestion) so it never changes by itself.
       icon: icon ?? suggestSportIcons(name, slug, 1)[0]?.emoji ?? null,
-      featuredEventIds: [],
-      seo: {
-        metaTitle: metaTitle || `${name} Tournament Guides & Records | SportingSpy`,
-        metaDescription: metaDescription || description,
-      },
+      heroImage: heroImage || null,
+      featuredEventIds,
+      faqSchemaEnabled,
+      // Blank SEO fields mean "automatic default"; canonical/noindex and other stored keys are kept.
+      seo: draftToSeo(seoDraft, editingSport?.seo),
     };
 
-    if (editingId) {
-      updateSport(editingId, payload);
-      setFeedback(`Sport "${name}" updated successfully.`);
+    if (editingId && editingSport) {
+      // Only the fields that changed: an ordinary save never overwrites stored values with defaults.
+      const before: Record<string, unknown> = { name: editingSport.name, slug: editingSport.slug, tagline: editingSport.tagline, description: editingSport.description, order: editingSport.order, isVisible: editingSport.isVisible, icon: editingSport.icon ?? null, heroImage: editingSport.heroImage || null, featuredEventIds: editingSport.featuredEventIds, faqSchemaEnabled: !!editingSport.faqSchemaEnabled, seo: editingSport.seo };
+      const changes = Object.fromEntries(Object.entries(full).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(before[k])));
+      if (changes.slug && !confirm(`Change the URL from /${editingSport.slug}/ to /${slug}/? Every page under this sport moves; old URLs will redirect (301) to the new ones.`)) return;
+      if (Object.keys(changes).length) updateSport(editingId, changes as Partial<Sport>);
+      setFeedback(Object.keys(changes).length ? `Sport "${name}" updated.` : 'No changes to save.');
     } else {
-      addSport(payload);
+      const { featuredEventIds: _none, ...create } = full;
+      addSport(create as never);
       setFeedback(`New sport "${name}" created and added to directory.`);
     }
 
@@ -98,9 +114,18 @@ export const AdminSports: React.FC = () => {
     setOrder(s.order);
     setIsVisible(s.isVisible);
     setIcon(s.icon ?? null);
-    setMetaTitle(s.seo.metaTitle || '');
-    setMetaDescription(s.seo.metaDescription || '');
+    setSeoDraft(seoToDraft(s.seo));
+    setHeroImage(s.heroImage || '');
+    setFeaturedEventIds(s.featuredEventIds || []);
+    setFaqSchemaEnabled(!!s.faqSchemaEnabled);
   };
+  const sportEvents = events.filter((e) => e.sportSlug === (editingSport?.slug ?? slug));
+  const toggleFeatured = (id: string) => setFeaturedEventIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : ids.length >= 12 ? ids : [...ids, id]));
+  const moveFeatured = (id: string, dir: -1 | 1) => setFeaturedEventIds((ids) => {
+    const i = ids.indexOf(id); const j = i + dir;
+    if (i < 0 || j < 0 || j >= ids.length) return ids;
+    const next = [...ids]; [next[i], next[j]] = [next[j], next[i]]; return next;
+  });
 
   return (
     <div className="space-y-6">
@@ -218,6 +243,45 @@ export const AdminSports: React.FC = () => {
               </label>
             </div>
           </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="sport-hero-image" className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">Sport image / logo (Media Library)</label>
+              <select id="sport-hero-image" value={heroImage} onChange={(e) => setHeroImage(e.target.value)} className="w-full text-xs p-2 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950">
+                <option value="">No image</option>
+                {heroImage && !mediaItems.some((m) => m.url === heroImage) && <option value={heroImage}>Existing image (not in library; preserved until changed)</option>}
+                {mediaItems.map((m) => <option key={m.id} value={m.url}>{m.title}{m.copyrightReview === 'restricted' ? ' (restricted)' : ''}</option>)}
+              </select>
+              <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400">Images come from the Media Library so their rights, alt text and responsive sizes are tracked.</p>
+            </div>
+            <label className="flex items-start gap-2 pt-6 text-xs">
+              <input type="checkbox" checked={faqSchemaEnabled} onChange={(e) => setFaqSchemaEnabled(e.target.checked)} className="mt-0.5" />
+              <span><span className="font-semibold">FAQPage structured data</span> for this sport&apos;s published FAQ (only when it passes validation).</span>
+            </label>
+          </div>
+
+          {editingId && (
+            <fieldset className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
+              <legend className="px-1 text-xs font-bold uppercase tracking-wider text-stone-700 dark:text-stone-200">Featured events ({featuredEventIds.length}/12)</legend>
+              <p className="mb-2 text-[11px] text-stone-500 dark:text-stone-400">Shown first on the sport page, in this order. With none chosen, events marked “featured” are shown.</p>
+              {sportEvents.length === 0 ? <p className="text-[11px] italic text-stone-500">This sport has no events yet.</p> : (
+                <ul className="space-y-1">
+                  {[...featuredEventIds.map((id) => sportEvents.find((e) => e.id === id)).filter(Boolean), ...sportEvents.filter((e) => !featuredEventIds.includes(e.id))].map((evt) => evt && (
+                    <li key={evt.id} className="flex items-center gap-2 text-xs">
+                      <input type="checkbox" id={`feat-${evt.id}`} checked={featuredEventIds.includes(evt.id)} onChange={() => toggleFeatured(evt.id)} />
+                      <label htmlFor={`feat-${evt.id}`} className="flex-1">{evt.name}</label>
+                      {featuredEventIds.includes(evt.id) && <>
+                        <button type="button" onClick={() => moveFeatured(evt.id, -1)} aria-label={`Move ${evt.name} up`} className="px-1 text-stone-500 hover:text-stone-900">↑</button>
+                        <button type="button" onClick={() => moveFeatured(evt.id, 1)} aria-label={`Move ${evt.name} down`} className="px-1 text-stone-500 hover:text-stone-900">↓</button>
+                      </>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </fieldset>
+          )}
+
+          <SeoFields idPrefix="sport-seo" value={seoDraft} onChange={setSeoDraft} defaults={{ title: `${name || 'Sport'} Guides, Tournament Schedules & Records | SportingSpy`, description }} />
 
           <div className="pt-2 flex justify-end gap-2 border-t border-stone-200 dark:border-stone-800">
             <Button type="button" variant="outline" size="sm" onClick={resetForm}>

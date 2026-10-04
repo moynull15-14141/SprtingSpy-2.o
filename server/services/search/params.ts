@@ -7,13 +7,15 @@
  * (server-rendered page) drops invalid values and continues with defaults.
  */
 
-import { ARTICLE_TYPES } from '../../../src/types';
 import { REVIEW_STATUSES } from '../../../src/lib/editorialWorkflow';
 import { SEARCH_MAX_LIMIT, SEARCH_MAX_QUERY, normalizeQuery, type ArticleStatusFilter, type SearchSort } from './articleSearch';
 
 export const DATE_RANGES = ['today', 'week', 'month', 'year'] as const;
 export type DateRange = (typeof DATE_RANGES)[number];
 export const SORTS: SearchSort[] = ['relevance', 'newest', 'oldest'];
+/** PHASE M: public result type filter. Empty = all (Articles and Events). */
+export const SEARCH_KINDS = ['article', 'event'] as const;
+export type SearchKind = (typeof SEARCH_KINDS)[number];
 const STATUSES: ArticleStatusFilter[] = ['draft', 'preview', 'scheduled', 'published', 'archived'];
 const MAX_PAGE = 500;
 const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -21,6 +23,8 @@ const ID = /^[A-Za-z0-9_-]{1,120}$/;
 
 export interface SearchQuery {
   q: string;
+  /** PHASE M: '' (all), 'article' or 'event'. Public search only. */
+  kind: SearchKind | '';
   sport: string;
   type: string;
   author: string;
@@ -55,7 +59,7 @@ const isoDay = (value: string) => {
 };
 
 export function parseSearchQuery(raw: Raw, options: { strict: boolean; defaultLimit: number; allowStatus?: boolean }): Parsed {
-  const value: SearchQuery = { q: '', sport: '', type: '', author: '', date: '', sort: 'relevance', page: 1, limit: options.defaultLimit, status: '' };
+  const value: SearchQuery = { q: '', kind: '', sport: '', type: '', author: '', date: '', sort: 'relevance', page: 1, limit: options.defaultLimit, status: '' };
   const fail = (error: string): Parsed | null => (options.strict ? { ok: false, error } : null);
 
   for (const [key, input] of Object.entries(raw)) {
@@ -76,11 +80,17 @@ export function parseSearchQuery(raw: Raw, options: { strict: boolean; defaultLi
         if (input.length > SEARCH_MAX_QUERY * 2) error = `q must be at most ${SEARCH_MAX_QUERY} characters.`;
         else value.q = normalizeQuery(input);
         break;
+      case 'kind':
+        if (options.allowStatus) error = 'kind is a public search parameter.';
+        else if ((SEARCH_KINDS as readonly string[]).includes(input)) value.kind = input as SearchKind;
+        else error = `kind must be one of ${SEARCH_KINDS.join(', ')}.`;
+        break;
       case 'sport':
         if (SLUG.test(input) && input.length <= 120) value.sport = input; else error = 'sport must be a sport slug.';
         break;
       case 'type':
-        if ((ARTICLE_TYPES as readonly string[]).includes(input)) value.type = input; else error = 'type is not a known article type.';
+        // PHASE R: database-backed types — validate the shape; an unknown type matches nothing.
+        if (/^[\p{L}\p{N}][\p{L}\p{N} &'’/().,-]{0,58}[\p{L}\p{N})]$/u.test(input)) value.type = input; else error = 'type is not a valid article type name.';
         break;
       case 'author':
         if (SLUG.test(input) && input.length <= 120) value.author = input; else error = 'author must be an author slug.';

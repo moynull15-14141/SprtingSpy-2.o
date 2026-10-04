@@ -5,6 +5,7 @@ import { getAuthorPage } from '../../../lib/data';
 import { pageMetadata } from '../../../lib/seo';
 import { authorPath } from '../../../lib/paths';
 import { authorIndexability } from '../../../lib/indexability';
+import { RumPageType } from '../../../components/analytics/RumPageType';
 
 type Params = Promise<{ slug: string }>;
 
@@ -14,7 +15,7 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
   const { author } = data;
   return pageMetadata({
     // PHASE D: an author page with no published articles is thin (noindex), as in the sitemap.
-    noindex: !authorIndexability(data.articles.length).indexable,
+    noindex: !authorIndexability(data.articleTotal).indexable,
     title: `${author.name} – ${author.roleTitle} | SportingSpy`,
     description: author.bio,
     path: authorPath(author.slug),
@@ -26,5 +27,5 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
 export default async function Page({ params }: { params: Params }) {
   const data = await getAuthorPage((await params).slug);
   if (!data) notFound();
-  return <AuthorPage data={data} />;
+  return <><RumPageType type="author" /><AuthorPage data={data} /></>;
 }

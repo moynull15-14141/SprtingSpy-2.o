@@ -8,6 +8,7 @@
  *   DELETE /api/media/:id      delete if unused (Admin)
  */
 
+import { recordAudit } from '../audit';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import multer from 'multer';
 import crypto from 'node:crypto';
@@ -15,9 +16,11 @@ import { prisma } from '../db';
 import { requireRole, type AuthLookup } from '../auth';
 import { firstError, validateOneOf, validateSafeUrl, validateText } from '../validation';
 import { MAX_UPLOAD_BYTES, UploadRejected } from './processing';
-import { COPYRIGHT_REVIEW_STATES, createMediaFromUpload, deleteMedia } from './service';
+import { COPYRIGHT_REVIEW_STATES, createMediaFromUpload, deleteMedia, DuplicateMedia } from './service';
 
-export const MEDIA_CREATION_TYPES = ['Original', 'AI-created', 'AI-assisted', 'Licensed', 'Official Source', 'Creative Commons', 'Other'] as const;
+// PHASE R: Spec v2.0 §18.3 labels. The pre-R labels are still accepted and stored with the new wording.
+export const MEDIA_CREATION_TYPES = ['SportingSpy Original', 'SportingSpy AI-Created', 'SportingSpy AI-Assisted/Edited', 'Licensed', 'Official Source', 'Creative Commons', 'Other'] as const;
+export const LEGACY_CREATION_TYPES: Record<string, (typeof MEDIA_CREATION_TYPES)[number]> = { Original: 'SportingSpy Original', 'AI-created': 'SportingSpy AI-Created', 'AI-assisted': 'SportingSpy AI-Assisted/Edited' };
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -25,6 +28,7 @@ const upload = multer({
 });
 
 function metadataErrors(body: Record<string, unknown>, requireTitle: boolean) {
+  if (typeof body.creationType === 'string' && LEGACY_CREATION_TYPES[body.creationType]) body.creationType = LEGACY_CREATION_TYPES[body.creationType];
   return firstError(
     validateText(body.title, 'title', 200, requireTitle),
     validateText(body.altText, 'altText', 300, false),
@@ -45,10 +49,10 @@ export function mediaRouter(getLookup: () => AuthLookup) {
   const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => {
     fn(req, res).catch(next);
   };
-  const audit = (req: Request, action: string, entityId: string, details: string) =>
-    prisma.auditLog.create({
-      data: { id: `log-${crypto.randomUUID()}`, userId: req.authContext!.userId, userName: req.authContext!.userName, action, entityType: 'Setting', entityId, timestamp: new Date(), details },
-    });
+  // PHASE R.1: structured previous/new metadata (entity type kept as before for audit compatibility).
+  const MEDIA_AUDIT_FIELDS = ['title', 'url', 'altText', 'caption', 'credit', 'source', 'license', 'creationType', 'aiTool', 'humanEditing', 'copyrightReview', 'mimeType', 'width', 'height', 'contentHash'] as const;
+  const audit = (req: Request, action: string, entityId: string, details: string, before?: object | null, after?: object | null) =>
+    recordAudit(prisma, { userId: req.authContext!.userId, userName: req.authContext!.userName, action, entityType: 'Setting', entityId, details, before: before as Record<string, unknown> | null | undefined, after: after as Record<string, unknown> | null | undefined, fields: MEDIA_AUDIT_FIELDS });
 
   router.post('/upload', requireRole(getLookup, ['Admin', 'Editor', 'Author']), (req, res, next) => {
     upload.single('file')(req, res, (err: unknown) => {
@@ -73,11 +77,13 @@ export function mediaRouter(getLookup: () => AuthLookup) {
             creationType: str(body.creationType),
             aiTool: str(body.aiTool),
             humanEditing: str(body.humanEditing),
-          });
-          await audit(req, 'Uploaded Media Asset', item.id, `Uploaded ${item.mimeType} ${item.width}x${item.height} "${item.title}".`);
+          // PHASE R: the same file already in the library is reported unless the editor confirms a copy.
+          }, { rejectDuplicates: str(body.allowDuplicate) !== 'true' });
+          await audit(req, 'Uploaded Media Asset', item.id, `Uploaded ${item.mimeType} ${item.width}x${item.height} "${item.title}".`, null, item);
           return res.status(201).json(item);
         } catch (e) {
           if (e instanceof UploadRejected) return res.status(e.status).json({ error: e.message });
+          if (e instanceof DuplicateMedia) return res.status(409).json({ error: e.message, duplicateOf: e.duplicateOf });
           throw e;
         }
       })(req, res, next);
@@ -99,14 +105,14 @@ export function mediaRouter(getLookup: () => AuthLookup) {
         credit: str(body.credit) || null,
         source: str(body.source) || null,
         license: str(body.license) || null,
-        creationType: str(body.creationType) || 'Original',
+        creationType: str(body.creationType) || 'SportingSpy Original',
         aiTool: str(body.aiTool) || null,
         humanEditing: str(body.humanEditing) || null,
         uploadedAt: new Date(),
         updatedAt: new Date(),
       },
     });
-    await audit(req, 'Registered Media Asset', item.id, `Registered media by URL: ${item.title}.`);
+    await audit(req, 'Registered Media Asset', item.id, `Registered media by URL: ${item.title}.`, null, item);
     return res.status(201).json(item);
   }));
 
@@ -131,14 +137,15 @@ export function mediaRouter(getLookup: () => AuthLookup) {
     for (const field of Object.keys(data)) if (!changedFields.includes(field)) delete data[field];
     const updated = await prisma.mediaItem.update({ where: { id: existing.id }, data: { ...data, updatedAt: new Date() } });
     const reviewNote = data.copyrightReview && data.copyrightReview !== existing.copyrightReview ? ` Copyright review: ${existing.copyrightReview} -> ${data.copyrightReview}.` : '';
-    await audit(req, 'Updated Media Metadata', updated.id, `Updated media item: ${updated.title}.${reviewNote}`);
+    await audit(req, 'Updated Media Metadata', updated.id, `Updated media item: ${updated.title}.${reviewNote}`, existing, updated);
     return res.json(updated);
   }));
 
   router.delete('/:id', requireRole(getLookup, ['Admin']), wrap(async (req, res) => {
+    const previous = await prisma.mediaItem.findUnique({ where: { id: req.params.id } });
     const result = await deleteMedia(req.params.id);
     if (!result.ok) { const failure = result as { status: number; error: string }; return res.status(failure.status).json({ error: failure.error }); }
-    await audit(req, 'Deleted Media Asset', req.params.id, `Deleted media item ${req.params.id} and its stored files.`);
+    await audit(req, 'Deleted Media Asset', req.params.id, `Deleted media item ${req.params.id} and its stored files.`, previous, null);
     return res.json({ success: true, id: req.params.id });
   }));
 

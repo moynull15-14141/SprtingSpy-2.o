@@ -5,11 +5,12 @@ import { requireAuth, type AuthLookup } from './auth';
 import { getSessionIdFromRequest, buildExpiredSessionCookie } from './session';
 import { hashPassword, verifyPassword, validatePasswordStrength } from './password';
 import { createRateLimiter } from './rateLimit';
+import { recordAudit } from './audit';
 import { validateText, validateSafeUrl } from './validation';
 import type { Prisma } from './generated/prisma/client';
 
 // Explicit projections: adding a sensitive column later cannot expose it here.
-const userSelect = { id: true, name: true, email: true, role: true, avatar: true, joinedAt: true, updatedAt: true, status: true } as const;
+const userSelect = { id: true, name: true, email: true, role: true, avatar: true, joinedAt: true, updatedAt: true, status: true, totpEnabledAt: true } as const;
 const authorSelect = { id: true, slug: true, name: true, roleTitle: true, bio: true, avatar: true, twitter: true, email: true } as const;
 export const accountSelect = { ...userSelect, authorProfile: { select: authorSelect } } as const;
 
@@ -99,13 +100,19 @@ export function accountRouter(lookup: () => AuthLookup) {
     const result = await prisma.$transaction(async tx => {
       if (!await lockAccount(tx, req)) return { status: 401, error: 'Session expired. Please sign in.' };
       const userId = req.authContext!.userId;
+      // PHASE R.1: previous values for the structured audit entry.
+      const beforeUser = await tx.user.findUnique({ where: { id: userId }, select: { name: true, avatar: true } });
+      const beforeAuthor = await tx.author.findUnique({ where: { userId }, select: { name: true, bio: true, avatar: true } });
       if (authorData) {
         const author = await tx.author.findUnique({ where: { userId } });
         if (!author) return { status: 400, error: 'Your account has no linked author profile.' };
         await tx.author.update({ where: { id: author.id }, data: authorData });
       }
       const user = await tx.user.update({ where: { id: userId }, data: { ...data, updatedAt: new Date() }, select: accountSelect });
-      await audit(tx, req, 'Profile Updated', 'Updated self-service profile fields.');
+      const afterAuthor = authorData ? await tx.author.findUnique({ where: { userId }, select: { name: true, bio: true, avatar: true } }) : beforeAuthor;
+      await recordAudit(tx, { userId, userName: req.authContext!.userName, action: 'Profile Updated', entityType: 'User', entityId: userId, details: 'Updated self-service profile fields.',
+        before: { name: beforeUser?.name, avatar: beforeUser?.avatar, authorName: beforeAuthor?.name, authorBio: beforeAuthor?.bio, authorAvatar: beforeAuthor?.avatar },
+        after: { name: user.name, avatar: user.avatar, authorName: afterAuthor?.name, authorBio: afterAuthor?.bio, authorAvatar: afterAuthor?.avatar } });
       return { status: 200, user };
     });
     return res.status(result.status).json(result.error ? { error: result.error } : { user: result.user });

@@ -30,6 +30,21 @@ interface PageMetadataInput {
   openGraph?: Metadata['openGraph'];
 }
 
+/**
+ * PHASE E5: a page-default meta description from editor prose — whitespace
+ * collapsed and cut at a word boundary within the 160-character guideline the
+ * SEO scanner uses. Falls back when the prose is empty. Editor SEO overrides
+ * (seo.metaDescription) are never shortened.
+ */
+export function descriptionFrom(text: string | null | undefined, fallback: string, max = 160): string {
+  const clean = (text || '').replace(/\s+/g, ' ').trim();
+  if (!clean) return fallback;
+  if (clean.length <= max) return clean;
+  const cut = clean.slice(0, max - 1);
+  const atWord = cut.slice(0, Math.max(cut.lastIndexOf(' '), Math.floor(max * 0.6))).replace(/[\s,;:.\-–—]+$/, '');
+  return `${atWord}…`;
+}
+
 /** Replaces the built-in brand name in page-default text with the configured site name. */
 export const withSiteName = (text: string, siteName: string) => (siteName === BRANDING.name ? text : text.split(BRANDING.name).join(siteName));
 

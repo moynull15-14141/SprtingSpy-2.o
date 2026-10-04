@@ -15,7 +15,7 @@ export function ArticleAppearanceEditor({ value, onChange, caption, credit, firs
     <p className="text-xs text-stone-500 dark:text-stone-400">These settings apply only to this article. Save the article to keep your changes.</p>
     <div className="grid gap-4 sm:grid-cols-2">
       {(['featuredCaption', 'featuredCredit'] as const).map((key) => {
-        const fallback = key === 'featuredCaption' ? caption || 'SportingSpy Editorial Archive' : credit || 'Verified Sports Photography';
+        const fallback = key === 'featuredCaption' ? caption || '' : credit || '';
         const label = key === 'featuredCaption' ? 'Featured image caption' : 'Featured image credit';
         return <div key={key} className="space-y-2 text-xs">
           <label className="block font-semibold">{label}<input className={field} aria-label={label} maxLength={key === 'featuredCaption' ? 500 : 200} disabled={value[key] === undefined} value={value[key] ?? fallback} onChange={e => patch({ [key]: e.target.value })}/></label>

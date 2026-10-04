@@ -65,7 +65,8 @@ try {
   await page.waitForURL((u) => u.searchParams.get('q') === word);
   await page.locator('ol mark').first().waitFor();
   const resultsHeading = await page.locator('#search-results-heading').innerText();
-  assert.match(resultsHeading, new RegExp(`results? for “${word}”`, 'i'));
+  // PHASE M: when Events also match, the heading reads "N articles and M events for …".
+  assert.match(resultsHeading, new RegExp(`(results?|articles? and \\d+ events?) for “${word}”`, 'i'));
   pass('Enter without a highlighted suggestion submits a URL-driven search with highlighted results');
 
   const sportSelect = page.locator('select[name="sport"]');
@@ -105,7 +106,7 @@ try {
   await page.getByPlaceholder('Password').fill(password);
   await page.getByRole('button', { name: 'Sign In' }).click();
   await page.getByRole('heading', { name: 'Content Management System' }).waitFor();
-  await page.getByRole('button', { name: /Articles/ }).click();
+  await page.getByRole('button', { name: 'Articles', exact: true }).click(); // exact: Phase I added an "articles awaiting review" dashboard button
   const cmsSearch = page.getByPlaceholder('Title, text, slug or article ID…');
   await cmsSearch.waitFor();
   await page.waitForFunction(() => document.querySelectorAll('tbody tr p').length > 0);

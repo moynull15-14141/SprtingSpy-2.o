@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { EventEditionPage } from '../../../../views/EventEditionPage';
 import { getEditionPage } from '../../../../lib/data';
-import { pageMetadata } from '../../../../lib/seo';
+import { descriptionFrom, pageMetadata } from '../../../../lib/seo';
 import { editionPath } from '../../../../lib/paths';
 import { yearParam } from '../../../../lib/params';
 
@@ -20,7 +20,9 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
   const { sport, event, edition } = data;
   return pageMetadata({
     title: `${edition.title} – Official Dates, Venue & Guides | SportingSpy`,
-    description: edition.description,
+    description: descriptionFrom(edition.description, `${edition.title} – ${event.name} edition guide on SportingSpy.`),
+    // Same rule as the sitemap (editionIndexability): an Edition of a noindexed Event is not indexable.
+    noindex: !!event.seo?.noIndex,
     path: editionPath(sport.slug, event.slug, edition.year),
     seo: edition.seo,
     image: edition.featuredImage,

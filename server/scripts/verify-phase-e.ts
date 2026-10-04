@@ -216,7 +216,7 @@ try {
   assert(sug.data.articles.length <= 6 && sug.data.sports.length <= 3, 'suggestions are limited');
   assert(!sugTitles.some((t: string) => /status|hidden sport/.test(t)), 'no unpublished/hidden titles suggested');
   assert(sug.data.articles.every((a: any) => a.url.startsWith('/') && !('id' in a)), 'suggestions expose only public fields');
-  assert.deepEqual((await expect(anon, '/api/search/suggestions?q=z', 200)).data, { articles: [], sports: [] }, 'single character does not query');
+  assert.deepEqual((await expect(anon, '/api/search/suggestions?q=z', 200)).data, { articles: [], sports: [], events: [] }, 'single character does not query'); // E5 added event suggestions
   pass('autocomplete returns a small, public-only, title-weighted suggestion list');
 
   // ── Public page (URL state, highlighting, states, SEO) ──
@@ -254,9 +254,11 @@ try {
 
   // ── Synchronisation through the CMS save API (PUT /api/articles/:id) ──
   const t = () => `zs${letters(8)}`;
-  const edition = await prisma.eventEdition.findFirstOrThrow({ where: { event: { isVisible: true, sport: { isVisible: true } } } });
+  // Deterministic choice (row order changes whenever an Edition is updated), and the event word
+  // must be a real search word: a stop word such as "the" (the-masters) is ignored by design.
+  const edition = await prisma.eventEdition.findFirstOrThrow({ where: { event: { isVisible: true, sport: { isVisible: true } } }, orderBy: { id: 'asc' } });
   const startSport = await prisma.sport.findFirstOrThrow({ where: { isVisible: true, slug: { not: edition.sportSlug } } });
-  const eventWord = edition.eventSlug.split('-').find((w) => w.length > 2 && !edition.sportSlug.includes(w)) ?? edition.eventSlug;
+  const eventWord = edition.eventSlug.split('-').find((w) => w.length > 2 && !['the', 'and', 'for'].includes(w) && !edition.sportSlug.includes(w)) ?? edition.eventSlug;
   const sportWord = (slug: string) => slug.split('-')[0];
   const tok = { title: [t(), t()], subtitle: [t(), t()], excerpt: [t(), t()], body: [t(), t()], kw: [t(), t()] };
   const syncId = A('sync');

@@ -40,7 +40,7 @@ async function snapshot() {
 const before = await snapshot();
 const originalSettings = await prisma.siteSetting.findMany();
 const originalFaq = await prisma.faqEntry.findMany();
-const touchedSettingKeys = ['siteName', 'siteDescription', 'defaultOgImage', 'twitterHandle', 'googleSiteVerification', 'bingSiteVerification'];
+const touchedSettingKeys = ['siteName', 'siteDescription', 'defaultOgImage', 'twitterHandle', 'googleSiteVerification', 'bingSiteVerification', 'globalFaqPage', 'globalFaqSchema'];
 const localSchedule = (days: number) => new Date(Date.now() + days * 86_400_000 + 6 * 3600_000).toISOString().slice(0, 16);
 const firstLocal = localSchedule(1), secondLocal = localSchedule(2);
 const asUtc = (value: string) => new Date(`${value}:00+06:00`).toISOString();
@@ -192,7 +192,10 @@ try {
   assert.equal(await prisma.auditLog.count({ where: { userId: 'system-scheduler', entityId: articleId } }), 1);
   pass('real scheduler publishes exactly once at scheduled timestamp; public article and sitemap become available');
 
+  // PHASE R (v2.2): the site-wide /faq/ page is off by default; this suite switches it (and its FAQPage markup) on.
+  await expect(admin, '/api/settings', 200, 'PUT', { globalFaqPage: 'enabled', globalFaqSchema: 'enabled' });
   await page.getByRole('button', { name: 'FAQ', exact: true }).click();
+  await page.getByTestId('faq-context').selectOption('site');
   const q1 = `${prefix} First question?`, q2 = `${prefix} Second question?`, hiddenQuestion = `${prefix} Hidden question?`;
   async function createFaq(question: string, status: string) {
     await page.getByRole('button', { name: '+ New question', exact: true }).click();
@@ -245,7 +248,8 @@ try {
   await faqItem(q2).getByRole('button', { name: 'Archive', exact: true }).click();
   await until(() => prisma.faqEntry.findUniqueOrThrow({ where: { id: second.id } }), (v) => v.status === 'archived', 'FAQ archive');
   assert(!(await expect(anon, '/faq/')).text.includes(q2));
-  await expect(editor, `/api/faq/${hidden.id}`, 403, 'DELETE');
+  // PHASE R (v2.2): Editors may delete FAQ entries (audited); Authors still cannot touch FAQ.
+  await expect(author, `/api/faq/${hidden.id}`, 403, 'DELETE');
   page.once('dialog', (d) => d.accept()); await faqItem(hiddenQuestion).getByRole('button', { name: 'Delete', exact: true }).click();
   await until(() => prisma.faqEntry.findUnique({ where: { id: hidden.id } }), (v) => v === null, 'FAQ delete');
   await expect(editor, '/api/faq', 400, 'POST', { question: 'x', answer: 'y', status: 'published' });

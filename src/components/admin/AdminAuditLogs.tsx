@@ -17,7 +17,7 @@ export const AdminAuditLogs: React.FC = () => {
             System & Editorial Audit Logs
           </h2>
           <p className="text-xs text-stone-500 mt-1 dark:text-stone-400">
-            Immutable chronological record of modifications, creations, and security events.
+            Chronological record of changes and security events, with previous and new values where recorded. The newest 500 entries are shown.
           </p>
         </div>
       </div>
@@ -48,8 +48,20 @@ export const AdminAuditLogs: React.FC = () => {
                 <td className="p-3 text-stone-600 dark:text-stone-400 font-sans">
                   {log.entityType}
                 </td>
-                <td className="p-3 text-stone-700 dark:text-stone-300 font-sans max-w-sm">
+                <td className="p-3 text-stone-700 dark:text-stone-300 font-sans max-w-md">
                   {log.details}
+                  {/* PHASE R: structured previous / new values (Spec §24.3). */}
+                  {(log.before || log.after) && (
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-[11px] font-semibold text-amber-700 dark:text-amber-400">Changes ({Object.keys({ ...(log.before || {}), ...(log.after || {}) }).length})</summary>
+                      <table className="mt-1 w-full text-[11px]">
+                        <thead><tr className="text-stone-500"><th className="pr-2 text-left">Field</th><th className="pr-2 text-left">Previous</th><th className="text-left">New</th></tr></thead>
+                        <tbody>{Object.keys({ ...(log.before || {}), ...(log.after || {}) }).map((k) => (
+                          <tr key={k} className="align-top"><td className="pr-2 font-mono">{k}</td><td className="max-w-[14rem] break-words pr-2 font-mono text-rose-700 dark:text-rose-300">{log.before && k in log.before ? JSON.stringify(log.before[k]).slice(0, 400) : '—'}</td><td className="max-w-[14rem] break-words font-mono text-emerald-700 dark:text-emerald-300">{log.after && k in log.after ? JSON.stringify(log.after[k]).slice(0, 400) : '—'}</td></tr>
+                        ))}</tbody>
+                      </table>
+                    </details>
+                  )}
                 </td>
               </tr>
             ))}

@@ -22,7 +22,7 @@ const TTL_MS = 60_000;
 type Cache = { cached: { at: number; value: PrivacyConfig } | null; inflight: Promise<PrivacyConfig> | null; generation: number };
 const store = ((globalThis as unknown as { __sportingspyTracking?: Cache }).__sportingspyTracking ??= { cached: null, inflight: null, generation: 0 });
 
-const OFF: PrivacyConfig = { ga4MeasurementId: null, adsenseClient: null };
+const OFF: PrivacyConfig = { ga4MeasurementId: null, adsenseClient: null, consentMode: 'builtin', adsenseAutoAds: false };
 
 function thirdPartyAllowed(): boolean {
   return process.env.NODE_ENV === 'production' || (process.env.ALLOW_THIRD_PARTY_IN_DEVELOPMENT || '').trim().toLowerCase() === 'true';
@@ -31,7 +31,7 @@ function thirdPartyAllowed(): boolean {
 async function load(): Promise<PrivacyConfig> {
   if (!thirdPartyAllowed()) return OFF;
   const { prisma } = await import('./db');
-  const rows = await prisma.siteSetting.findMany({ where: { key: { in: ['ga4MeasurementId', 'adsensePublisherId'] } } });
+  const rows = await prisma.siteSetting.findMany({ where: { key: { in: ['ga4MeasurementId', 'adsensePublisherId', 'consentMode', 'adsenseAutoAds'] } } });
   const get = (key: string) => rows.find((r) => r.key === key)?.value?.trim() || null;
   // Re-check the stored format: these values end up in script URLs.
   const ga = get('ga4MeasurementId');
@@ -39,6 +39,9 @@ async function load(): Promise<PrivacyConfig> {
   return {
     ga4MeasurementId: ga && /^G-[A-Z0-9]{4,15}$/.test(ga) ? ga : null,
     adsenseClient: ads && /^ca-pub-\d{16}$/.test(ads) ? ads : null,
+    // PHASE R: consent interface and Auto ads (Admin → Settings).
+    consentMode: get('consentMode') === 'google-cmp' ? 'google-cmp' : 'builtin',
+    adsenseAutoAds: get('adsenseAutoAds') === 'enabled',
   };
 }
 

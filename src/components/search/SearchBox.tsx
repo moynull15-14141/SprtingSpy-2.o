@@ -15,7 +15,7 @@ import { SEARCH_MAX_QUERY } from '../../lib/searchText';
 import { trackSearchEvent } from '../../lib/searchEvents';
 import { Highlight } from './Highlight';
 
-type Suggestion = { kind: 'article' | 'sport'; label: string; url: string; meta: string };
+type Suggestion = { kind: 'article' | 'sport' | 'event'; label: string; url: string; meta: string };
 const DEBOUNCE_MS = 200;
 
 export function SearchBox({ defaultQuery, hidden, autoFocus = false }: {
@@ -44,9 +44,10 @@ export function SearchBox({ defaultQuery, hidden, autoFocus = false }: {
       try {
         const res = await fetch(`/api/search/suggestions?q=${encodeURIComponent(q)}`, { signal: controller.signal });
         if (!res.ok) throw new Error(String(res.status));
-        const data = (await res.json()) as { articles: { title: string; url: string; sportName: string; articleType: string }[]; sports: { name: string; url: string }[] };
+        const data = (await res.json()) as { articles: { title: string; url: string; sportName: string; articleType: string }[]; sports: { name: string; url: string }[]; events?: { name: string; url: string; sportName: string }[] };
         setItems([
           ...data.sports.map((s) => ({ kind: 'sport' as const, label: s.name, url: s.url, meta: 'Sport' })),
+          ...(data.events ?? []).map((e) => ({ kind: 'event' as const, label: e.name, url: e.url, meta: `${e.sportName} · Event` })),
           ...data.articles.map((a) => ({ kind: 'article' as const, label: a.title, url: a.url, meta: `${a.sportName} · ${a.articleType}` })),
         ]);
         setActive(-1);
