@@ -202,8 +202,8 @@ function Section({ section, firstHeading }: { section: ResolvedSection; firstHea
 export const HomePage: React.FC<{ sections: ResolvedSection[]; identity?: { name: string; description: string } }> = ({ sections, identity = { name: BRANDING.name, description: BRANDING.description } }) => {
   // Schema.org Organization + WebSite (Spec §15); name/description from Admin → Settings (PHASE H).
   const structuredData = [
-    { '@context': 'https://schema.org', '@type': 'Organization', name: identity.name, url: absoluteUrl('/'), description: identity.description },
-    { '@context': 'https://schema.org', '@type': 'WebSite', name: identity.name, url: absoluteUrl('/') },
+    { '@context': 'https://schema.org', '@type': 'Organization', '@id': `${absoluteUrl('/')}#organization`, name: identity.name, url: absoluteUrl('/'), description: identity.description },
+    { '@context': 'https://schema.org', '@type': 'WebSite', '@id': `${absoluteUrl('/')}#website`, name: identity.name, url: absoluteUrl('/'), publisher: { '@id': `${absoluteUrl('/')}#organization` } },
   ];
   const firstIntro = sections.find((s) => s.type === 'intro')?.id;
   const hasH1 = !!firstIntro;

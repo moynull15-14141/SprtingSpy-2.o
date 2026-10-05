@@ -22,7 +22,7 @@ export function articlePath(article: { sportSlug: string; eventSlug?: string | n
 
 /** The browser-facing origin used for canonical URLs and JSON-LD. */
 export function siteOrigin(): string {
-  return (process.env.ALLOWED_ORIGIN || 'https://sportingspy.com').replace(/\/+$/, '');
+  return (process.env.ALLOWED_ORIGIN || 'https://www.sportingspy.com').replace(/\/+$/, '');
 }
 
 export const absoluteUrl = (path: string) => `${siteOrigin()}${path}`;

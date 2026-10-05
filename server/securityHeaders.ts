@@ -30,6 +30,7 @@ import crypto from 'node:crypto';
 import { Request, Response, NextFunction } from 'express';
 import { trackingConfigSnapshot } from './trackingConfig';
 import type { PrivacyConfig } from '../src/lib/consent';
+import { profileImageOrigins } from './profileImage';
 
 // PHASE B: Next.js server rendering emits inline bootstrap scripts, so the
 // production policy allows scripts only from 'self' plus a fresh per-request
@@ -75,7 +76,7 @@ export const productionCsp = (nonce: string, providers: PrivacyConfig = tracking
     `script-src 'self' 'nonce-${nonce}'${extra('script')}`,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
-    `img-src 'self' data: https://images.unsplash.com${media}${extra('img')}`,
+    `img-src 'self' data: ${profileImageOrigins().join(' ')}${extra('img')}`,
     `media-src 'self'${media}`,
     `connect-src 'self'${extra('connect')}`,
     `frame-src 'self'${frames}`,

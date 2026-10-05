@@ -12,7 +12,8 @@
 import type { Metadata } from 'next';
 import type { SeoMetadata } from '../types';
 import { BRANDING } from '../config/branding';
-import { absoluteUrl } from './paths';
+import { absoluteUrl, siteOrigin } from './paths';
+import { canonicalElsewhere } from './indexability';
 import { getSiteIdentity } from './data';
 
 interface PageMetadataInput {
@@ -23,6 +24,8 @@ interface PageMetadataInput {
   seo?: SeoMetadata;
   /** Fallback social image (e.g. the featured image). */
   image?: string;
+  /** Factual description from the selected Media Library item, when available. */
+  imageAlt?: string;
   /** Force noindex (search results, filtered listings, private areas). */
   noindex?: boolean;
   /** Private areas: noindex AND nofollow. */
@@ -48,7 +51,7 @@ export function descriptionFrom(text: string | null | undefined, fallback: strin
 /** Replaces the built-in brand name in page-default text with the configured site name. */
 export const withSiteName = (text: string, siteName: string) => (siteName === BRANDING.name ? text : text.split(BRANDING.name).join(siteName));
 
-export async function pageMetadata({ title, description, path, seo, image, noindex, private: isPrivate, openGraph }: PageMetadataInput): Promise<Metadata> {
+export async function pageMetadata({ title, description, path, seo, image, imageAlt, noindex, private: isPrivate, openGraph }: PageMetadataInput): Promise<Metadata> {
   const identity = await getSiteIdentity();
   const pageTitle = seo?.metaTitle || withSiteName(title, identity.name);
   const pageDescription = seo?.metaDescription || withSiteName(description, identity.name);
@@ -57,7 +60,7 @@ export async function pageMetadata({ title, description, path, seo, image, noind
   const socialTitle = seo?.ogTitle || pageTitle;
   const socialDescription = seo?.ogDescription || pageDescription;
   const socialImage = seo?.ogImage || image || identity.defaultOgImage || undefined;
-  const images = socialImage ? [new URL(socialImage, absoluteUrl('/')).toString()] : undefined;
+  const images = socialImage ? [{ url: new URL(socialImage, absoluteUrl('/')).toString(), ...(imageAlt && !seo?.ogImage ? { alt: imageAlt } : {}) }] : undefined;
 
   return {
     title: { absolute: pageTitle },
@@ -65,7 +68,7 @@ export async function pageMetadata({ title, description, path, seo, image, noind
     alternates: { canonical },
     robots: isPrivate
       ? { index: false, follow: false }
-      : seo?.noIndex || noindex
+      : seo?.noIndex || noindex || canonicalElsewhere(seo, path, siteOrigin())
         ? { index: false, follow: true }
         : { index: true, follow: true },
     openGraph: {

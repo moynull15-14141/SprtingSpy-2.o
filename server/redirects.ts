@@ -163,6 +163,21 @@ export function redirectRouter(getLookup: () => AuthLookup) {
       body.isActive !== undefined && typeof body.isActive !== 'boolean' ? { valid: false, error: 'isActive must be true or false.' } : { valid: true }
     );
 
+  /**
+   * PHASE N (v2.2 §19, §25.2 "Back up redirect configuration"): every rule,
+   * active and inactive, as CSV — downloaded before a migration apply so the
+   * exact pre-migration redirect set is on record.
+   */
+  router.get('/export', requireRole(getLookup, ['Admin']), wrap(async (req, res) => {
+    const rules = await prisma.redirectRule.findMany({ orderBy: { sourceUrl: 'asc' } });
+    const cell = (v: unknown) => { const s = v == null ? '' : v instanceof Date ? v.toISOString() : String(v); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    const lines = [['Source URL', 'Target URL', 'Status', 'Active', 'Origin', 'Notes', 'Created', 'Updated', 'Id'].join(','), ...rules.map((r) => [r.sourceUrl, r.targetUrl, r.statusCode, r.isActive ? 'yes' : 'no', r.origin, r.notes, r.createdAt, r.updatedAt, r.id].map(cell).join(','))];
+    await audit(req, 'Exported Redirects', 'export', `Admin ${req.authContext!.userName} exported ${rules.length} redirect rule(s).`);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="sportingspy-redirects-${new Date().toISOString().slice(0, 10)}.csv"`);
+    return res.send(lines.join('\r\n'));
+  }));
+
   router.post('/', requireRole(getLookup, ['Admin']), wrap(async (req, res) => {
     const body = req.body as Record<string, unknown>;
     const error = validate(body, false);

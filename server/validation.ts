@@ -7,7 +7,7 @@
  * No new validation library was introduced — the project had none, and the
  * validation needs here (presence, length caps, slug shape, safe URL
  * schemes) don't justify adding one yet. Revisit if the schema grows
- * significantly more complex (see PROJECT_BRAIN.md Phase 2).
+ * significantly more complex.
  */
 
 export interface ValidationResult {

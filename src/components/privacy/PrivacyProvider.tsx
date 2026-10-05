@@ -80,10 +80,25 @@ export function PrivacyProvider({ config, initialConsent, children }: { config: 
   }, [analyticsOn, config.ga4MeasurementId, consent]);
 
   // Sponsored/house links report ad_click (no per-slot client code needed).
+  // PHASE Q: article/event/edition card links report select_content, with the
+  // placement derived from the page type and the enclosing labelled section.
+  // Search results (search_result_click) and ads (ad_click) are not double-counted.
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
-      const link = (e.target as HTMLElement | null)?.closest?.<HTMLAnchorElement>('a[data-ad-placement]');
-      if (link) analytics.track('ad_click', { ad_placement: link.dataset.adPlacement, ad_provider: link.dataset.adProvider, sponsor: link.dataset.adSponsor });
+      const target = e.target as HTMLElement | null;
+      const link = target?.closest?.<HTMLAnchorElement>('a[data-ad-placement]');
+      if (link) { analytics.track('ad_click', { ad_placement: link.dataset.adPlacement, ad_provider: link.dataset.adProvider, sponsor: link.dataset.adSponsor }); return; }
+      const card = target?.closest?.<HTMLAnchorElement>('a[data-content-type]');
+      if (!card || card.hasAttribute('data-result-position')) return;
+      const pageType = document.querySelector<HTMLElement>('[data-ss-page-type]')?.dataset.ssPageType || 'static';
+      const section = card.closest('[aria-labelledby]')?.getAttribute('aria-labelledby')?.replace(/-heading$/, '') || 'page';
+      let path = '';
+      try { path = new URL(card.href, location.origin).pathname; } catch { /* malformed link: no id */ }
+      analytics.track('select_content', {
+        content_type: card.dataset.contentType,
+        content_id: card.dataset.contentId || path,
+        placement: `${pageType}:${section}`.toLowerCase().replace(/[^a-z0-9:_-]/g, '').slice(0, 60),
+      });
     };
     document.addEventListener('click', onClick);
     return () => document.removeEventListener('click', onClick);

@@ -38,7 +38,7 @@ import { RumPageType } from '../components/analytics/RumPageType';
 type ArticlePageData = NonNullable<Awaited<ReturnType<typeof getArticlePage>>>;
 
 
-export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] | null; preview?: boolean }> = ({ data, comments, preview = false }) => {
+export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] | null; preview?: boolean; siteName?: string }> = ({ data, comments, preview = false, siteName = 'SportingSpy' }) => {
   const { article, sport, event, edition, author, related: relatedArticles, latest: latestArticles, body, media, featuredImage, faqs, faqSchemaEnabled, schemaType } = data;
   // PHASE R: no invented caption/credit — only what the editor or the Media Library record says.
   const imageCaption = body.attrs?.featuredCaption ?? (featuredImage?.caption || '');
@@ -92,10 +92,11 @@ export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] 
           url: absoluteUrl(authorPath(author.slug)),
         }
       : undefined,
-    publisher: {
-      '@type': 'Organization',
-      name: 'SportingSpy',
-      url: absoluteUrl('/'),
+      publisher: {
+        '@type': 'Organization',
+        '@id': `${absoluteUrl('/')}#organization`,
+        name: siteName,
+        url: absoluteUrl('/'),
     },
     image: imageUrl ? [imageUrl] : undefined,
     articleSection: sport.name,
@@ -115,6 +116,9 @@ export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] 
         </>
       )}
 
+      {/* Keep article details within the wide editorial page area. This shared
+          template covers every article type, including Event editions. */}
+      <div className="mx-auto w-full max-w-3xl lg:max-w-[82.5rem] space-y-8">
       <Breadcrumbs items={breadcrumbItems} />
 
       <AdSlot id="ARTICLE_TOP" />
@@ -179,7 +183,7 @@ export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] 
       {/* FEATURED EDITORIAL IMAGE */}
       {featuredImage ? (
         <figure className="overflow-hidden rounded-2xl border border-stone-200 dark:border-stone-800 bg-stone-100 dark:bg-stone-900">
-          <ResponsiveImage asset={featuredImage} alt={featuredImage.alt || article.title} sizes="(min-width: 896px) 896px, 100vw" priority className="w-full h-auto aspect-video object-cover" />
+          <ResponsiveImage asset={featuredImage} alt={featuredImage.alt || article.title} sizes="(min-width: 1400px) 1320px, (min-width: 1024px) calc(100vw - 4rem), (min-width: 800px) 768px, calc(100vw - 2rem)" priority className="w-full h-auto aspect-video object-cover" />
           {(imageCaption || imageCredit) && <figcaption className="p-2.5 text-[11px] text-stone-500 dark:text-stone-400 bg-stone-50 dark:bg-stone-950/80 border-t border-stone-200 dark:border-stone-800 italic flex flex-wrap justify-between gap-2 break-words">
             <span>{imageCaption}</span>
             <span className="font-mono text-[10px]">{imageCredit}</span>
@@ -202,9 +206,9 @@ export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] 
       {/* STRUCTURED DATA TABLES */}
       {article.tables && article.tables.length > 0 && (
         <section aria-labelledby="tables-heading" className="pt-4">
-          <h3 id="tables-heading" className="sr-only">
+          <h2 id="tables-heading" className="sr-only">
             Statistical & Schedule Data
-          </h3>
+          </h2>
           {article.tables.map((table, tIdx) => (
             <StructuredTable key={tIdx} table={table} />
           ))}
@@ -214,9 +218,9 @@ export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] 
       {/* EXTERNAL REFERENCES & CITATIONS */}
       {article.references && article.references.length > 0 && (
         <div className="p-4 rounded-xl bg-stone-50 dark:bg-stone-900/60 border border-stone-200 dark:border-stone-800 text-xs">
-          <h4 className="font-semibold text-stone-900 dark:text-stone-100 uppercase tracking-wider mb-2">
+          <h2 className="font-semibold text-stone-900 dark:text-stone-100 uppercase tracking-wider mb-2">
             Sources &amp; references
-          </h4>
+          </h2>
           <ul className="space-y-1">
             {article.references.map((ref, idx) => (
               <li key={idx} className="flex items-center gap-2">
@@ -243,6 +247,7 @@ export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] 
 
       {/* COMMENTS (launch-disabled unless the server enables them) */}
       {comments && <CommentsSection articleId={article.id} initialComments={comments} />}
+      </div>
 
       {/* RELATED ARTICLES */}
       {relatedArticles.length > 0 && (
@@ -251,9 +256,9 @@ export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] 
             <span className="text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-500">
               Related articles
             </span>
-            <h3 id="related-heading" className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">
+            <h2 id="related-heading" className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">
               Related {sport.name} articles
-            </h3>
+            </h2>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
             {relatedArticles.map((rel) => (
@@ -267,7 +272,7 @@ export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] 
         <section aria-labelledby="latest-heading" className="pt-8 border-t border-stone-200 dark:border-stone-800">
           <div className="mb-4">
             <span className="text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-500">Latest articles</span>
-            <h3 id="latest-heading" className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">Latest {sport.name} articles</h3>
+            <h2 id="latest-heading" className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">Latest {sport.name} articles</h2>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {latestArticles.map((a) => <ArticleCard key={a.id} article={a} variant="standard" />)}
@@ -280,9 +285,9 @@ export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] 
         <div className="p-6 rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-[#121417] flex flex-col sm:flex-row items-center sm:items-start gap-4">
           <Avatar src={author.avatar} name={author.name} className="w-16 h-16 rounded-full object-cover shrink-0" />
           <div className="flex-1 text-center sm:text-left">
-            <h4 className="font-serif text-lg font-bold text-stone-900 dark:text-stone-100">
+            <h2 className="font-serif text-lg font-bold text-stone-900 dark:text-stone-100">
               Written by {author.name}
-            </h4>
+            </h2>
             <p className="text-xs text-amber-700 dark:text-amber-400 font-semibold mb-1">
               {author.roleTitle}
             </p>

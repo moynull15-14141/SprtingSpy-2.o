@@ -80,8 +80,7 @@ and submit; the reviewer or an Admin can request changes with a reason or
 approve. Publication remains restricted to Admin/Editor. Admin-created articles
 can publish directly. **Needs Review**, **Changes Requested**, **Approved** and
 **My Drafts** use the existing article repository. Freshness review is separate
-from approval. See [PHASE_I_REQUIREMENTS.md](PHASE_I_REQUIREMENTS.md) and
-[PHASE_I_IMPLEMENTATION.md](PHASE_I_IMPLEMENTATION.md).
+from approval.
 
 After `npm run build`, run `npm run test:phase-i` with installed Chrome or
 `PLAYWRIGHT_EXECUTABLE_PATH`. It requires a safe local database, runs direct API
@@ -112,8 +111,7 @@ homepage, announcements and blocks, with Admin approval for navigation/footer.
 
 Public pages use the published configuration and safe defaults. Draft preview
 requires an active staff session. Ads, consent and SEO continue to use their
-existing systems. See [the audit](PHASE_F1_AUDIT.md) and
-[implementation/verification report](PHASE_F1_IMPLEMENTATION.md).
+existing systems.
 
 Open the Homepage **Intro banner** to choose/upload a background image and
 compare ten banner presets in a live desktop/mobile preview. Adjust image crop,

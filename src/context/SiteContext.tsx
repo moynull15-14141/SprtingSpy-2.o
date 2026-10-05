@@ -37,6 +37,9 @@ export type ApiCall = <T>(endpoint: string, options?: { method?: string; body?: 
 export interface SiteContextType {
   theme: 'light' | 'dark';
   toggleTheme: () => void;
+  /** PHASE R UI/UX: the visitor's choice; "system" follows the operating system live. */
+  themePreference: 'system' | 'light' | 'dark';
+  setThemePreference: (preference: 'system' | 'light' | 'dark') => void;
   accountLanguage: 'en' | 'bn';
   setAccountLanguage: (language: 'en' | 'bn') => void;
   currentPath: string;
@@ -71,10 +74,15 @@ export const SiteProvider: React.FC<{ features: FeatureFlags; children: React.Re
   // are applied after mount to avoid hydration mismatches. The theme class
   // itself is already on <html> before paint (inline script in app/layout).
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [themePreference, setThemePreferenceState] = useState<'system' | 'light' | 'dark'>('system');
   const [storedLanguage, setAccountLanguage] = useState<'en' | 'bn'>('en');
   const prefsLoaded = useRef(false);
   useEffect(() => {
     setTheme(document.documentElement.classList.contains('dark') ? 'dark' : 'light');
+    try {
+      const saved = localStorage.getItem('sportingspy_theme');
+      if (saved === 'light' || saved === 'dark') setThemePreferenceState(saved);
+    } catch { /* storage unavailable: system */ }
     try {
       if (localStorage.getItem('sportingspy_account_language') === 'bn') setAccountLanguage('bn');
     } catch { /* storage unavailable: keep defaults */ }
@@ -98,7 +106,18 @@ export const SiteProvider: React.FC<{ features: FeatureFlags; children: React.Re
   useEffect(() => {
     if (prefsLoaded.current) try { localStorage.setItem('sportingspy_account_language', storedLanguage); } catch { /* ignore */ }
   }, [storedLanguage]);
-  const toggleTheme = () => applyTheme(document.documentElement.classList.contains('dark') ? 'light' : 'dark', true);
+  const toggleTheme = () => {
+    const next = document.documentElement.classList.contains('dark') ? 'light' : 'dark';
+    applyTheme(next, true);
+    setThemePreferenceState(next);
+  };
+  const setThemePreference = (preference: 'system' | 'light' | 'dark') => {
+    setThemePreferenceState(preference);
+    if (preference !== 'system') { applyTheme(preference, true); return; }
+    // Back to the operating-system setting: forget the explicit choice.
+    try { localStorage.removeItem('sportingspy_theme'); } catch { /* ignore */ }
+    applyTheme(window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light', false);
+  };
 
   const [notification, setNotification] = useState<AppNotification | null>(null);
   const showNotification = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
@@ -231,6 +250,8 @@ export const SiteProvider: React.FC<{ features: FeatureFlags; children: React.Re
       value={{
         theme,
         toggleTheme,
+        themePreference,
+        setThemePreference,
         // The account-area language switch belongs to reader accounts
         // (launch-disabled); English is used while that flag is off.
         accountLanguage: features.readerAccounts ? storedLanguage : 'en',

@@ -13,7 +13,7 @@
  *
  * Local development databases only (server/dbSafety.ts). For production, run
  * the same steps against a restored copy on a disposable server (see
- * PHASE_G_IMPLEMENTATION.md, Recovery runbook). The dump file is kept.
+ * DEPLOYMENT.md, "Backup, restore and disaster recovery"). The dump file is kept.
  *
  *   npm run db:backup-drill
  */

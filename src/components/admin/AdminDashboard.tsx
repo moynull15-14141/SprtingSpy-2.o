@@ -13,13 +13,18 @@ interface AdminDashboardProps {
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ setActiveTab }) => {
-  const { sports, events, editions, articles, authors, users, comments, auditLogs, adSlots, redirectRules, features } = useApp();
+  const { sports, events, editions, articles, authors, users, comments, auditLogs, adSlots, redirectRules, features, cmsDataLoaded } = useApp();
 
   const publishedCount = articles.filter((a) => a.status === 'published').length;
   const draftCount = articles.filter((a) => a.status === 'draft').length;
   const pendingArticles = articles.filter((article) => article.reviewStatus === 'in_review').length;
   const pendingComments = comments.filter((c) => c.status === 'pending');
   const activeAdsCount = adSlots.filter((s) => s.enabled && !UNPLACED_AD_SLOTS.includes(s.id)).length;
+
+  // PHASE R UI/UX: never show zero counts while the dataset is still loading.
+  if (!cmsDataLoaded) {
+    return <p role="status" aria-live="polite" className="py-10 text-center text-sm text-stone-500 dark:text-stone-400">Loading the editorial overview…</p>;
+  }
 
   return (
     <div className="space-y-8">

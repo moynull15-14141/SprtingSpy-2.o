@@ -10,7 +10,13 @@ import { chromium, type Browser, type Page } from 'playwright-core';
 import { prisma } from '../db';
 import { hashPassword } from '../password';
 import { checkDatabaseUrlIsLocalDev } from '../dbSafety';
-import { SETTING_KEYS } from '../settingsRegistry';
+import { SETTING_KEYS, SETTINGS } from '../settingsRegistry';
+
+// PHASE R UI/UX: expectations come from the settings registry (every defined
+// setting must render), instead of counts frozen before Phase Q/R added settings.
+const CHOICE_KEYS = SETTING_KEYS.filter((k) => 'options' in SETTINGS[k]);
+const TEXT_KEYS = SETTING_KEYS.filter((k) => !('options' in SETTINGS[k]));
+const GROUP_COUNT = new Set(SETTING_KEYS.map((k) => SETTINGS[k].group)).size;
 
 assert(checkDatabaseUrlIsLocalDev(process.env.DATABASE_URL).safe, 'Requires a local non-production database.');
 assert(fs.existsSync('.next/BUILD_ID'), 'Run npm run build first.');
@@ -73,11 +79,13 @@ try {
   await page.getByText('Loading settings…', { exact: true }).waitFor(); releaseLoad();
   await page.locator('input[name="siteName"]').waitFor(); await page.unroute('**/api/settings');
   const form = page.getByRole('form', { name: 'Site settings' });
-  assert.equal(await form.locator('input,textarea').count(), 9);
-  assert.equal(await form.locator('section').count(), 5);
+  assert.equal(await form.locator('input,textarea').count(), TEXT_KEYS.length, 'one text field per free-text setting');
+  assert.equal(await form.locator('select').count(), CHOICE_KEYS.length, 'one select per choice setting');
+  assert.equal(await form.locator('section').count(), GROUP_COUNT, 'one section per settings group');
+  for (const key of SETTING_KEYS) assert.equal(await form.locator(`[name="${key}"]`).count(), 1, `${key} rendered once`);
   assert(await form.getByRole('button', { name: 'Save changes', exact: true }).isDisabled());
   assert.equal(await form.getByRole('region', { name: 'Unsaved settings changes' }).count(), 0);
-  pass('initial loading placeholder, all nine fields in five categories, and visible disabled save action without edits');
+  pass(`initial loading placeholder, all ${SETTING_KEYS.length} settings (${TEXT_KEYS.length} text, ${CHOICE_KEYS.length} choices) in ${GROUP_COUNT} categories, and visible disabled save action without edits`);
   const originalResponse = await page.evaluate(async () => { const res = await fetch('/api/settings', { credentials: 'include' }); return { status: res.status, data: await res.json() }; });
   assert.equal(originalResponse.status, 200);
   const initialValues = originalResponse.data.values;
@@ -98,7 +106,7 @@ try {
   await page.getByRole('heading', { name: 'Editorial Overview & Health', exact: true }).waitFor();
   await openSettings(page); assert.equal(await page.locator('[name="siteName"]').inputValue(), initialValues.siteName ?? '');
   pass('native unsaved dialog traps focus; Escape/Stay preserve edits; Leave navigates without saving');
-  const labelAudit = await form.locator('input,textarea').evaluateAll((fields) => fields.every((field) => (field as HTMLInputElement).labels?.length && field.getAttribute('aria-describedby')));
+  const labelAudit = await form.locator('input,textarea,select').evaluateAll((fields) => fields.every((field) => (field as HTMLInputElement).labels?.length && field.getAttribute('aria-describedby')));
   assert(labelAudit);
   for (const scheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: scheme });
@@ -114,7 +122,8 @@ try {
       }
       const help = form.getByRole('button', { name: 'Help: IndexNow', exact: true });
       await help.scrollIntoViewIfNeeded(); await help.focus();
-      const tooltip = page.getByRole('tooltip'); await tooltip.waitFor();
+      const tooltip = page.getByRole('tooltip');
+      await tooltip.waitFor({ timeout: 5000 }).catch(async () => { throw new Error(`${scheme} ${width}: IndexNow help tooltip did not open on focus (focused: ${await page.evaluate('document.activeElement && document.activeElement.getAttribute("aria-label")')})`); });
       const tip = await tooltip.boundingBox(); assert(tip && tip.x >= 0 && tip.x + tip.width <= width && tip.y >= 0 && tip.y + tip.height <= (width < 800 ? 844 : 1000), `${scheme} ${width}: tooltip overflow`);
       await page.keyboard.press('Escape'); assert.equal(await tooltip.count(), 0);
       const audit = await page.evaluate(accessibilityAudit); assert.deepEqual(audit, [], `${scheme} ${width}: accessibility`);
@@ -165,7 +174,7 @@ try {
   await form.getByRole('status').filter({ hasText: 'Settings saved successfully.' }).waitFor(); await page.unroute('**/api/settings');
   assert.equal(puts, 1); assert.equal(await form.getByRole('region', { name: 'Unsaved settings changes' }).count(), 0);
   for (const [key, value] of Object.entries(fixtureValues)) assert.equal((await prisma.siteSetting.findUniqueOrThrow({ where: { key } })).value, value);
-  pass('all nine values save through unchanged partial PUT; Saving state blocks duplicates; persistent success and saved statuses');
+  pass('all values save through unchanged partial PUT; Saving state blocks duplicates; persistent success and saved statuses');
   await page.reload(); await openSettings(page);
   for (const [key, value] of Object.entries(fixtureValues)) assert.equal(await form.locator(`[name="${key}"]`).inputValue(), value);
   assert.equal(await form.getByText('Configured', { exact: true }).count(), 9);

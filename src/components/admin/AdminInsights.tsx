@@ -19,13 +19,22 @@ interface Row { key: string; clicks: number; impressions: number; ctr: number; p
 interface EngineData { hasData: boolean; totals: { clicks: number; impressions: number; ctr: number | null; position: number | null }; trend: { day: string; clicks: number; impressions: number }[]; queries: Row[]; pages: Row[]; countries: Row[]; devices: Row[]; appearance: Row[] }
 interface Overview {
   period: { from: string; to: string; days: number };
-  measurement: { realUserMonitoring: boolean; thresholds: Record<string, { good: number; poor: number }> };
+  measurement: { realUserMonitoring: boolean; retention: string; thresholds: Record<string, { good: number; poor: number }> };
   pageViews: { total: number; byPageType: { pageType: string; views: number }[]; topPages: { path: string; pageType: string; views: number }[]; trend: { day: string; views: number }[] };
   webVitals: { pageType: string; metric: string; device: string; samples: number; p75: number | null; rating: string | null; goodShare: number | null }[];
   regressions: { pageType: string; metric: string; before: number; after: number; samples: { before: number; after: number }; reason: string }[];
   search: { totals: { searches: number; zeroResults: number; distinctQueries: number }; popular: { query: string; searches: number; zeroResults: number }[]; noResults: { query: string; searches: number }[]; trend: { day: string; searches: number; zeroResults: number }[] };
   searchEngines: { providers: { google: { configured: boolean; property: string | null; credentials: boolean; serviceAccount: string | null }; bing: { configured: boolean; siteUrl: string | null; credentials: boolean } }; google: EngineData; bing: EngineData; snapshots: { source: string; kind: string; fetchedAt: string; data: unknown }[] };
   publishing: { total: number; byType: { articleType: string; count: number }[] };
+  // PHASE Q: content performance (first-party page views resolved to content) and the previous period.
+  content: {
+    topArticles: { path: string; views: number; id: string | null; title: string | null; articleType: string | null; sport: string | null; sportName: string | null; status: string | null }[];
+    topEvents: { id: string | null; name: string | null; sport: string; sportName: string; path: string; eventViews: number; editionViews: number; articleViews: number; total: number }[];
+    bySport: { sport: string; sportName: string; views: number }[];
+    byArticleType: { articleType: string; views: number }[];
+    unmatchedArticleViews: number;
+  };
+  previous: { from: string; to: string; views: number; articleViews: number; eventViews: number; searches: number };
   cache: { hits: number; misses: number; entries: number; ttlSeconds: number };
 }
 
@@ -62,6 +71,14 @@ function Table({ rows, columns, empty }: { rows: Record<string, unknown>[]; colu
       </table>
     </div>
   );
+}
+
+/** PHASE Q: change against the previous period of the same length ("new" when it had none). */
+function Change({ now, before }: { now: number; before: number }) {
+  if (!before) return <span className="text-[11px] text-stone-500">{now ? 'new in this period' : 'no data in either period'}</span>;
+  const delta = (now - before) / before;
+  const cls = delta > 0 ? 'text-emerald-700 dark:text-emerald-400' : delta < 0 ? 'text-rose-700 dark:text-rose-400' : 'text-stone-500';
+  return <span className={`text-[11px] ${cls}`}>{delta > 0 ? '+' : ''}{(delta * 100).toFixed(1)}% vs previous period ({num(before)})</span>;
 }
 
 const str = (v: unknown) => String(v ?? '');
@@ -118,6 +135,39 @@ export const AdminInsights: React.FC = () => {
       {error && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200">{error}</p>}
       {!data ? <p className="text-sm text-stone-500" aria-live="polite">{period === 'custom' && (!from || !to) ? 'Choose both dates.' : 'Loading…'}</p> : (
         <>
+          {/* PHASE Q: OVERVIEW */}
+          <section className={card} aria-labelledby="ins-overview">
+            <h3 id="ins-overview" className={h3}>Overview</h3>
+            <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400">First-party page views (aggregate counts per page and UTC day; no visitors or sessions are tracked, so these are views, not unique users). Previous period: {data.previous.from} – {data.previous.to}.</p>
+            {(() => {
+              const byType = Object.fromEntries(data.pageViews.byPageType.map((r) => [r.pageType, r.views]));
+              const kpis: [string, number, number][] = [
+                ['Page views', data.pageViews.total, data.previous.views],
+                ['Article views', byType.article ?? 0, data.previous.articleViews],
+                ['Event & edition views', (byType.event ?? 0) + (byType.edition ?? 0), data.previous.eventViews],
+                ['Site searches', data.search.totals.searches, data.previous.searches],
+              ];
+              return (
+                <dl className="mt-3 grid grid-cols-2 gap-3 text-xs lg:grid-cols-4" data-insights-kpis>
+                  {kpis.map(([label, now, before]) => <div key={label}><dt className="text-stone-500">{label}</dt><dd className="text-xl font-bold tabular-nums">{num(now)}</dd><dd><Change now={now} before={before} /></dd></div>)}
+                </dl>
+              );
+            })()}
+          </section>
+
+          {/* PHASE Q: CONTENT PERFORMANCE */}
+          <section className={card} aria-labelledby="ins-content">
+            <h3 id="ins-content" className={h3}>Content performance</h3>
+            <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400">Views of each article, event and edition page in this period. Card and search-result clicks are measured in Google Analytics (select_content, search_result_click) when it is configured and visitors consent.</p>
+            <div className="mt-3 grid gap-4 lg:grid-cols-2">
+              <div className="lg:col-span-2"><h4 className="mb-1 text-xs font-semibold">Top articles</h4><Table rows={data.content.topArticles.map((a) => ({ ...a, label: a.title ?? `${a.path} (no longer resolves)` })) as unknown as Record<string, unknown>[]} columns={[['label', 'Article', str], ['articleType', 'Type', str], ['sportName', 'Sport', str], ['status', 'Status', str], ['views', 'Views', n0]]} empty="No article views counted in this period." /></div>
+              <div className="lg:col-span-2"><h4 className="mb-1 text-xs font-semibold">Top events</h4><Table rows={data.content.topEvents.map((e) => ({ ...e, label: e.name ?? `${e.path} (no longer resolves)` })) as unknown as Record<string, unknown>[]} columns={[['label', 'Event', str], ['sportName', 'Sport', str], ['eventViews', 'Event page', n0], ['editionViews', 'Edition pages', n0], ['articleViews', 'Its articles', n0], ['total', 'Total', n0]]} empty="No event or edition views counted in this period." /></div>
+              <div><h4 className="mb-1 text-xs font-semibold">Views by sport</h4><Table rows={data.content.bySport as unknown as Record<string, unknown>[]} columns={[['sportName', 'Sport', str], ['views', 'Views (hub, events, editions, articles)', n0]]} empty="No sport views counted in this period." /></div>
+              <div><h4 className="mb-1 text-xs font-semibold">Article views by Article Type</h4><Table rows={data.content.byArticleType as unknown as Record<string, unknown>[]} columns={[['articleType', 'Article Type', str], ['views', 'Views', n0]]} empty="No article views counted in this period." /></div>
+            </div>
+            {data.content.unmatchedArticleViews > 0 && <p className="mt-2 text-[11px] text-stone-500 dark:text-stone-400">{num(data.content.unmatchedArticleViews)} article view(s) were for URLs that no longer resolve (deleted, unpublished or moved articles); they are not attributed to other content.</p>}
+          </section>
+
           {/* SEARCH ENGINES */}
           <section className={card} aria-labelledby="ins-engines">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -168,6 +218,7 @@ export const AdminInsights: React.FC = () => {
           <section className={card} aria-labelledby="ins-views">
             <h3 id="ins-views" className={h3}>Page views (first-party, aggregate)</h3>
             {!data.measurement.realUserMonitoring && <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">Real-user monitoring is switched off in Settings; no new views or vitals are being counted.</p>}
+            <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400">Aggregates are kept for {data.measurement.retention === 'unlimited' ? 'an unlimited time' : data.measurement.retention.replace('-', ' ')} (Settings → Privacy &amp; consent → Analytics retention).</p>
             <p className="mt-1 text-2xl font-bold tabular-nums">{num(data.pageViews.total)}</p>
             <div className="mt-3 grid gap-4 lg:grid-cols-2">
               <div><h4 className="mb-1 text-xs font-semibold">By page type</h4><Table rows={data.pageViews.byPageType as unknown as Record<string, unknown>[]} columns={[['pageType', 'Page type', str], ['views', 'Views', n0]]} empty="No page views counted in this period." /></div>

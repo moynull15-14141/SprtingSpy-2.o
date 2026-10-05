@@ -19,7 +19,8 @@ export async function verifyProductionBoot() {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'sportingspy-boot-'));
   const loader = import.meta.resolve('tsx');
   const entry = path.resolve('server/start-production.ts');
-  const baseline = { ...process.env, NODE_ENV: 'development', AUTH_MODE: 'development', DEV_LOGIN_BYPASS: 'false', HOST: '127.0.0.1', TRUST_PROXY: 'false', ALLOWED_ORIGIN: 'https://sportingspy.test' };
+  // The test edge is not the canonical host, so it runs as staging (Phase N.1 canonical-origin guard).
+  const baseline = { ...process.env, NODE_ENV: 'development', APP_ENV: 'staging', AUTH_MODE: 'development', DEV_LOGIN_BYPASS: 'false', HOST: '127.0.0.1', TRUST_PROXY: 'false', ALLOWED_ORIGIN: 'https://sportingspy.test' };
   try {
     for (const test of [
       { env: { DATABASE_URL: '' }, message: 'DATABASE_URL' },
@@ -27,6 +28,7 @@ export async function verifyProductionBoot() {
       { env: { ALLOWED_ORIGIN: '*' }, message: 'ALLOWED_ORIGIN' },
       { env: { ALLOWED_ORIGIN: 'http://public.example' }, message: 'HTTPS' },
       { env: { ALLOWED_ORIGIN: 'https://example.com/path' }, message: 'ALLOWED_ORIGIN' },
+      { env: { APP_ENV: 'production' }, message: 'ALLOWED_ORIGIN=https://www.sportingspy.com' },
       { env: { DEV_LOGIN_BYPASS: 'true' }, message: 'DEV_LOGIN_BYPASS' },
       { env: { TRUST_PROXY: 'true' }, message: 'TRUST_PROXY' },
       { env: { TRUST_PROXY: '1' }, message: 'TRUST_PROXY' },

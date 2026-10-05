@@ -35,7 +35,7 @@ export const AuthorPage: React.FC<{ data: AuthorPageData }> = ({ data }) => {
     <div className="space-y-10">
       <JsonLd data={structuredData} />
 
-      <Breadcrumbs items={[{ label: 'Editorial Staff' }, { label: author.name }]} />
+      <Breadcrumbs items={[{ label: author.name }]} />
 
       {/* Author Profile Header */}
       <div className="rounded-2xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-[#121417] p-8 lg:p-10 shadow-sm">

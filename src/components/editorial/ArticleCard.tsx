@@ -47,7 +47,7 @@ export const ArticleCard: React.FC<ArticleCardProps> = ({ article, variant = 'st
           <span className="text-stone-500 dark:text-stone-400 font-normal">{article.articleType}</span>
         </div>
         <h4 className="text-sm md:text-base font-semibold text-stone-900 dark:text-stone-100 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors leading-snug">
-          <Link href={article.url} className={stretched}>{article.title}</Link>
+          <Link href={article.url} className={stretched} data-content-type="article" data-content-id={article.id}>{article.title}</Link>
         </h4>
         <div className="mt-1.5">
           <MetadataRow items={[article.authorName, formattedDate, `${article.readingTimeMinutes} min read`]} size="xs" />
@@ -94,7 +94,7 @@ export const ArticleCard: React.FC<ArticleCardProps> = ({ article, variant = 'st
               <span className="text-stone-500 dark:text-stone-400 font-normal normal-case">{article.articleType}</span>
             </div>
             <h2 className="font-serif text-2xl lg:text-3xl font-bold text-stone-900 dark:text-stone-100 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors leading-tight">
-              <Link href={article.url} className={stretched}>{article.title}</Link>
+              <Link href={article.url} className={stretched} data-content-type="article" data-content-id={article.id}>{article.title}</Link>
             </h2>
             <p className="mt-3 text-sm text-stone-600 dark:text-stone-400 line-clamp-3 leading-relaxed">{article.excerpt}</p>
           </div>
@@ -150,7 +150,7 @@ export const ArticleCard: React.FC<ArticleCardProps> = ({ article, variant = 'st
           </div>
 
           <h3 className="font-serif text-lg font-semibold text-stone-900 dark:text-stone-100 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors leading-snug line-clamp-2">
-            <Link href={article.url} className={stretched}>{article.title}</Link>
+            <Link href={article.url} className={stretched} data-content-type="article" data-content-id={article.id}>{article.title}</Link>
           </h3>
 
           <p className="mt-2 text-xs text-stone-600 dark:text-stone-400 line-clamp-2 leading-relaxed">{article.excerpt}</p>

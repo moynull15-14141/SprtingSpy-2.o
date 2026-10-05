@@ -28,7 +28,8 @@ const ids = { admin: `${fixture}-admin`, editor: `${fixture}-editor`, author: `$
 const userIds = Object.values(ids);
 const bylines = { editor: `${fixture}-byline-editor`, author: `${fixture}-byline-author`, author2: `${fixture}-byline-author2` };
 const mediaRoot = path.resolve(process.env.MEDIA_LOCAL_DIR || 'storage/media');
-const protectedFiles = ['data/db.json', 'PROJECT_BRAIN.md'];
+// Files that must stay byte-identical, where still present (both were moved to the project archive).
+const protectedFiles = ['data/db.json', 'PROJECT_BRAIN.md'].filter((file) => fs.existsSync(file));
 const digest = (value: string | Buffer) => crypto.createHash('sha256').update(value).digest('hex');
 const filesBefore = protectedFiles.map((file) => digest(fs.readFileSync(file)));
 const listMediaFiles = (): string[] => {
@@ -273,8 +274,10 @@ try {
   assert.equal(rich.featuredMediaId, jpg.id); assert.equal(rich.featuredImage, `/media/${jpg.storageKey}`);
   const imageNode = rich.body.content.find((n: any) => n.type === 'image');
   assert.equal(imageNode.attrs.src, `/media/${jpg.storageKey}`, 'image src comes from the library, not the client');
+  // PHASE P: the CMS list omits bodies; the editor reloads one article in full.
   const cms = (await status(editor, '/api/cms/data', 200)).data;
-  const reloaded = cms.articles.find((a: any) => a.id === rich.id);
+  assert(cms.articles.some((a: any) => a.id === rich.id && a.body === undefined && a.content === undefined), 'CMS list carries no article bodies');
+  const reloaded = (await status(editor, `/api/articles/${rich.id}`, 200)).data;
   assert.deepEqual(reloaded.body, rich.body, 'rich content persists');
   assert.deepEqual(rich.body.attrs, doc.attrs, 'article appearance survives API and reload');
   assert.equal(await prisma.articleMedia.count({ where: { articleId: rich.id, mediaId: jpg.id } }), 1);

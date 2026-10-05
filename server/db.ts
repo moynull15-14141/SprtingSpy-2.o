@@ -17,11 +17,15 @@ import 'dotenv/config';
 import { PrismaClient } from './generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 
-if (!process.env.DATABASE_URL) {
+// PHASE R (deployment): `next build` imports this module while collecting page
+// data but never queries (every page is dynamic; the pool connects lazily), so
+// a clean build, e.g. on Render, needs no database. The running server still
+// refuses to start without DATABASE_URL.
+if (!process.env.DATABASE_URL && process.env.NEXT_PHASE !== 'phase-production-build') {
   // eslint-disable-next-line no-console
   console.error(
     '[FATAL] DATABASE_URL is not set. Copy .env.example to .env and point it at your local PostgreSQL ' +
-      'database (see PROJECT_BRAIN.md "Phase 2" for exact setup commands). Refusing to start without it.'
+      'database (see DEPLOYMENT.md and DATABASE_OPERATIONS.md for setup). Refusing to start without it.'
   );
   process.exit(1);
 }
@@ -32,6 +36,16 @@ if (!process.env.DATABASE_URL) {
 // owns shutdown so it can drain requests before disconnecting this pool.
 const globalForPrisma = globalThis as unknown as { __sportingspyPrisma?: PrismaClient };
 
+// PHASE P (diagnostics, off by default): PRISMA_QUERY_LOG=true prints one
+// "[db-query] <ms>ms <sql>" line per query, so performance audits can count
+// and time the queries behind a request. Never enable it in production.
+function createClient(): PrismaClient {
+  const queryLog = process.env.PRISMA_QUERY_LOG === 'true';
+  const client = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }), ...(queryLog ? { log: [{ emit: 'event' as const, level: 'query' as const }] } : {}) });
+  if (queryLog) (client as unknown as { $on: (e: 'query', cb: (q: { duration: number; query: string }) => void) => void }).$on('query', (q) => console.log(`[db-query] ${q.duration}ms ${q.query.replace(/\s+/g, ' ').slice(0, 300)}`));
+  return client;
+}
+
 export const prisma: PrismaClient =
   globalForPrisma.__sportingspyPrisma ??
-  (globalForPrisma.__sportingspyPrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) }));
+  (globalForPrisma.__sportingspyPrisma = createClient());

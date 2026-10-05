@@ -9,16 +9,18 @@ import { deploymentConfig } from '../deployment';
 import { LocalStorageProvider } from '../media/storage';
 import { EMPTY_PAYLOAD_SHA256, S3StorageProvider, s3ConfigFromEnv, signV4 } from '../media/s3';
 import { robotsTxt } from '../seo/robots';
+import { productionCsp } from '../securityHeaders';
+import { profileImageOrigins, validateProfileImageUrl } from '../profileImage';
 
 let checks = 0;
 const pass = (name: string) => { checks++; console.log(`PASS ${name}`); };
-const production: NodeJS.ProcessEnv = { NODE_ENV: 'production', APP_ENV: 'production', DATABASE_URL: 'postgresql://fixture:fixture@db.example.invalid/sportingspy', ALLOWED_ORIGIN: 'https://sportingspy.example', HOST: '127.0.0.1', TRUST_PROXY: '127.0.0.1/32' };
+const production: NodeJS.ProcessEnv = { NODE_ENV: 'production', APP_ENV: 'production', DATABASE_URL: 'postgresql://fixture:fixture@db.example.invalid/sportingspy', ALLOWED_ORIGIN: 'https://www.sportingspy.com', HOST: '127.0.0.1', TRUST_PROXY: '127.0.0.1/32' };
 assert.equal(deploymentConfig(production, true).production, true);
 for (const patch of [
   { DATABASE_URL: '' }, { DATABASE_URL: 'postgresql://USER:PASSWORD@localhost/db' },
   { DATABASE_URL: 'postgresql://fixture:fixture@db.example.invalid/sportingspy_dev' },
   { DATABASE_URL: 'file:dev.db' }, { ALLOWED_ORIGIN: '' },
-  { ALLOWED_ORIGIN: 'http://public.example' }, { ALLOWED_ORIGIN: 'https://public.example/path' },
+  { ALLOWED_ORIGIN: 'http://public.example' }, { ALLOWED_ORIGIN: 'https://public.example/path' }, { ALLOWED_ORIGIN: 'https://sportingspy.com' },
   { DEV_LOGIN_BYPASS: 'true' }, { ALLOW_DESTRUCTIVE_DB_OPS: 'true' },
   { SHADOW_DATABASE_URL: 'postgresql://fixture:fixture@db.example.invalid/shadow' },
   { PORT: '0' }, { HOST: 'public.example' }, { TRUST_PROXY: 'true' },
@@ -51,6 +53,34 @@ try {
 
 const s3Env: NodeJS.ProcessEnv = { NODE_ENV: 'test', MEDIA_S3_BUCKET: 'fixture-bucket', MEDIA_S3_REGION: 'auto', MEDIA_S3_ACCESS_KEY_ID: 'fixture-access', MEDIA_S3_SECRET_ACCESS_KEY: 'fixture-secret', MEDIA_S3_ENDPOINT: 'https://objects.example', MEDIA_PUBLIC_BASE_URL: 'https://cdn.example/media', MEDIA_S3_FORCE_PATH_STYLE: 'true', MEDIA_S3_SESSION_TOKEN: 'fixture-session' };
 const config = s3ConfigFromEnv(s3Env);
+assert.deepEqual(s3ConfigFromEnv(s3Env, 'r2'), config, 'R2 uses the existing S3 adapter');
+for (const patch of [
+  { MEDIA_S3_ENDPOINT: '' }, { MEDIA_S3_REGION: 'us-east-1' }, { MEDIA_S3_FORCE_PATH_STYLE: 'false' },
+]) assert.throws(() => s3ConfigFromEnv({ ...s3Env, ...patch }, 'r2'));
+pass('R2 alias reuses S3 and requires its HTTPS endpoint, auto region and path-style URLs');
+
+const profileEnv: NodeJS.ProcessEnv = { NODE_ENV: 'test', MEDIA_PUBLIC_BASE_URL: 'https://media.example.test/assets', PROFILE_IMAGE_ALLOWED_ORIGINS: 'https://avatars.example.test' };
+assert(profileImageOrigins(profileEnv).includes('https://media.example.test'));
+for (const src of ['https://avatars.example.test/person.jpg', 'https://media.example.test/assets/person.jpg', '/media/person.jpg', '']) {
+  assert.equal(validateProfileImageUrl(src, 'avatar', profileEnv), null);
+}
+for (const src of ['http://avatars.example.test/person.jpg', 'https://unknown.example.test/person.jpg', 'javascript:alert(1)', '//unknown.example.test/person.jpg', 'https://user:pass@avatars.example.test/person.jpg']) {
+  assert(validateProfileImageUrl(src, 'avatar', profileEnv));
+}
+assert.throws(() => profileImageOrigins({ NODE_ENV: 'test', PROFILE_IMAGE_ALLOWED_ORIGINS: 'https://avatars.example.test/path' }));
+const oldImageEnv = { MEDIA_PUBLIC_BASE_URL: process.env.MEDIA_PUBLIC_BASE_URL, PROFILE_IMAGE_ALLOWED_ORIGINS: process.env.PROFILE_IMAGE_ALLOWED_ORIGINS };
+try {
+  process.env.MEDIA_PUBLIC_BASE_URL = profileEnv.MEDIA_PUBLIC_BASE_URL;
+  process.env.PROFILE_IMAGE_ALLOWED_ORIGINS = profileEnv.PROFILE_IMAGE_ALLOWED_ORIGINS;
+  const csp = productionCsp('fixture');
+  assert(csp.includes('https://media.example.test') && csp.includes('https://avatars.example.test'));
+  assert(!csp.includes('img-src https:') && !csp.includes('img-src *'));
+} finally {
+  for (const [key, value] of Object.entries(oldImageEnv)) {
+    if (value === undefined) delete process.env[key]; else process.env[key] = value;
+  }
+}
+pass('profile URL policy permits configured HTTPS, R2 and local images; blocks invalid hosts with strict CSP');
 // Public AWS example credentials (not deployment secrets). Official reference:
 // https://docs.aws.amazon.com/AmazonS3/latest/developerguide/sig-v4-header-based-auth.html
 const awsExample = {

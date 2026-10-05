@@ -25,7 +25,8 @@ const roles = ['Reader', 'Author', 'Editor', 'Admin'] as const;
 const ids = roles.map(role => `${fixture}-${role}`);
 const originalPassword = `Test-${crypto.randomUUID()}`;
 const newPassword = `New-${crypto.randomUUID()}`;
-const protectedFiles = ['data/db.json', 'PROJECT_BRAIN.md'];
+// Files that must stay byte-identical, where still present (both were moved to the project archive).
+const protectedFiles = ['data/db.json', 'PROJECT_BRAIN.md'].filter((file) => fs.existsSync(file));
 const digest = (value: string | Buffer) => crypto.createHash('sha256').update(value).digest('hex');
 const filesBefore = protectedFiles.map(file => digest(fs.readFileSync(file)));
 const tables = ['sport', 'sportEvent', 'eventEdition', 'article', 'author', 'user', 'session', 'comment', 'mediaItem', 'adSlotConfig', 'redirectRule', 'auditLog'] as const;
@@ -53,7 +54,7 @@ const child = spawn(process.execPath, ['--import', 'tsx', httpsMode ? 'server/st
   cwd: process.cwd(), windowsHide: true,
   // This pre-launch suite deliberately exercises Reader accounts/comments;
   // Phase A separately verifies the current launch defaults keep both off.
-  env: { ...process.env, ENABLE_READER_ACCOUNTS: 'true', ENABLE_COMMENTS: 'true', PORT: String(port), HOST: '127.0.0.1', TRUST_PROXY: transport ? '127.0.0.1/32' : 'false', NODE_ENV: 'production', APP_ENV: 'production', AUTH_MODE: 'production', DEV_LOGIN_BYPASS: 'false', ALLOWED_ORIGIN: base },
+  env: { ...process.env, ENABLE_READER_ACCOUNTS: 'true', ENABLE_COMMENTS: 'true', PORT: String(port), HOST: '127.0.0.1', TRUST_PROXY: transport ? '127.0.0.1/32' : 'false', NODE_ENV: 'production', APP_ENV: transport ? 'staging' : 'production', AUTH_MODE: 'production', DEV_LOGIN_BYPASS: 'false', ALLOWED_ORIGIN: base },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let serverOutput = '';
@@ -92,7 +93,8 @@ try {
   await new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error('Test server did not start.')), 20_000);
     child.stdout.on('data', chunk => { if (String(chunk).includes('Server running')) { clearTimeout(timeout); resolve(); } });
-    child.once('exit', () => { clearTimeout(timeout); reject(new Error('Test server exited before startup.')); });
+    child.once('exit', () => { clearTimeout(timeout); reject(new Error(`Test server exited before startup.
+${serverOutput.slice(-2000)}`)); });
   });
   if (httpsMode) { await verifyProductionBoot(); tested('production startup refusal matrix and untrusted proxy spoof protection'); }
   for (const [index, role] of roles.entries()) await prisma.user.create({ data: {

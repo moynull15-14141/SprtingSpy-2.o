@@ -16,20 +16,28 @@ export function SettingsHelp({ label, children }: { label: string; children: str
   const hide = () => { clearTimeout(timer.current); setOpen(false); };
   const leave = () => { timer.current = setTimeout(() => { if (document.activeElement !== trigger.current) setOpen(false); }, 120); };
   useEffect(() => () => clearTimeout(timer.current), []);
-  useLayoutEffect(() => {
-    if (!open || !trigger.current || !tooltip.current) return;
+  const place = () => {
+    if (!trigger.current || !tooltip.current) return;
     const anchor = trigger.current.getBoundingClientRect();
     const box = tooltip.current.getBoundingClientRect();
     setPosition({
       left: Math.max(16, Math.min(anchor.right - box.width, window.innerWidth - box.width - 16)),
       top: Math.max(16, anchor.bottom + box.height + 8 < window.innerHeight - 16 ? anchor.bottom + 8 : anchor.top - box.height - 8),
     });
-  }, [open]);
+  };
+  useLayoutEffect(() => { if (open) place(); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!open) return;
     const outside = (e: PointerEvent) => { if (!trigger.current?.contains(e.target as Node) && !tooltip.current?.contains(e.target as Node)) hide(); };
     const dismiss = (e: KeyboardEvent) => { if (e.key === 'Escape') hide(); };
-    const scroll = (e: Event) => { if (!tooltip.current?.contains(e.target as Node)) hide(); };
+    // PHASE R UI/UX: a scroll (including the browser bringing the focused
+    // button into view) moves the tip with its button; it closes only once
+    // the button has left the viewport.
+    const scroll = (e: Event) => {
+      if (tooltip.current?.contains(e.target as Node) || !trigger.current) return;
+      const r = trigger.current.getBoundingClientRect();
+      if (r.bottom < 0 || r.top > window.innerHeight) hide(); else place();
+    };
     window.addEventListener('pointerdown', outside); window.addEventListener('keydown', dismiss);
     window.addEventListener('resize', hide); window.addEventListener('scroll', scroll, true);
     return () => { window.removeEventListener('pointerdown', outside); window.removeEventListener('keydown', dismiss); window.removeEventListener('resize', hide); window.removeEventListener('scroll', scroll, true); };

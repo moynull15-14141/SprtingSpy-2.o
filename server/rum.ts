@@ -63,6 +63,13 @@ const cleanPath = (raw: unknown): string | null => {
   return /^[\w\-/%.~]+$/.test(path) ? (path.endsWith('/') ? path : `${path}/`) : null;
 };
 
+/**
+ * PHASE Q: rendering crawlers and audit tools run page JavaScript too; their
+ * visits are not reader page views or real-user vitals (same intent as the
+ * crawler filter in searchAnalytics.ts).
+ */
+export const CRAWLER_UA = /bot|crawl|spider|slurp|bingpreview|facebookexternalhit|lighthouse|pagespeed|gtmetrix|pingdom/i;
+
 let enabledCache: { at: number; value: boolean } | null = null;
 async function collectionEnabled(): Promise<boolean> {
   if (enabledCache && Date.now() - enabledCache.at < 60_000) return enabledCache.value;
@@ -109,6 +116,7 @@ export function rumRouter() {
       if (limit.limited) return res.status(429).end();
       limiter.record(ip);
       if (!(await collectionEnabled())) return res.status(204).end();
+      if (CRAWLER_UA.test(String(req.get('user-agent') || ''))) return res.status(204).end();
       const body = (req.body || {}) as { path?: unknown; pageType?: unknown; device?: unknown; view?: unknown; metrics?: unknown };
       const path = cleanPath(body.path);
       const pageType = RUM_PAGE_TYPES.includes(body.pageType as RumPageType) ? (body.pageType as RumPageType) : null;

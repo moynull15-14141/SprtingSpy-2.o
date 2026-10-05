@@ -68,6 +68,7 @@ export function deploymentConfig(env: NodeJS.ProcessEnv = process.env, buildExis
     } catch (error) { if (error instanceof DeploymentConfigError) throw error; fail('DATABASE_URL must identify a PostgreSQL database.'); }
     if (env.SHADOW_DATABASE_URL?.trim()) fail('SHADOW_DATABASE_URL must be unset for production-mode startup; deployment uses existing migrations without a shadow database.');
     if (!origin) fail('ALLOWED_ORIGIN is required in production to identify the browser-facing service origin.');
+    if (environment === 'production' && !['localhost', '127.0.0.1', '[::1]'].includes(new URL(origin).hostname) && origin !== 'https://www.sportingspy.com') fail('APP_ENV=production requires ALLOWED_ORIGIN=https://www.sportingspy.com (local loopback smoke tests are exempt).');
     if (env.DEV_LOGIN_BYPASS === 'true') fail('DEV_LOGIN_BYPASS is forbidden when NODE_ENV=production.');
     if (!buildExists) fail('Production build missing: run npm run build before starting the server.');
     if (env.ALLOW_DESTRUCTIVE_DB_OPS === 'true') fail('ALLOW_DESTRUCTIVE_DB_OPS is a local-development switch and is forbidden when NODE_ENV=production.');
@@ -76,9 +77,18 @@ export function deploymentConfig(env: NodeJS.ProcessEnv = process.env, buildExis
   return { production, port, host, origin, trustProxy, appEnv: environment };
 }
 
+let proxyHintLogged = false;
+
 export function enforceProductionTransport(req: Request, res: Response, next: NextFunction) {
   // Direct HTTP health probes (liveness and readiness) are allowed, but receive neither cookies nor HSTS.
   if (process.env.NODE_ENV === 'production' && process.env.ALLOWED_ORIGIN?.startsWith('https:') && !req.secure && req.path !== '/api/health' && req.path !== '/api/health/ready') {
+    // PHASE R (deployment): a request that arrived over HTTPS through the
+    // platform proxy but is not trusted as such points at TRUST_PROXY. Logged
+    // once, with the proxy's address only (no client data).
+    if (!proxyHintLogged && req.get('x-forwarded-proto') === 'https') {
+      proxyHintLogged = true;
+      console.warn(`[SportingSpy] HTTPS request rejected: the reverse proxy at ${req.socket.remoteAddress} is not in TRUST_PROXY. Add its network (e.g. 10.0.0.0/8) to TRUST_PROXY.`);
+    }
     return res.status(426).json({ error: 'HTTPS is required.' });
   }
   next();

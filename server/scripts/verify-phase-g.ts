@@ -40,7 +40,7 @@ try {
   // ── Launch guard: documented default passwords ──
   const weakId = `${fixture}-weak`;
   await prisma.user.create({ data: { id: weakId, name: 'Phase G weak', email: `${weakId}@example.test`, role: 'Editor', avatar: '', joinedAt: new Date(), passwordHash: hashPassword('ChangeMe123!') } });
-  const refused = spawnSync(process.execPath, [...tsx, 'server.ts'], { env: serverEnv(await freePort(), 'https://sportingspy.com'), encoding: 'utf8', timeout: 60_000 });
+  const refused = spawnSync(process.execPath, [...tsx, 'server.ts'], { env: serverEnv(await freePort(), 'https://www.sportingspy.com'), encoding: 'utf8', timeout: 60_000 });
   assert.notEqual(refused.status, 0, 'a real production origin must refuse to start');
   assert.match(refused.stderr + refused.stdout, /Refusing to start: \d+ active account\(s\) .* still use the documented default password/);
   assert(!/@example\.test|ChangeMe123!/.test(refused.stderr + refused.stdout), 'the refusal names roles only, never e-mails or the password');

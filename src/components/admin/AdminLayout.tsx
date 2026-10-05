@@ -40,14 +40,28 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
   const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
   // Collapsing the desk navigation gives the article editor more width. The
   // preference is a per-browser convenience, so storage failures are ignored.
-  const [navCollapsed, setNavCollapsed] = useState(false);
+  const [savedCollapsed, setSavedCollapsed] = useState(false);
   useEffect(() => {
-    try { setNavCollapsed(localStorage.getItem('cms-nav-collapsed') === '1'); } catch { /* ignore */ }
+    try { setSavedCollapsed(localStorage.getItem('cms-nav-collapsed') === '1'); } catch { /* ignore */ }
   }, []);
-  const toggleNav = () => setNavCollapsed((value) => {
-    try { localStorage.setItem('cms-nav-collapsed', value ? '0' : '1'); } catch { /* ignore */ }
-    return !value;
-  });
+  // PHASE R UI/UX: while an article is open in the editor the navigation folds
+  // to its icon rail so the writing column keeps its width (Expand still works
+  // and does not change the saved preference).
+  const [editorFocus, setEditorFocus] = useState(false);
+  const [focusExpanded, setFocusExpanded] = useState(false);
+  useEffect(() => {
+    const onFocus = (e: Event) => { setEditorFocus(!!(e as CustomEvent<{ active: boolean }>).detail?.active); setFocusExpanded(false); };
+    window.addEventListener('sportingspy:cms-editor', onFocus);
+    return () => window.removeEventListener('sportingspy:cms-editor', onFocus);
+  }, []);
+  const navCollapsed = editorFocus ? !focusExpanded : savedCollapsed;
+  const toggleNav = () => {
+    if (editorFocus) { setFocusExpanded((v) => !v); return; }
+    setSavedCollapsed((value) => {
+      try { localStorage.setItem('cms-nav-collapsed', value ? '0' : '1'); } catch { /* ignore */ }
+      return !value;
+    });
+  };
 
   const pendingCommentsCount = comments.filter((c) => c.status === 'pending').length;
 

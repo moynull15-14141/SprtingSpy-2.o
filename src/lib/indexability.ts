@@ -20,32 +20,36 @@ export const STATIC_NON_INDEXABLE_PATHS: Record<string, string> = { '/search/': 
 export const FAQ_PATH = '/faq/';
 
 /** An editor canonical override that points somewhere else makes this URL a duplicate. */
-function canonicalElsewhere(seo: SeoMetadata | undefined, selfPath: string, origin: string): boolean {
+export function canonicalElsewhere(seo: SeoMetadata | undefined, selfPath: string, origin: string): boolean {
   if (!seo?.canonicalUrl) return false;
   try {
     const url = new URL(seo.canonicalUrl, origin);
-    return url.origin !== new URL(origin).origin || canonicalPagePath(url.pathname) !== selfPath;
+    const self = new URL(selfPath, origin);
+    return url.origin !== self.origin || canonicalPagePath(url.pathname) !== canonicalPagePath(self.pathname) || url.search !== self.search || !!url.hash;
   } catch {
     return true;
   }
 }
 
-export function sportIndexability(s: { isVisible: boolean; seo?: SeoMetadata; publishedArticleCount: number; visibleEventCount: number }): Indexability {
+export function sportIndexability(s: { isVisible: boolean; seo?: SeoMetadata; publishedArticleCount: number; visibleEventCount: number }, path?: string, origin?: string): Indexability {
   if (!s.isVisible) return no('sport is hidden');
   if (s.seo?.noIndex) return no('editor set noindex');
+  if (path && origin && canonicalElsewhere(s.seo, path, origin)) return no('canonical points to another URL');
   if (s.publishedArticleCount === 0 && s.visibleEventCount === 0) return no('thin: no published articles or events yet');
   return yes;
 }
 
-export function eventIndexability(e: { isVisible: boolean; sportVisible: boolean; seo?: SeoMetadata }): Indexability {
+export function eventIndexability(e: { isVisible: boolean; sportVisible: boolean; seo?: SeoMetadata }, path?: string, origin?: string): Indexability {
   if (!e.isVisible || !e.sportVisible) return no('event or its sport is hidden');
   if (e.seo?.noIndex) return no('editor set noindex');
+  if (path && origin && canonicalElsewhere(e.seo, path, origin)) return no('canonical points to another URL');
   return yes;
 }
 
-export function editionIndexability(ed: { eventIndexable: boolean; seo?: SeoMetadata }): Indexability {
+export function editionIndexability(ed: { eventIndexable: boolean; seo?: SeoMetadata }, path?: string, origin?: string): Indexability {
   if (!ed.eventIndexable) return no('its event is not indexable');
   if (ed.seo?.noIndex) return no('editor set noindex');
+  if (path && origin && canonicalElsewhere(ed.seo, path, origin)) return no('canonical points to another URL');
   return yes;
 }
 

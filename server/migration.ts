@@ -11,6 +11,14 @@
  * URL is unchanged); RETIRE has no redirect (the old URL returns a real 404,
  * Spec §20.5 / §27.5 — never a blanket homepage redirect).
  *
+ * PHASE N (v2.2 §25): chains and loops are also detected inside the sheet
+ * before anything is applied; a RETIRE row is an error while any active rule
+ * still redirects its URL; a KEEP row with an unchanged URL must be a live
+ * page; editing an applied row's New URL makes the next apply update its rule
+ * (never a silent mismatch); absolute URLs must be on this site or the old
+ * site (LEGACY_SITE_HOSTS). The dry run performs the real writes in a
+ * transaction that is always rolled back.
+ *
  *   GET    /api/migration                 rows + counts          Admin, Editor
  *   GET    /api/migration/export          CSV                    Admin, Editor
  *   POST   /api/migration/import          { csv } or { rows }    Admin
@@ -34,32 +42,48 @@ export type Decision = (typeof DECISIONS)[number];
 export const SHEET_COLUMNS = ['Old URL', 'Old Category', 'Old Title', 'Decision', 'New Category', 'New Title', 'New URL', '301'] as const;
 const MAX_ROWS = 20000;
 
+/**
+ * PHASE N: hosts whose absolute URLs belong to this site — the canonical
+ * host, its www/apex twin, and the old site's hosts (LEGACY_SITE_HOSTS,
+ * comma-separated; default the current WordPress site www.sportingspy.com).
+ * Anything else is a cross-domain mistake, never silently reduced to a path.
+ */
+export function siteHosts(): Set<string> {
+  const own = new URL(siteOrigin()).hostname.toLowerCase();
+  const bare = own.replace(/^www\./, '');
+  const legacy = (process.env.LEGACY_SITE_HOSTS ?? 'www.sportingspy.com,sportingspy.com').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
+  return new Set([own, bare, `www.${bare}`, ...legacy]);
+}
+
+/** A site path from a path or an absolute http(s) URL on one of `siteHosts()`; query/hash dropped. */
+function sitePath(value: string): { path: string; query: boolean } | { error: 'format' | 'host'; host?: string } {
+  if (/^https?:\/\//i.test(value)) {
+    let u: URL;
+    try { u = new URL(value); } catch { return { error: 'format' }; }
+    if (!siteHosts().has(u.hostname.toLowerCase())) return { error: 'host', host: u.hostname };
+    return { path: u.pathname, query: !!u.search };
+  }
+  if (!value.startsWith('/') || value.startsWith('//')) return { error: 'format' };
+  return { path: value.split(/[?#]/)[0], query: /\?./.test(value.split('#')[0]) };
+}
+
 /** An old URL as a site path (absolute URLs keep only path; no query/hash; no trailing slash). */
 export function oldPath(raw: string): string | null {
   const value = raw.trim();
   if (!value) return null;
-  let path: string;
-  if (/^https?:\/\//i.test(value)) {
-    try { path = new URL(value).pathname; } catch { return null; }
-  } else if (value.startsWith('/') && !value.startsWith('//')) path = value.split(/[?#]/)[0];
-  else return null;
-  if (path.length > 1000 || /[\s<>"]/.test(path)) return null;
-  return normalizeSource(path) || '/';
+  const parsed = sitePath(value);
+  if ('error' in parsed) return null;
+  if (parsed.path.length > 1000 || /[\s<>"]/.test(parsed.path)) return null;
+  return normalizeSource(parsed.path) || '/';
 }
 
 /** A new URL: an internal path (stored without trailing slash) or empty. */
 function newPath(raw: string): string | null {
   const value = raw.trim();
   if (!value) return '';
-  if (/^https?:\/\//i.test(value)) {
-    try {
-      const u = new URL(value);
-      if (u.origin !== new URL(siteOrigin()).origin) return null;
-      return normalizeSource(u.pathname) || '/';
-    } catch { return null; }
-  }
-  if (!value.startsWith('/') || value.startsWith('//')) return null;
-  return normalizeSource(value.split(/[?#]/)[0]) || '/';
+  const parsed = sitePath(value);
+  if ('error' in parsed) return null;
+  return normalizeSource(parsed.path) || '/';
 }
 
 /** Minimal RFC 4180 CSV parser (quotes, escaped quotes, CRLF). */
@@ -92,8 +116,13 @@ type Row = { oldUrl: string; oldCategory: string; oldTitle: string; decision: De
 
 function parseRow(input: Record<string, unknown>): { ok: true; row: Row } | { ok: false; error: string } {
   const text = (k: string, max: number) => (typeof input[k] === 'string' ? (input[k] as string).trim().slice(0, max) : '');
-  const old = oldPath(text('oldUrl', 2000));
+  const rawOld = text('oldUrl', 2000);
+  const parsedOld = rawOld ? sitePath(rawOld) : null;
+  if (parsedOld && 'error' in parsedOld && parsedOld.error === 'host') return { ok: false, error: `Old URL host ${parsedOld.host} is not this site or the old site (${[...siteHosts()].join(', ')}). Set LEGACY_SITE_HOSTS if the old site used another host.` };
+  const old = oldPath(rawOld);
   if (!old) return { ok: false, error: 'Old URL must be a path (/old-page) or an absolute http(s) URL.' };
+  // Redirects match paths only, so "/?p=123" would silently become a rule for the homepage.
+  if (old === '/' && parsedOld && 'query' in parsedOld && parsedOld.query) return { ok: false, error: 'Old URL is the homepage with a query string (such as /?p=123). Redirects match the path only, so this URL cannot be redirected on its own; list the post\'s real URL instead.' };
   const decision = (text('decision', 20).toUpperCase() || 'UNDECIDED') as Decision;
   if (!DECISIONS.includes(decision)) return { ok: false, error: `Decision must be one of: ${DECISIONS.join(', ')}.` };
   const target = newPath(text('newUrl', 2000));
@@ -103,29 +132,66 @@ function parseRow(input: Record<string, unknown>): { ok: true; row: Row } | { ok
 
 type Site = Awaited<ReturnType<typeof loadSiteIndex>>;
 
-/** Problems with one row against the live site and the rest of the sheet. */
-export function checkRow(row: Row, site: Site, redirects: Map<string, string>): { status: 'ok' | 'error' | 'pending'; problems: string[]; action: 'redirect' | 'none' | 'retire' | 'undecided' } {
+const REDIRECTING: Decision[] = ['KEEP', 'REWRITE', 'MERGE'];
+
+/**
+ * PHASE N: what else a row is checked against.
+ * - `sheet`: every row by Old URL (chains/loops inside the sheet, before anything is applied)
+ * - `ownRule`: the redirect this row applied earlier (active or not)
+ * - `inactiveSources`: sources of inactive rules the row does not own (one rule per source)
+ */
+export interface RowContext {
+  sheet?: Map<string, Pick<Row, 'decision' | 'newUrl'>>;
+  ownRule?: { targetUrl: string; isActive: boolean } | null;
+  inactiveSources?: Lookup;
+}
+
+/** Source → normalised target (only `get` is used, so a row's own rule can be excluded cheaply). */
+type Lookup = Pick<Map<string, string>, 'get'>;
+
+/** Problems with one row against the live site and the rest of the sheet. `redirects` = active rules NOT owned by this row. */
+export function checkRow(row: Row, site: Site, redirects: Lookup, ctx: RowContext = {}): { status: 'ok' | 'error' | 'pending'; problems: string[]; action: 'redirect' | 'none' | 'retire' | 'undecided' } {
   const problems: string[] = [];
+  const ownActive = ctx.ownRule?.isActive ? ctx.ownRule.targetUrl : undefined;
+  const activeAtOld = ownActive ?? redirects.get(row.oldUrl);
   if (row.decision === 'UNDECIDED') return { status: 'pending', problems: ['No decision yet.'], action: 'undecided' };
   if (row.decision === 'RETIRE') {
     if (row.newUrl) problems.push('RETIRE rows do not redirect. Use MERGE to send this URL to a relevant replacement.');
     if (site.resolve(row.oldUrl)) problems.push(`${row.oldUrl}/ is a live page on the new site, so it is not retired.`);
+    // A retired URL must answer 404; an active rule would keep sending visitors elsewhere.
+    else if (activeAtOld) problems.push(`An active redirect still sends ${row.oldUrl}/ to ${activeAtOld}/, so it does not return 404. Deactivate or delete that redirect in URL Redirects.`);
     return { status: problems.length ? 'error' : 'ok', problems, action: 'retire' };
   }
   if (!row.newUrl) problems.push(`${row.decision} needs a New URL.`);
-  else {
-    if (row.newUrl === row.oldUrl) return { status: 'ok', problems: [], action: 'none' };
+  else if (row.newUrl === row.oldUrl) {
+    // Same URL on the new site: it must really be served there.
+    if (activeAtOld) problems.push(`An active redirect sends ${row.oldUrl}/ to ${activeAtOld}/, so the page is not served at its old URL.`);
+    else if (!site.resolve(row.oldUrl)) problems.push(`${row.oldUrl}/ is not a live page on the new site (it would return 404). Publish it there, or give a New URL.`);
+    return { status: problems.length ? 'error' : 'ok', problems, action: 'none' };
+  } else {
     if (row.newUrl === '/' && row.oldUrl !== '/') problems.push('Redirecting to the homepage is not allowed for unrelated pages (Spec §27.5). Choose the relevant new page, or RETIRE.');
     const chained = redirects.get(row.newUrl);
+    const next = ctx.sheet?.get(row.newUrl);
     if (chained) problems.push(`New URL ${row.newUrl}/ is itself redirected to ${chained}/ — point directly at the final URL.`);
-    else if (!site.resolve(row.newUrl)) problems.push(`New URL ${row.newUrl}/ is not a live page yet (it would return 404). Publish the content first.`);
+    else if (next && next.decision === 'RETIRE') problems.push(`New URL ${row.newUrl}/ is RETIRED in this sheet (it will return 404). Choose a live replacement.`);
+    else if (next && REDIRECTING.includes(next.decision as Decision) && next.newUrl && next.newUrl !== row.newUrl) {
+      problems.push(next.newUrl === row.oldUrl
+        ? `New URL ${row.newUrl}/ redirects back to ${row.oldUrl}/ in this sheet — that is a loop.`
+        : `New URL ${row.newUrl}/ is itself an Old URL in this sheet (→ ${next.newUrl}/) — point directly at the final URL.`);
+    } else if (!site.resolve(row.newUrl)) problems.push(`New URL ${row.newUrl}/ is not a live page yet (it would return 404). Publish the content first.`);
     const live = site.resolve(row.oldUrl);
     if (live) problems.push(`Old URL ${row.oldUrl}/ is a live page on the new site; a redirect would hide it.`);
     const existing = redirects.get(row.oldUrl);
     if (existing && existing !== row.newUrl) problems.push(`A redirect for ${row.oldUrl} already exists (→ ${existing}).`);
+    const inactive = ctx.inactiveSources?.get(row.oldUrl);
+    if (inactive) problems.push(`An inactive redirect rule for ${row.oldUrl} (→ ${inactive}) already exists. Reactivate or delete it in URL Redirects; a URL can have only one rule.`);
   }
   return { status: problems.length ? 'error' : 'ok', problems, action: 'redirect' };
 }
+
+/** A row's redirect is applied when the rule it created is active and points at its New URL. */
+const isApplied = (row: Pick<Row, 'newUrl'>, own: { targetUrl: string; isActive: boolean } | null | undefined) =>
+  !!own && own.isActive && (own.targetUrl.replace(/\/$/, '') || '/') === row.newUrl;
 
 export function migrationRouter(getLookup: () => AuthLookup) {
   const router = express.Router();
@@ -138,17 +204,26 @@ export function migrationRouter(getLookup: () => AuthLookup) {
     const [rows, site, rules] = await Promise.all([
       prisma.migrationItem.findMany(),
       loadSiteIndex(siteOrigin()),
-      prisma.redirectRule.findMany({ where: { isActive: true }, select: { sourceUrl: true, targetUrl: true, id: true } }),
+      prisma.redirectRule.findMany({ select: { sourceUrl: true, targetUrl: true, id: true, isActive: true } }),
     ]);
-    const redirects = new Map(rules.map((r) => [r.sourceUrl, r.targetUrl.replace(/\/$/, '') || '/']));
-    const ownRedirects = new Set(rows.map((r) => r.redirectId).filter(Boolean));
+    const target = (url: string) => url.replace(/\/$/, '') || '/';
+    const ruleById = new Map(rules.map((r) => [r.id, r]));
+    const sheet = new Map(rows.map((r) => [r.oldUrl, r as Row]));
+    const active = new Map(rules.filter((r) => r.isActive).map((r) => [r.sourceUrl, r]));
+    const inactive = new Map(rules.filter((r) => !r.isActive).map((r) => [r.sourceUrl, r]));
+    // One rule per source, so "every rule except the row's own" is a lookup that skips its id.
+    const except = (map: Map<string, (typeof rules)[number]>, ownId?: string): Lookup => ({ get: (src) => { const r = map.get(src); return r && r.id !== ownId ? target(r.targetUrl) : undefined; } });
     for (const row of rows) {
-      // A row whose redirect was already applied is checked against its own rule.
-      const ruleForRow = rules.find((r) => r.id === row.redirectId);
-      const map = ruleForRow ? new Map([...redirects].filter(([src]) => src !== row.oldUrl)) : redirects;
-      const result = checkRow(row as Row, site, map);
-      const applied = !!ruleForRow && ownRedirects.has(ruleForRow.id);
-      await prisma.migrationItem.update({ where: { id: row.id }, data: { checkStatus: result.status, validation: { problems: result.problems, action: result.action, applied } } });
+      // PHASE N: the rule this row applied is checked as the row's own (even if
+      // it was later deactivated or re-targeted); every other rule is a conflict.
+      const own = row.redirectId ? ruleById.get(row.redirectId) : undefined;
+      const redirects = except(active, own?.id);
+      const inactiveSources = except(inactive, own?.id);
+      const ownRule = own ? { targetUrl: target(own.targetUrl), isActive: own.isActive } : null;
+      const result = checkRow(row as Row, site, redirects, { sheet, ownRule, inactiveSources });
+      const applied = result.action === 'redirect' && isApplied(row as Row, ownRule);
+      const appliedTo = own?.isActive ? target(own.targetUrl) : null;
+      await prisma.migrationItem.update({ where: { id: row.id }, data: { checkStatus: result.status, validation: { problems: result.problems, action: result.action, applied, appliedTo } } });
     }
     return rows.length;
   }
@@ -168,9 +243,10 @@ export function migrationRouter(getLookup: () => AuthLookup) {
   }));
 
   router.get('/export', staff, wrap(async (_req, res) => {
+    // PHASE N: "301 = yes" only when the row's own rule is active AND points at its New URL.
     const rows = await prisma.migrationItem.findMany({ orderBy: { oldUrl: 'asc' } });
-    const applied = new Set((await prisma.redirectRule.findMany({ where: { isActive: true, id: { in: rows.map((r) => r.redirectId).filter((v): v is string => !!v) } }, select: { id: true } })).map((r) => r.id));
-    const lines = [SHEET_COLUMNS.join(','), ...rows.map((r) => [r.oldUrl, r.oldCategory, r.oldTitle, r.decision, r.newCategory, r.newTitle, r.newUrl ? `${r.newUrl}${r.newUrl === '/' ? '' : '/'}` : '', r.redirectId && applied.has(r.redirectId) ? 'yes' : 'no'].map((v) => csvCell(String(v))).join(','))];
+    const rules = new Map((await prisma.redirectRule.findMany({ where: { id: { in: rows.map((r) => r.redirectId).filter((v): v is string => !!v) } }, select: { id: true, targetUrl: true, isActive: true } })).map((r) => [r.id, r]));
+    const lines = [SHEET_COLUMNS.join(','), ...rows.map((r) => [r.oldUrl, r.oldCategory, r.oldTitle, r.decision, r.newCategory, r.newTitle, r.newUrl ? `${r.newUrl}${r.newUrl === '/' ? '' : '/'}` : '', REDIRECTING.includes(r.decision as Decision) && isApplied(r, r.redirectId ? rules.get(r.redirectId) : null) ? 'yes' : 'no'].map((v) => csvCell(String(v))).join(','))];
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="sportingspy-migration-sheet.csv"');
     return res.send(lines.join('\r\n'));
@@ -236,30 +312,61 @@ export function migrationRouter(getLookup: () => AuthLookup) {
 
   router.post('/validate', staff, wrap(async (_req, res) => res.json({ checked: await revalidateAll() })));
 
+  /**
+   * PHASE N: the dry run runs exactly the writes a real apply would (same
+   * redirect-manager checks, inside a transaction that is always rolled
+   * back), so a conflict found only at write time shows up in the preview.
+   * A real apply is all-or-nothing: any conflict rolls the whole batch back.
+   */
   router.post('/apply', admin, wrap(async (req, res) => {
     const dryRun = req.body?.dryRun !== false;
     await revalidateAll();
-    const rows = await prisma.migrationItem.findMany({ where: { checkStatus: 'ok', decision: { in: ['KEEP', 'REWRITE', 'MERGE'] } } });
-    const todo = rows.filter((r) => r.newUrl && r.newUrl !== r.oldUrl && !(r.validation as { applied?: boolean } | null)?.applied);
-    const plan = todo.map((r) => ({ id: r.id, from: r.oldUrl, to: r.newUrl }));
-    const blocked = await prisma.migrationItem.count({ where: { checkStatus: 'error' } });
-    if (dryRun) return res.json({ dryRun: true, redirects: plan, blockedRows: blocked });
-    const created: string[] = [];
+    const rows = await prisma.migrationItem.findMany({ orderBy: { oldUrl: 'asc' } });
+    const v = (r: (typeof rows)[number]) => (r.validation || {}) as { action?: string; applied?: boolean; problems?: string[] };
+    const ownIds = rows.map((r) => r.redirectId).filter((id): id is string => !!id);
+    const owned = new Set((await prisma.redirectRule.findMany({ where: { id: { in: ownIds } }, select: { id: true } })).map((r) => r.id));
+    const todo = rows.filter((r) => r.checkStatus === 'ok' && v(r).action === 'redirect' && !v(r).applied);
+    const plan = todo.map((r) => ({ id: r.id, from: r.oldUrl, to: r.newUrl, change: r.redirectId && owned.has(r.redirectId) ? 'update' as const : 'create' as const }));
+    const summary = {
+      create: plan.filter((p) => p.change === 'create').length,
+      update: plan.filter((p) => p.change === 'update').length,
+      alreadyApplied: rows.filter((r) => r.checkStatus === 'ok' && v(r).applied).length,
+      unchanged: rows.filter((r) => r.checkStatus === 'ok' && v(r).action === 'none').length,
+      retire: rows.filter((r) => r.checkStatus === 'ok' && v(r).action === 'retire').length,
+      undecided: rows.filter((r) => r.checkStatus === 'pending').length,
+      errors: rows.filter((r) => r.checkStatus === 'error').length,
+    };
+    const errors = rows.filter((r) => r.checkStatus === 'error').slice(0, 500).map((r) => ({ from: r.oldUrl, problems: v(r).problems ?? [] }));
+    const retire = rows.filter((r) => r.checkStatus === 'ok' && v(r).action === 'retire').slice(0, 2000).map((r) => r.oldUrl);
+
+    class RolledBack extends Error {}
+    const conflicts: { from: string; error: string }[] = [];
+    let created = 0, updated = 0;
     try {
       await prisma.$transaction(async (tx) => {
-        for (const r of todo) {
-          const rule = await saveRedirect(tx, { sourceUrl: r.oldUrl, targetUrl: r.newUrl, statusCode: 301, origin: 'migration', notes: `Migration sheet (${r.decision}): ${r.oldTitle || r.oldUrl}` }, 'create');
-          await tx.migrationItem.update({ where: { id: r.id }, data: { redirectId: rule.id } });
-          created.push(rule.id);
+        for (const [i, p] of plan.entries()) {
+          const r = todo[i];
+          const input = { sourceUrl: r.oldUrl, targetUrl: r.newUrl, statusCode: 301, isActive: true, origin: 'migration' as const, notes: `Migration sheet (${r.decision}): ${r.oldTitle || r.oldUrl}` };
+          try {
+            const rule = p.change === 'update' ? await saveRedirect(tx, input, 'update', r.redirectId!) : await saveRedirect(tx, input, 'create');
+            await tx.migrationItem.update({ where: { id: r.id }, data: { redirectId: rule.id } });
+            if (p.change === 'update') updated++; else created++;
+          } catch (err) {
+            if (!(err instanceof RedirectConflict)) throw err;
+            conflicts.push({ from: r.oldUrl, error: err.message });
+          }
         }
+        if (dryRun || conflicts.length) throw new RolledBack();
       }, { timeout: 120_000 });
     } catch (err) {
-      if (err instanceof RedirectConflict) return res.status(409).json({ error: `Nothing was applied: ${err.message}` });
-      throw err;
+      if (!(err instanceof RolledBack)) throw err;
     }
+    const report = { redirects: plan, blockedRows: summary.errors, summary, errors, retire, conflicts };
+    if (dryRun) return res.json({ dryRun: true, ...report });
+    if (conflicts.length) return res.status(409).json({ error: `Nothing was applied: ${conflicts.length} redirect(s) conflict with existing rules.`, dryRun: false, ...report });
     await revalidateAll();
-    await recordAudit(prisma, { ...actor(req), action: 'Applied Migration Redirects', entityType: 'Migration', entityId: 'migration-sheet', details: `${req.authContext!.userName} created ${created.length} 301 redirect(s) from the migration sheet.` });
-    return res.status(201).json({ dryRun: false, created: created.length, blockedRows: blocked });
+    await recordAudit(prisma, { ...actor(req), action: 'Applied Migration Redirects', entityType: 'Migration', entityId: 'migration-sheet', details: `${req.authContext!.userName} created ${created} and updated ${updated} 301 redirect(s) from the migration sheet.`, before: null, after: { created: plan.filter((p) => p.change === 'create').map((p) => `${p.from} → ${p.to}`).slice(0, 500), updated: plan.filter((p) => p.change === 'update').map((p) => `${p.from} → ${p.to}`).slice(0, 500) }, fields: ['created', 'updated'] });
+    return res.status(201).json({ dryRun: false, created, updated, blockedRows: summary.errors, summary });
   }));
 
   return router;

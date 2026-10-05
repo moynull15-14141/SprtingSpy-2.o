@@ -29,17 +29,17 @@ export const EditionCard: React.FC<{ edition: DiscoveryEdition; today: string }>
           <span className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-bold uppercase ${TIMING_BADGE[timing]}`}>{TIMING_LABELS[timing]}</span>
         </div>
         <h3 className="mt-2 break-words font-serif text-lg font-bold text-stone-900 dark:text-stone-100">
-          <Link href={edition.url} className="hover:text-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:hover:text-amber-400">{edition.title}</Link>
+          <Link href={edition.url} data-content-type="edition" data-content-id={edition.id} className="hover:text-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:hover:text-amber-400">{edition.title}</Link>
         </h3>
         <p className="mt-1 break-words text-xs text-stone-500 dark:text-stone-400">
-          Part of <Link href={edition.eventUrl} className="font-semibold text-stone-700 hover:underline dark:text-stone-300">{edition.eventName}</Link>
+          Part of <Link href={edition.eventUrl} data-content-type="event" className="font-semibold text-stone-700 hover:underline dark:text-stone-300">{edition.eventName}</Link>
         </p>
         {(dates || place) && <div className="mt-3 space-y-1.5 text-xs text-stone-600 dark:text-stone-400">
           {dates && <p className="flex items-start gap-1.5"><CalendarDays size={14} aria-hidden="true" className="mt-px shrink-0 text-amber-700 dark:text-amber-500" /><span className="sr-only">Dates: </span><span className="tabular-nums">{dates}</span></p>}
           {place && <p className="flex items-start gap-1.5"><MapPin size={14} aria-hidden="true" className="mt-px shrink-0 text-amber-700 dark:text-amber-500" /><span className="sr-only">Venue: </span><span className="min-w-0 break-words">{place}</span></p>}
         </div>}
       </div>
-      <Link href={edition.url} className="mt-4 inline-block border-t border-stone-100 pt-3 text-xs font-semibold text-amber-700 hover:underline dark:border-stone-800 dark:text-amber-400" aria-label={`View the ${edition.title} guide`}>
+      <Link href={edition.url} data-content-type="edition" data-content-id={edition.id} className="mt-4 inline-block border-t border-stone-100 pt-3 text-xs font-semibold text-amber-700 hover:underline dark:border-stone-800 dark:text-amber-400" aria-label={`View the ${edition.title} guide`}>
         View edition guide <span aria-hidden="true">→</span>
       </Link>
     </article>

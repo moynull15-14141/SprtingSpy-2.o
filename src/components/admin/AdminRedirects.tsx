@@ -68,11 +68,14 @@ export const AdminRedirects: React.FC = () => {
             Section 11: 301 Permanent and 302 Temporary redirects for URL migrations, event renaming, and canonical stability.
           </p>
         </div>
-        {!isCreating && (
-          <Button onClick={() => setIsCreating(true)} size="sm">
-            + New Redirect Rule
-          </Button>
-        )}
+        <div className="flex items-center gap-3">
+          <a href="/api/redirects/export" className="text-xs font-semibold text-amber-700 underline dark:text-amber-400">Export all (CSV backup)</a>
+          {!isCreating && (
+            <Button onClick={() => setIsCreating(true)} size="sm">
+              + New Redirect Rule
+            </Button>
+          )}
+        </div>
       </div>
 
       {feedback && (

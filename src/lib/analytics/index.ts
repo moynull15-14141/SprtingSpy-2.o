@@ -20,8 +20,14 @@ import { isPrivatePath, sanitizeParams, sanitizePath, type Params } from './sani
 export const EVENTS = {
   page_view: ['page_path', 'page_title'],
   article_view: ['article_id', 'sport', 'category', 'author', 'event', 'published_at'],
+  // PHASE Q: Event and Edition pages (the Event counterpart of article_view).
+  event_view: ['event_id', 'sport', 'event', 'edition_year', 'edition_status'],
+  // PHASE Q: GA4 recommended event for content discovery: a click on an
+  // article/event/edition card; `placement` = "<page type>:<section>".
+  select_content: ['content_type', 'content_id', 'placement'],
   search: ['search_term', 'result_count', 'page', 'sport', 'category', 'author', 'date', 'sort'],
-  search_result_click: ['search_term', 'link_path', 'position'],
+  // PHASE Q: result_type = article | event (Event results are listed separately, positions per list).
+  search_result_click: ['search_term', 'link_path', 'position', 'result_type'],
   search_suggestion_click: ['search_term', 'link_path'],
   ad_click: ['ad_placement', 'ad_provider', 'sponsor'],
 } as const;

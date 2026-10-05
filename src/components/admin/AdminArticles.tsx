@@ -5,7 +5,7 @@
  * Select Article Type -> Write -> Featured Image -> SEO Check -> Publish Status.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { legacyToDoc, validateRichDoc, type RichDoc } from '../../lib/richText';
 import { MediaPicker, ReviewBadge, thumbnailUrl } from './media/MediaShared';
@@ -65,6 +65,11 @@ export const AdminArticles: React.FC = () => {
   const isAuthor = currentUser.role === 'Author';
   const ownByline = authors.find(author => author.userId === currentUser.id);
   const [isCreating, setIsCreating] = useState(false);
+  // PHASE R UI/UX: tell the CMS layout an article is open (it folds the desk navigation).
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('sportingspy:cms-editor', { detail: { active: isCreating } }));
+    return () => { window.dispatchEvent(new CustomEvent('sportingspy:cms-editor', { detail: { active: false } })); };
+  }, [isCreating]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const editingArticleForPermissions = articles.find(article => article.id === editingId);
   const authorLocked = isAuthor && !!editingArticleForPermissions && (editingArticleForPermissions.reviewStatus === 'in_review' || ['published','scheduled','archived'].includes(editingArticleForPermissions.status));
@@ -332,6 +337,14 @@ export const AdminArticles: React.FC = () => {
     return counts;
   }, { passed: 0, blocking: 0, warning: 0, info: 0 }) ?? null;
   const focusField = (id: string) => document.getElementById(id)?.focus();
+
+  // PHASE P: the CMS list carries no article bodies; load the full article to edit it.
+  const openEditor = async (id: string) => {
+    setFeedback(null);
+    const res = await apiCall<Article>(`/api/articles/${encodeURIComponent(id)}`);
+    if (res.data) startEdit(res.data);
+    else setFeedback(res.error || 'This article could not be loaded. Please try again.');
+  };
 
   const startEdit = (art: Article) => {
     setFirstParagraphFocusRequest(0);
@@ -918,7 +931,7 @@ export const AdminArticles: React.FC = () => {
           sports={sports}
           authors={authors}
           onView={(url) => navigate(url)}
-          onEdit={(id) => { const art = articles.find((a) => a.id === id); if (art) startEdit(art); else setFeedback('This article is still loading. Please try again in a moment.'); }}
+          onEdit={(id) => void openEditor(id)}
           onReview={(id) => { const art = articles.find((a) => a.id === id); if (art) confirmFreshness(art); }}
           onDelete={(id, title) => { if (confirm(`Delete "${title}"?`)) deleteArticle(id); }}
         />

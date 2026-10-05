@@ -3,11 +3,14 @@
   "private": true,
   "version": "2.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=22 <23"
+  },
   "scripts": {
     "dev": "tsx server.ts",
     "start": "tsx server.ts",
     "start:production": "node --import tsx server/start-production.ts",
-    "build": "tsc --noEmit && next build",
+    "build": "prisma generate && tsc --noEmit && next build",
     "clean": "rm -rf .next dist",
     "lint": "tsc --noEmit",
     "test:phase4": "tsx server/scripts/verify-phase4.ts",
@@ -53,7 +56,19 @@
     "content:phase-h": "tsx server/scripts/apply-phase-h-content.ts",
     "check:env": "tsx server/scripts/check-env.ts",
     "test:phase-r": "tsx server/scripts/verify-phase-r.ts",
-    "test:phase-r1": "tsx server/scripts/verify-phase-r1.ts"
+    "test:phase-r1": "tsx server/scripts/verify-phase-r1.ts",
+    "test:phase-n": "tsx server/scripts/verify-phase-n.ts",
+    "migration:inventory": "tsx server/scripts/legacy-inventory.ts",
+    "test:phase-p": "tsx server/scripts/verify-phase-p.ts",
+    "test:phase-q": "tsx server/scripts/verify-phase-q.ts",
+    "test:phase-s": "tsx server/scripts/verify-phase-s.ts",
+    "test:phase-s-browser": "tsx server/scripts/verify-phase-s-browser.ts",
+    "test:phase-t1-profile": "tsx server/scripts/verify-phase-t1-profile.ts",
+    "test:r2-live": "tsx server/scripts/verify-r2-live.ts",
+    "media:copy-to-r2": "tsx server/scripts/media-local-to-r2.ts",
+    "perf:seed": "tsx server/scripts/perf-seed.ts",
+    "perf:scale": "tsx server/scripts/perf-scale.ts",
+    "verify:render-staging": "tsx server/scripts/verify-render-staging.ts"
   },
   "dependencies": {
     "@ffprobe-installer/ffprobe": "^2.1.2",
@@ -75,7 +90,7 @@
     "express": "^4.21.2",
     "lucide-react": "^0.546.0",
     "multer": "^2.4.0",
-    "next": "^16.3.6",
+    "next": "16.3.8",
     "pg": "^8.23.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",

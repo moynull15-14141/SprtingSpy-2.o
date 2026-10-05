@@ -98,7 +98,7 @@ export const AdminUsers: React.FC = () => {
           </h2>
           <p className="text-xs text-stone-500 mt-1 dark:text-stone-400">
             Section 20: Role-Based Access Control (Admin, Editor, Author, Reader). Every action here is
-            enforced by the server against the real logged-in session — see PROJECT_BRAIN.md Phase 1.
+            enforced by the server against the real logged-in session.
           </p>
         </div>
         {!isCreating && currentUser.role === 'Admin' && (

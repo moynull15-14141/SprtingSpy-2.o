@@ -33,6 +33,8 @@ export const SETTINGS = {
   consentMode: { group: 'Privacy & consent', label: 'Consent interface', public: false, options: ['builtin', 'google-cmp'], validate: oneOf(['builtin', 'google-cmp']) },
   // PHASE R: first-party, aggregate real-user performance + page-view measurement.
   realUserMonitoring: { group: 'Privacy & consent', label: 'Real-user monitoring', public: false, options: ['enabled', 'disabled'], validate: oneOf(['enabled', 'disabled']) },
+  // PHASE Q: how long aggregate analytics are kept (server/analyticsRetention.ts). Default 25-months.
+  analyticsRetention: { group: 'Privacy & consent', label: 'Analytics retention', public: false, options: ['13-months', '25-months', '37-months', 'unlimited'], validate: oneOf(['13-months', '25-months', '37-months', 'unlimited']) },
   // PHASE R: Search Console / Bing data import (credentials are environment secrets).
   searchConsoleProperty: { group: 'Search engine data', label: 'Search Console property', public: false, validate: pattern(/^(sc-domain:[a-z0-9.-]+|https:\/\/[^\s]+\/)$/i, 'Use "sc-domain:example.com" or a URL-prefix property ending in "/".') },
   bingSiteUrl: { group: 'Search engine data', label: 'Bing Webmaster site URL', public: false, validate: pattern(/^https:\/\/[^\s]+\/$/i, 'Use the site URL exactly as registered in Bing, ending in "/".') },

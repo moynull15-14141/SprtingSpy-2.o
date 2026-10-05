@@ -45,13 +45,13 @@ export function SportHubTabs(props: {
 
       {props.ad}
 
-      {show('events') && props.featuredSection}
-      {show('events') && props.upcomingSection}
-      {show('articles') && props.articlesSection}
-      {show('events') && props.eventsSection}
-      {show('guides') && props.guidesSection}
-      {activeTab === 'all' && props.exploreSection}
-      {activeTab === 'all' && props.faqSection}
+      <React.Fragment key="featured">{show('events') && props.featuredSection}</React.Fragment>
+      <React.Fragment key="upcoming">{show('events') && props.upcomingSection}</React.Fragment>
+      <React.Fragment key="articles">{show('articles') && props.articlesSection}</React.Fragment>
+      <React.Fragment key="events">{show('events') && props.eventsSection}</React.Fragment>
+      <React.Fragment key="guides">{show('guides') && props.guidesSection}</React.Fragment>
+      <React.Fragment key="explore">{activeTab === 'all' && props.exploreSection}</React.Fragment>
+      <React.Fragment key="faq">{activeTab === 'all' && props.faqSection}</React.Fragment>
     </>
   );
 }

@@ -11,6 +11,7 @@
 import 'dotenv/config';
 import { appEnv, deploymentConfig, DeploymentConfigError } from '../deployment';
 import { s3ConfigFromEnv } from '../media/s3';
+import { profileImageOrigins } from '../profileImage';
 
 const problems: string[] = [];
 const warnings: string[] = [];
@@ -21,11 +22,12 @@ try { deploymentConfig(); } catch (e) { problems.push(e instanceof DeploymentCon
 
 const environment = appEnv();
 const provider = (env.MEDIA_STORAGE_PROVIDER || 'local').trim().toLowerCase();
-if (provider === 's3') {
-  try { s3ConfigFromEnv(); } catch (e) { problems.push((e as Error).message); }
+if (provider === 's3' || provider === 'r2') {
+  try { s3ConfigFromEnv(env, provider); } catch (e) { problems.push((e as Error).message); }
 } else if (provider === 'local') {
   if (environment !== 'development' && !set('MEDIA_LOCAL_DIR')) warnings.push('MEDIA_LOCAL_DIR is not set: uploads go to ./storage/media inside the app directory. Point it at a persistent, backed-up volume (or use MEDIA_STORAGE_PROVIDER=s3).');
-} else problems.push(`MEDIA_STORAGE_PROVIDER "${provider}" is not supported; use "local" or "s3".`);
+} else problems.push(`MEDIA_STORAGE_PROVIDER "${provider}" is not supported; use "local", "s3" or "r2".`);
+try { profileImageOrigins(); } catch (e) { problems.push((e as Error).message); }
 
 if (environment !== 'development') {
   if (env.AUTH_MODE !== 'production') warnings.push('AUTH_MODE is not "production".');

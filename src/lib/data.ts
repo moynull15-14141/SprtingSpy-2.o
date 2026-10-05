@@ -46,6 +46,12 @@ export const getRumEnabled = cache(cached('rumEnabled', async () => {
   const row = await prisma.siteSetting.findUnique({ where: { key: 'realUserMonitoring' } }).catch(() => null);
   return row?.value !== 'disabled';
 }));
+/** PHASE Q: analytics retention choice (Admin → Settings), for the privacy page. */
+export const getAnalyticsRetention = cache(cached('analyticsRetention', async () => {
+  const { prisma } = await import('../../server/db');
+  const row = await prisma.siteSetting.findUnique({ where: { key: 'analyticsRetention' } }).catch(() => null);
+  return ['13-months', '25-months', '37-months', 'unlimited'].includes(row?.value ?? '') ? row!.value : '25-months';
+}));
 /** PHASE R: published FAQ of one context (article / edition / event / sport). */
 export const getContextFaqs = cache(async (kind: 'article' | 'edition' | 'event' | 'sport', id: string) =>
   (await import('../../server/services/public/faq')).getPublishedFaqsFor({ kind, id }));
@@ -55,6 +61,9 @@ export const getContextFaqs = cache(async (kind: 'article' | 'edition' | 'event'
  * default social image, X/Twitter handle), falling back to the built-in
  * branding. These values are public by nature.
  */
+/** PHASE P: public settings (verification tokens, identity) through the write-invalidated cache. */
+export const getPublicSettings = cache(cached('publicSettings', async () => (await import('../../server/settingsRegistry')).publicSettings()));
+
 export const getSiteIdentity = cache(cached('siteIdentity', async (): Promise<SiteIdentity> => {
   let stored: Partial<Record<string, string>> = {};
   try { stored = await (await import('../../server/settingsRegistry')).publicSettings(); } catch { /* database trouble: built-in branding keeps pages up */ }

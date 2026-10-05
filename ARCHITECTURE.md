@@ -1,6 +1,6 @@
 # SportingSpy v2.0 architecture
 
-This is the current code path as of 4 October 2026. Older `PROJECT_BRAIN.md` and phase reports include historical Vite/JSON phases; `PROJECT_STATE.json` is the current snapshot. See `PHASE_R_REQUIREMENTS_REPORT.md` for launch gaps.
+This is the current code path. Phase reports and older design notes are kept outside this repository (project archive).
 
 ## Request path
 

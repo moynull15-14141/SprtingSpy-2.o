@@ -11,7 +11,7 @@ import { Header } from '../components/layout/Header';
 import { Footer } from '../components/layout/Footer';
 import { SiteProvider } from '../context/SiteContext';
 import { BRANDING } from '../config/branding';
-import { getFeatures, getGlobalFaqSettings, getRumEnabled, getNavSports, getSiteIdentity, getSiteLayoutForRequest } from '../lib/data';
+import { getFeatures, getGlobalFaqSettings, getRumEnabled, getNavSports, getPublicSettings, getSiteIdentity, getSiteLayoutForRequest } from '../lib/data';
 import { AnnouncementBar } from '../components/site/AnnouncementBar';
 import { GlobalBlocks } from '../components/site/GlobalBlocks';
 import { PreviewBanner } from '../components/site/PreviewBanner';
@@ -29,8 +29,7 @@ export const dynamic = 'force-dynamic';
 
 export async function generateMetadata(): Promise<Metadata> {
   // PHASE C: CMS settings that are public by design (verification tokens).
-  const { publicSettings } = await import('../../server/settingsRegistry');
-  const [settings, identity] = await Promise.all([publicSettings().catch(() => ({} as Awaited<ReturnType<typeof publicSettings>>)), getSiteIdentity()]);
+  const [settings, identity] = await Promise.all([getPublicSettings().catch(() => ({} as Awaited<ReturnType<typeof getPublicSettings>>)), getSiteIdentity()]);
   const verification: Metadata['verification'] = {
     ...(settings.googleSiteVerification ? { google: settings.googleSiteVerification } : {}),
     ...(settings.bingSiteVerification ? { other: { 'msvalidate.01': settings.bingSiteVerification } } : {}),

@@ -128,7 +128,7 @@ try {
   for (const role of Object.keys(ids) as (keyof typeof ids)[]) await prisma.user.create({ data: { id: ids[role], name: `F1 ${role}`, email: `${ids[role]}@example.test`, role: role === 'admin' ? 'Admin' : role === 'editor' ? 'Editor' : 'Author', avatar: '', joinedAt: new Date(), passwordHash: hashPassword(password) } });
   // Test only known documents so pre-existing editorial content does not affect results.
   for (const area of SITE_AREAS) await prisma.siteExperience.upsert({ where: { area }, create: { area, draft: DEFAULT_SITE_EXPERIENCE[area] as object, draftUpdatedAt: new Date(), draftUpdatedBy: prefix }, update: { draft: DEFAULT_SITE_EXPERIENCE[area] as object, published: Prisma.DbNull, scheduled: Prisma.DbNull, scheduledFor: null, version: 0, publishedAt: null, publishedBy: null, draftUpdatedAt: new Date(), draftUpdatedBy: prefix } });
-  child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], { windowsHide: true, env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', NODE_ENV: 'production', APP_ENV: 'production', AUTH_MODE: 'production', DEV_LOGIN_BYPASS: 'false', ALLOWED_ORIGIN: base, TRUST_PROXY: 'false', GEMINI_API_KEY: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], { windowsHide: true, env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', NODE_ENV: 'production', APP_ENV: 'production', AUTH_MODE: 'production', DEV_LOGIN_BYPASS: 'false', PUBLIC_CACHE_TTL_SECONDS: '2', ALLOWED_ORIGIN: base, TRUST_PROXY: 'false', GEMINI_API_KEY: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout?.on('data', (c) => output += c); child.stderr?.on('data', (c) => output += c);
   const anon = new Client(), admin = new Client(), editor = new Client(), author = new Client();
   for (let i = 0; i < 160; i++) { if (child.exitCode !== null) throw new Error(output); try { if ((await anon.request('/api/health')).status === 200) break; } catch {} await new Promise((r) => setTimeout(r, 250)); }
@@ -211,6 +211,9 @@ try {
   pass('breaking announcements publish site-wide and expired announcements disappear');
   await prisma.siteExperience.update({ where: { area: 'homepage' }, data: { published: { corrupted: true } } });
   assert.deepEqual((await effectiveDocuments()).homepage, DEFAULT_SITE_EXPERIENCE.homepage);
+  // The row was changed directly in the database, bypassing the app's cache
+  // invalidation; the public cache (2 s TTL on this test server) expires first.
+  await new Promise((r) => setTimeout(r, 2500));
   assert((await expect(anon, '/')).text.includes(HOMEPAGE_H1.replace(/&/g, '&amp;')));
   pass('corrupted published configuration serves safe defaults');
   await expect(editor, api('homepage', 'draft'), 200, 'PUT', { document: DEFAULT_SITE_EXPERIENCE.homepage }); await expect(editor, api('homepage', 'publish'), 200, 'POST');

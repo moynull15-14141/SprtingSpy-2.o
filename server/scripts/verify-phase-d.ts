@@ -19,7 +19,8 @@ assert(fs.existsSync('.next/BUILD_ID'), 'Run npm run build first.');
 const fixture = `phased-${crypto.randomUUID()}`;
 const password = `Test-${crypto.randomUUID()}`;
 const userIds = { admin: `${fixture}-admin`, editor: `${fixture}-editor`, author: `${fixture}-author-user` };
-const protectedFiles = ['data/db.json', 'PROJECT_BRAIN.md'];
+// Files that must stay byte-identical, where still present (both were moved to the project archive).
+const protectedFiles = ['data/db.json', 'PROJECT_BRAIN.md'].filter((file) => fs.existsSync(file));
 const digest = (value: string | Buffer) => crypto.createHash('sha256').update(value).digest('hex');
 const filesBefore = protectedFiles.map((file) => digest(fs.readFileSync(file)));
 const tables = ['sport', 'sportEvent', 'eventEdition', 'article', 'articleMedia', 'author', 'user', 'session', 'comment', 'mediaItem', 'adSlotConfig', 'redirectRule', 'siteSetting', 'seoRule', 'seoScanRun', 'seoIntegrationLog', 'auditLog'] as const;

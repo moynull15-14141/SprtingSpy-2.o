@@ -9,6 +9,13 @@ import { useApp } from '../../context/AppContext';
 import { AdSlotId, AdProvider, UNPLACED_AD_SLOTS, type AdCreative } from '../../types';
 import { AdMediaEditor } from './AdMediaEditor';
 
+// Placement positions are defined by public components. Show current copy for
+// existing databases that still hold older seed descriptions.
+const placementCopy: Partial<Record<AdSlotId, string>> = {
+  ARTICLE_MIDDLE: 'After the second body paragraph on article pages.',
+  EVENT_TOP: 'On sport hubs and Event pages; after quick facts on Edition pages.',
+};
+
 export const AdminAds: React.FC = () => {
   const { adSlots: allSlots, toggleAdSlot, updateAdSlot, currentUser } = useApp();
   // PHASE H: slots with no public placement (sidebar) are not configurable.
@@ -183,7 +190,7 @@ export const AdminAds: React.FC = () => {
                 </td>
                 <td className="p-3 text-stone-600 dark:text-stone-400">
                   {slot.name}
-                  <span className="block text-[11px] text-stone-500 dark:text-stone-400">{slot.placementDescription}</span>
+                  <span className="block text-[11px] text-stone-500 dark:text-stone-400">{placementCopy[slot.id] ?? slot.placementDescription}</span>
                 </td>
                 <td className="p-3 font-mono text-stone-500 dark:text-stone-400">{slot.dimensions}</td>
                 <td className="p-3 text-stone-700 dark:text-stone-300">

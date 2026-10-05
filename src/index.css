@@ -85,6 +85,10 @@
 .site-shell:has([data-admin-shell]) > footer,
 .site-shell:has([data-admin-shell]) > .site-footer-blocks,
 .site-shell:has([data-admin-shell]) > .site-announcements { display: none; }
+/* PHASE R UI/UX: anchors, focus and scroll-into-view stop below the sticky
+   64px header instead of underneath it (WCAG 2.4.11 focus not obscured). */
+html { scroll-padding-top: 5rem; }
+
 /* Public pages use a 98rem content column (space outside is left for ads);
    the CMS keeps the wider 120rem workspace. */
 .site-main:has([data-admin-shell]) { max-width: 120rem; }

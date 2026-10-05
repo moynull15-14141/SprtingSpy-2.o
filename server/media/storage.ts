@@ -10,7 +10,7 @@
  * MEDIA_STORAGE_PROVIDER selects the provider:
  *   "local" (default) — files on disk under MEDIA_LOCAL_DIR, served at /media.
  *     In production this directory must be a persistent, backed-up volume.
- *   "s3" (PHASE J) — any S3-compatible bucket (AWS S3, Cloudflare R2, …),
+ *   "s3" or "r2" — one S3-compatible provider implementation,
  *     see server/media/s3.ts; files are served from MEDIA_PUBLIC_BASE_URL.
  * Unknown values or incomplete S3 settings fail at startup instead of
  * silently storing somewhere unexpected.
@@ -92,12 +92,12 @@ let provider: MediaStorageProvider | null = null;
 export function mediaStorage(): MediaStorageProvider {
   if (provider) return provider;
   const name = (process.env.MEDIA_STORAGE_PROVIDER || 'local').trim().toLowerCase();
-  if (name === 's3') {
-    provider = new S3StorageProvider(s3ConfigFromEnv());
+  if (name === 's3' || name === 'r2') {
+    provider = new S3StorageProvider(s3ConfigFromEnv(process.env, name));
     return provider;
   }
   if (name !== 'local') {
-    throw new Error(`MEDIA_STORAGE_PROVIDER "${name}" is not supported; use "local" or "s3".`);
+    throw new Error(`MEDIA_STORAGE_PROVIDER "${name}" is not supported; use "local", "s3" or "r2".`);
   }
   provider = new LocalStorageProvider(process.env.MEDIA_LOCAL_DIR || 'storage/media');
   return provider;

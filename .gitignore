@@ -29,3 +29,35 @@ next-env.d.ts
 
 # Local run artifacts (screenshots, logs, probe scripts)
 /.codex-runtime/
+
+# PHASE N: draft migration sheets derived from the old site's exports (owner data; regenerate with npm run migration:inventory)
+/migration-inventory/
+
+# PHASE N.1: legacy-site migration sources are RESTRICTED (credentials, password
+# hashes, TLS keys, staff PII). They live outside this repository; these rules
+# stop an accidental copy into the working tree from ever being committed.
+/backup/
+/legacy/
+/migration-source/
+*.sql
+!/prisma/migrations/**/migration.sql
+*.zip
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+*.WordPress.*.xml
+*.wxr
+wp-config.php
+*.rcube.db*
+*.crt
+*.p12
+*.pfx
+*ssl_log*
+*.log.gz
+
+# PHASE P: local performance measurement output
+/.perf/
+
+# Screenshots written by the verification suites (regenerated on every run)
+/verification/

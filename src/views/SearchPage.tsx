@@ -215,9 +215,11 @@ export const SearchPage: React.FC<{ results: PublicSearchData; state: SearchStat
                   <Link href={tabHref('event')} className="text-xs font-semibold text-amber-700 hover:underline dark:text-amber-400">See all {results.eventTotal} events <span aria-hidden="true">→</span></Link>
                 )}
               </div>
-              <ol className="divide-y divide-stone-200 dark:divide-stone-800">
-                {results.events.map((e, i) => <EventResultRow key={e.id} event={e} q={q} position={i + 1} />)}
-              </ol>
+              <SearchAnalytics query={q} total={pagedTotal} page={results.page} filters={filters} sort={state.sort} trackSearch={false}>
+                <ol className="divide-y divide-stone-200 dark:divide-stone-800">
+                  {results.events.map((e, i) => <EventResultRow key={e.id} event={e} q={q} position={i + 1} />)}
+                </ol>
+              </SearchAnalytics>
             </section>
           )}
 

@@ -33,7 +33,7 @@ try {
   await page.getByRole('button', { name: 'Sign In' }).click();
   await page.getByRole('heading', { name: 'Content Management System' }).waitFor();
 
-  await page.getByRole('button', { name: /Articles/ }).click();
+  await page.getByRole('button', { name: 'Articles', exact: true }).click();
   const create = page.getByTestId('create-article-button');
   await create.waitFor();
   await create.click();
@@ -80,8 +80,9 @@ try {
   assert.equal(afterSeo.editor, afterEditor.editor, 'SEO scrolling moved the article column');
 
   await page.screenshot({ path: path.join('.codex-runtime', 'admin-article-ui-fixed.png'), fullPage: false });
-  // Laptop width: the pane is too narrow for Article | SEO columns, so the
-  // content pane itself must scroll (nothing may be clipped).
+  // Laptop width: the sidebar may collapse and leave room for both columns.
+  // The SEO panel must remain reachable whether the pane scrolls or the
+  // editor keeps its independent columns.
   await page.setViewportSize({ width: 1280, height: 800 });
   const laptop = await page.evaluate(`(() => {
     const main = document.querySelector('.cms-main');
@@ -91,7 +92,7 @@ try {
     return { pageHeight: document.documentElement.scrollHeight, innerHeight, seoBottom: seo.bottom, paneBottom: pane.bottom, scrolled: main.scrollTop > 0 };
   })()`) as { pageHeight: number; innerHeight: number; seoBottom: number; paneBottom: number; scrolled: boolean };
   assert(laptop.pageHeight <= laptop.innerHeight + 1, 'laptop CMS must not make the browser page scroll');
-  assert(laptop.scrolled && laptop.seoBottom <= laptop.paneBottom + 1, 'laptop article form must be reachable by scrolling the content pane');
+  assert(laptop.seoBottom <= laptop.paneBottom + 1, `laptop SEO panel must be visible or reachable by scrolling the content pane: ${JSON.stringify(laptop)}`);
   await page.setViewportSize({ width: 390, height: 844 });
   const mobile = await page.evaluate(`({
     pageWidth: document.documentElement.scrollWidth,

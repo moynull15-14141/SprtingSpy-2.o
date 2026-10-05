@@ -3,7 +3,8 @@ import { notFound } from 'next/navigation';
 import { EventEditionPage } from '../../../../views/EventEditionPage';
 import { getEditionPage } from '../../../../lib/data';
 import { descriptionFrom, pageMetadata } from '../../../../lib/seo';
-import { editionPath } from '../../../../lib/paths';
+import { editionPath, eventPath, siteOrigin } from '../../../../lib/paths';
+import { eventIndexability } from '../../../../lib/indexability';
 import { yearParam } from '../../../../lib/params';
 
 type Params = Promise<{ sport: string; event: string; year: string }>;
@@ -22,7 +23,7 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
     title: `${edition.title} – Official Dates, Venue & Guides | SportingSpy`,
     description: descriptionFrom(edition.description, `${edition.title} – ${event.name} edition guide on SportingSpy.`),
     // Same rule as the sitemap (editionIndexability): an Edition of a noindexed Event is not indexable.
-    noindex: !!event.seo?.noIndex,
+    noindex: !eventIndexability({ isVisible: true, sportVisible: true, seo: event.seo }, eventPath(sport.slug, event.slug), siteOrigin()).indexable,
     path: editionPath(sport.slug, event.slug, edition.year),
     seo: edition.seo,
     image: edition.featuredImage,

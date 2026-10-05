@@ -54,7 +54,8 @@ assert.equal(sanitizeSearchTerm('  Call ME 01711-223344 '), '(redacted)');
 assert.equal(sanitizeSearchTerm('someone@example.com'), '(redacted)');
 assert.equal(sanitizeSearchTerm('French   OPEN'), 'french open');
 assert.deepEqual(sanitizeParams({ a: 'x'.repeat(300), b: { nested: 1 }, c: NaN, d: 2, e: 'ok' }, ['a', 'b', 'c', 'd']), { a: 'x'.repeat(100), d: 2 });
-assert.deepEqual(await trackingConfig(), { ga4MeasurementId: null, adsenseClient: null }, 'providers stay off outside production');
+// PHASE Q: expectation updated to the PrivacyConfig shape Phase R introduced (consent interface, Auto ads); intent unchanged.
+assert.deepEqual(await trackingConfig(), { ga4MeasurementId: null, adsenseClient: null, consentMode: 'builtin', adsenseAutoAds: false }, 'providers stay off outside production');
 pass('consent cookie format, per-category answers, payload/path/search-term sanitizing, and development kill-switch');
 
 const before = await snapshot();

@@ -24,6 +24,7 @@ import { prisma } from '../db';
 import { checkDatabaseUrlIsLocalDev } from '../dbSafety';
 import { hashPassword } from '../password';
 import { base32Decode, totpAt } from '../totp';
+import { p75FromHistogram } from '../rum';
 
 assert(checkDatabaseUrlIsLocalDev(process.env.DATABASE_URL).safe, 'Phase R requires a local development database.');
 assert(fs.existsSync('.next/BUILD_ID'), 'Build before Phase R verification (npm run build).');
@@ -307,7 +308,11 @@ try {
   assert.equal((await anon.request('/api/rum', 'POST', { path: '/admin/', pageType: 'article', device: 'mobile' })).status, 400, 'private paths are not measured');
   const ins = await admin.ok('/api/insights/overview?period=today');
   assert(ins.pageViews.topPages.some((p: any) => p.path === rumPath && p.views >= 3), 'page views aggregated');
-  assert(ins.webVitals.some((v: any) => v.pageType === 'article' && v.metric === 'LCP' && v.device === 'mobile' && v.samples >= 3 && v.p75 === 2000), 'LCP p75 from histogram');
+  const todayUtc = new Date(); todayUtc.setUTCHours(0, 0, 0, 0);
+  const lcpNow = await prisma.webVitalStat.findFirstOrThrow({ where: { day: todayUtc, pageType: 'article', metric: 'LCP', device: 'mobile' } });
+  const lcpBefore = vitalsBefore.filter((v) => v.day.getTime() === todayUtc.getTime() && v.pageType === 'article' && v.metric === 'LCP' && v.device === 'mobile').reduce((n, v) => n + v.samples, 0);
+  assert(lcpNow.samples >= lcpBefore + 3, 'three LCP samples were recorded');
+  assert(ins.webVitals.some((v: any) => v.pageType === 'article' && v.metric === 'LCP' && v.device === 'mobile' && v.samples === lcpNow.samples && v.p75 === p75FromHistogram('LCP', lcpNow.histogram)), 'LCP p75 from the current histogram');
   for (const p of ['7d', '28d', '3m', '6m', '12m']) await admin.ok(`/api/insights/overview?period=${p}`);
   await admin.ok('/api/insights/overview?period=custom&from=2026-01-01&to=2026-01-31');
   assert.equal((await admin.request('/api/insights/overview?period=custom&from=2026-02-01&to=2026-01-01')).status, 400);

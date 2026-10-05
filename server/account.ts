@@ -6,7 +6,8 @@ import { getSessionIdFromRequest, buildExpiredSessionCookie } from './session';
 import { hashPassword, verifyPassword, validatePasswordStrength } from './password';
 import { createRateLimiter } from './rateLimit';
 import { recordAudit } from './audit';
-import { validateText, validateSafeUrl } from './validation';
+import { validateText } from './validation';
+import { validateProfileImageUrl } from './profileImage';
 import type { Prisma } from './generated/prisma/client';
 
 // Explicit projections: adding a sensitive column later cannot expose it here.
@@ -80,8 +81,9 @@ export function accountRouter(lookup: () => AuthLookup) {
     const data: { name?: string; avatar?: string } = {};
     for (const field of ['name', 'avatar'] as const) {
       if (!(field in body)) continue;
-      const result = field === 'name' ? validateText(body[field], field, 150) : validateSafeUrl(body[field], field);
-      if (!result.valid) return res.status(400).json({ error: result.error });
+      const result = field === 'name' ? validateText(body[field], field, 150) : null;
+      const imageError = field === 'avatar' ? validateProfileImageUrl(body[field], field) : null;
+      if (result && !result.valid || imageError) return res.status(400).json({ error: imageError || result?.error });
       data[field] = body[field].trim();
     }
     let authorData: { name?: string; bio?: string; avatar?: string } | undefined;
@@ -92,8 +94,9 @@ export function accountRouter(lookup: () => AuthLookup) {
       for (const field of ['name', 'bio', 'avatar'] as const) {
         if (!(field in body.authorProfile)) continue;
         const value = body.authorProfile[field];
-        const result = field === 'avatar' ? validateSafeUrl(value, field) : validateText(value, field, field === 'bio' ? 3000 : 150, field !== 'bio');
-        if (typeof value !== 'string' || !result.valid) return res.status(400).json({ error: result.error || 'Profile fields must be strings.' });
+        const result = field === 'avatar' ? null : validateText(value, field, field === 'bio' ? 3000 : 150, field !== 'bio');
+        const imageError = field === 'avatar' ? validateProfileImageUrl(value, field) : null;
+        if (typeof value !== 'string' || imageError || result && !result.valid) return res.status(400).json({ error: imageError || result?.error || 'Profile fields must be strings.' });
         authorData[field] = value.trim();
       }
     }

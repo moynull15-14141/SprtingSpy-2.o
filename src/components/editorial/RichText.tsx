@@ -60,6 +60,13 @@ function renderInline(nodes: RichNode[] = []): React.ReactNode[] {
 
 export function RichText({ doc, media, afterSecondParagraph }: RichTextProps) {
   let paragraphCount = 0;
+  // PHASE R UI/UX: the page title is the only h1, so the body's shallowest
+  // heading becomes h2 (an article whose sections start at H3 would otherwise
+  // skip a level). Only the element changes; the size the editor chose stays.
+  const levels: number[] = [];
+  const collect = (nodes: RichNode[] = []) => nodes.forEach((n) => { if (n.type === 'heading') levels.push(Number(n.attrs?.level) || 2); else collect(n.content); });
+  collect(doc.content);
+  const headingShift = levels.length ? Math.max(0, Math.min(...levels) - 2) : 0;
 
   const renderBlock = (node: RichNode, key: React.Key, topLevel: boolean): React.ReactNode => {
     switch (node.type) {
@@ -87,7 +94,7 @@ export function RichText({ doc, media, afterSecondParagraph }: RichTextProps) {
           3: 'font-serif text-xl sm:text-2xl font-bold text-stone-900 dark:text-stone-100 pt-4',
           4: 'font-serif text-lg sm:text-xl font-semibold text-stone-900 dark:text-stone-100 pt-2',
         }[level];
-        const Tag = `h${level}` as 'h2' | 'h3' | 'h4';
+        const Tag = `h${Math.max(2, level - headingShift)}` as 'h2' | 'h3' | 'h4';
         return <Tag key={key} style={{ textAlign: String(node.attrs?.textAlign || 'left') as React.CSSProperties['textAlign'] }} className={className}>{renderInline(node.content)}</Tag>;
       }
       case 'bulletList':

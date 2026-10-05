@@ -16,6 +16,7 @@ import { AdSlot } from '../components/ui/AdSlot';
 import { JsonLd } from '../components/seo/JsonLd';
 import { ContextFaq } from '../components/editorial/ContextFaq';
 import { RumPageType } from '../components/analytics/RumPageType';
+import { EventAnalytics } from '../components/editorial/EventAnalytics';
 import { absoluteUrl, editionPath, eventPath } from '../lib/paths';
 import { editionDates } from '../lib/eventDates';
 import { absoluteMedia, schemaStatus } from './EventPage';
@@ -55,6 +56,7 @@ export const EventEditionPage: React.FC<{ data: EditionPageData }> = ({ data }) 
   return (
     <div className="space-y-10">
       <RumPageType type="edition" />
+      <EventAnalytics id={event.id} sport={sport.slug} event={event.slug} editionYear={edition.year} editionStatus={edition.status} />
       {structuredData && <JsonLd data={structuredData} />}
 
       <Breadcrumbs

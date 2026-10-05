@@ -30,7 +30,8 @@ const readerSessionId = crypto.randomBytes(32).toString('hex');
 const createdArticleIds: string[] = [];
 const createdEventIds: string[] = [];
 const createdEditionIds: string[] = [];
-const protectedFiles = ['data/db.json', 'PROJECT_BRAIN.md'];
+// Files that must stay byte-identical, where still present (both were moved to the project archive).
+const protectedFiles = ['data/db.json', 'PROJECT_BRAIN.md'].filter((file) => fs.existsSync(file));
 const digest = (value: string | Buffer) => crypto.createHash('sha256').update(value).digest('hex');
 const filesBefore = protectedFiles.map((file) => digest(fs.readFileSync(file)));
 const tables = ['sport', 'sportEvent', 'eventEdition', 'article', 'author', 'user', 'session', 'comment', 'mediaItem', 'adSlotConfig', 'redirectRule', 'auditLog'] as const;

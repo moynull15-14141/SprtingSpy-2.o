@@ -14,7 +14,7 @@ import { sanitizePath, sanitizeSearchTerm } from './analytics/sanitize';
 
 export type SearchEvent =
   | { type: 'search'; query: string; total: number; page: number; filters: Record<string, string>; sort?: string }
-  | { type: 'search_result_click'; query: string; url: string; position: number }
+  | { type: 'search_result_click'; query: string; url: string; position: number; resultType?: 'article' | 'event' }
   | { type: 'search_suggestion_click'; query: string; url: string };
 
 const pathOnly = (url: string) => sanitizePath(url, location.origin).split('?')[0];
@@ -28,7 +28,7 @@ export function trackSearchEvent(event: SearchEvent): void {
       sport: event.filters.sport, category: event.filters.type, author: event.filters.author, date: event.filters.date || (event.filters.from || event.filters.to ? 'custom' : ''),
     });
   } else if (event.type === 'search_result_click') {
-    analytics.track('search_result_click', { search_term, link_path: pathOnly(event.url), position: event.position });
+    analytics.track('search_result_click', { search_term, link_path: pathOnly(event.url), position: event.position, result_type: event.resultType ?? 'article' });
   } else {
     analytics.track('search_suggestion_click', { search_term, link_path: pathOnly(event.url) });
   }

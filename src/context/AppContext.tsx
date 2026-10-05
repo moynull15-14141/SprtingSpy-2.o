@@ -107,6 +107,8 @@ interface AdminDataContextType {
   selectedSportFilter: string;
   setSelectedSportFilter: (sportSlug: string) => void;
   refreshData: () => Promise<void>;
+  /** PHASE R UI/UX: true once the CMS dataset has loaded for the current identity (screens show loading, not zeros, before). */
+  cmsDataLoaded: boolean;
 }
 
 type AppContextType = SiteContextType & AdminDataContextType;
@@ -116,6 +118,7 @@ const AppContext = createContext<AdminDataContextType | undefined>(undefined);
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { authUser, authLoading, authEpoch, authGeneration, apiCall, showNotification } = useSite();
   const dataGeneration = useRef(0);
+  const [cmsDataLoaded, setCmsDataLoaded] = useState(false);
 
   const [redirectRules, setRedirectRules] = useState<RedirectRule[]>([]);
   const [sports, setSports] = useState<Sport[]>([]);
@@ -138,6 +141,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setAuditLogs([]);
     setArticles([]);
     setComments([]);
+    setCmsDataLoaded(false);
   }, [authEpoch]);
 
   const isStaff = !!authUser && STAFF_ROLES.includes(authUser.role);
@@ -177,6 +181,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setRedirectRules(res.data.redirectRules);
       setMediaUsage(res.data.mediaUsage || {});
       setArticleTypes(res.data.articleTypes || []);
+      setCmsDataLoaded(true);
     }
   };
 
@@ -675,6 +680,7 @@ Upload a separate copy anyway?`)) return uploadMedia(file, { ...metadata, allowD
         selectedSportFilter,
         setSelectedSportFilter,
         refreshData,
+        cmsDataLoaded,
       }}
     >
       {children}

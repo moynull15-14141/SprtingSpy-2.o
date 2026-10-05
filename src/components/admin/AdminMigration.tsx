@@ -14,7 +14,16 @@ import { useApp } from '../../context/AppContext';
 import { Button } from '../ui/Button';
 
 const DECISIONS = ['UNDECIDED', 'KEEP', 'REWRITE', 'MERGE', 'RETIRE'] as const;
-interface Item { id: string; oldUrl: string; oldCategory: string; oldTitle: string; decision: string; newCategory: string; newTitle: string; newUrl: string; checkStatus: string; validation: { problems?: string[]; action?: string; applied?: boolean } | null; notes: string }
+interface Item { id: string; oldUrl: string; oldCategory: string; oldTitle: string; decision: string; newCategory: string; newTitle: string; newUrl: string; checkStatus: string; validation: { problems?: string[]; action?: string; applied?: boolean; appliedTo?: string | null } | null; notes: string }
+// PHASE N: the dry run reports every row's outcome and any write-time conflict.
+interface Plan {
+  redirects: { from: string; to: string; change: 'create' | 'update' }[];
+  blockedRows: number;
+  summary: { create: number; update: number; alreadyApplied: number; unchanged: number; retire: number; undecided: number; errors: number };
+  errors: { from: string; problems: string[] }[];
+  retire: string[];
+  conflicts: { from: string; error: string }[];
+}
 interface ListResponse { rows: Item[]; total: number; page: number; pageSize: number; counts: { decision: Record<string, number>; status: Record<string, number> }; columns: string[] }
 const field = 'w-full rounded border border-stone-300 bg-white p-1.5 text-xs dark:border-stone-700 dark:bg-stone-950';
 const STATUS: Record<string, string> = { ok: 'text-emerald-700 dark:text-emerald-400', error: 'text-rose-700 dark:text-rose-400', pending: 'text-stone-500' };
@@ -28,7 +37,7 @@ export const AdminMigration: React.FC = () => {
   const [page, setPage] = useState(1);
   const [csv, setCsv] = useState('');
   const [importErrors, setImportErrors] = useState<{ row: number; error: string }[]>([]);
-  const [plan, setPlan] = useState<{ redirects: { from: string; to: string }[]; blockedRows: number } | null>(null);
+  const [plan, setPlan] = useState<Plan | null>(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<Item | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -65,17 +74,18 @@ export const AdminMigration: React.FC = () => {
 
   const dryRun = async () => {
     setBusy(true);
-    const res = await apiCall<{ redirects: { from: string; to: string }[]; blockedRows: number }>('/api/migration/apply', { method: 'POST', body: { dryRun: true } });
+    const res = await apiCall<Plan>('/api/migration/apply', { method: 'POST', body: { dryRun: true } });
     setBusy(false);
     if (res.data) setPlan(res.data);
   };
 
   const apply = async () => {
-    if (!plan || !confirm(`Create ${plan.redirects.length} permanent (301) redirect(s)? Rows with problems are skipped.`)) return;
+    if (!plan || !confirm(`Create ${plan.summary.create} and update ${plan.summary.update} permanent (301) redirect(s)? Rows with problems are skipped. Export the current redirects (URL Redirects → Export) first so this step can be undone.`)) return;
     setBusy(true);
-    const res = await apiCall<{ created: number }>('/api/migration/apply', { method: 'POST', body: { dryRun: false } });
+    const res = await apiCall<{ created: number; updated: number }>('/api/migration/apply', { method: 'POST', body: { dryRun: false } });
     setBusy(false);
-    if (res.data) { showNotification(`${res.data.created} redirect(s) created.`, 'success'); setPlan(null); await load(); }
+    if (res.data) { showNotification(`${res.data.created} redirect(s) created, ${res.data.updated} updated.`, 'success'); setPlan(null); await load(); }
+    else if (res.details?.conflicts) setPlan(res.details as unknown as Plan);
   };
 
   const saveRow = async (e: React.FormEvent) => {
@@ -132,9 +142,19 @@ export const AdminMigration: React.FC = () => {
 
       {plan && (
         <section className="rounded-xl border border-amber-300 bg-amber-50/50 p-4 text-xs dark:border-amber-900 dark:bg-amber-950/20" aria-labelledby="mig-plan">
-          <h3 id="mig-plan" className="font-semibold">Dry run: {plan.redirects.length} redirect(s) would be created{plan.blockedRows ? `; ${plan.blockedRows} row(s) with problems are skipped` : ''}.</h3>
-          <ul className="mt-2 max-h-48 overflow-auto font-mono text-[11px]">{plan.redirects.slice(0, 500).map((r) => <li key={r.from}>{r.from}/ → {r.to}/</li>)}</ul>
-          {plan.redirects.length > 0 && <Button size="sm" className="mt-2" disabled={busy} onClick={() => void apply()}>Create these redirects</Button>}
+          <h3 id="mig-plan" className="font-semibold">Dry run (nothing was changed): {plan.summary.create} redirect(s) to create, {plan.summary.update} to update.</h3>
+          <p className="mt-1" data-migration-summary>
+            Already applied {plan.summary.alreadyApplied} · same URL {plan.summary.unchanged} · retire (404) {plan.summary.retire} · undecided {plan.summary.undecided} · with problems {plan.summary.errors}
+          </p>
+          {plan.conflicts.length > 0 && (
+            <div className="mt-2 text-rose-700 dark:text-rose-300">
+              <p className="font-semibold">{plan.conflicts.length} redirect(s) conflict with existing rules. Nothing can be applied until they are fixed:</p>
+              <ul className="max-h-32 overflow-auto font-mono text-[11px]">{plan.conflicts.map((c) => <li key={c.from}>{c.from}/: {c.error}</li>)}</ul>
+            </div>
+          )}
+          <ul className="mt-2 max-h-48 overflow-auto font-mono text-[11px]">{plan.redirects.slice(0, 500).map((r) => <li key={r.from}>{r.change === 'update' ? '(update) ' : ''}{r.from}/ → {r.to}/</li>)}</ul>
+          {plan.errors.length > 0 && <p className="mt-2 text-rose-700 dark:text-rose-300">Rows with problems are skipped; filter by Check → Problems to fix them.</p>}
+          {plan.redirects.length > 0 && plan.conflicts.length === 0 && <Button size="sm" className="mt-2" disabled={busy} onClick={() => void apply()}>Apply these redirects</Button>}
         </section>
       )}
 
@@ -166,7 +186,7 @@ export const AdminMigration: React.FC = () => {
                   <td className="px-2 py-1">{r.newCategory}</td>
                   <td className="px-2 py-1">{r.newTitle}</td>
                   <td className="px-2 py-1 font-mono">{r.newUrl}</td>
-                  <td className="px-2 py-1">{r.validation?.applied ? 'yes' : r.validation?.action === 'redirect' ? 'not yet' : '—'}</td>
+                  <td className="px-2 py-1">{r.validation?.applied ? 'yes' : r.validation?.action === 'redirect' ? (r.validation?.appliedTo ? `points to ${r.validation.appliedTo}` : 'not yet') : r.validation?.appliedTo ? `still → ${r.validation.appliedTo}` : '—'}</td>
                   <td className={`px-2 py-1 ${STATUS[r.checkStatus] ?? ''}`}>{r.checkStatus}{r.validation?.problems?.length ? <ul className="mt-1 list-disc pl-4 text-[11px]">{r.validation.problems.map((p) => <li key={p}>{p}</li>)}</ul> : null}</td>
                   <td className="whitespace-nowrap px-2 py-1"><button type="button" onClick={() => setEditing(r)} className="font-semibold text-amber-700 hover:underline dark:text-amber-400">Edit</button>{isAdmin && <button type="button" onClick={() => void removeRow(r)} className="ml-2 text-rose-600 hover:underline">Remove</button>}</td>
                 </tr>

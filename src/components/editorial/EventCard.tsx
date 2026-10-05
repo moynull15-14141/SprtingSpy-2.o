@@ -28,7 +28,7 @@ export const EventCard: React.FC<EventCardProps> = ({ event, className = '' }) =
         </div>
 
         <h3 className="font-serif text-xl font-bold text-stone-900 dark:text-stone-100 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors cursor-pointer">
-          <Link href={href}>{event.name}</Link>
+          <Link href={href} data-content-type="event" data-content-id={event.id}>{event.name}</Link>
         </h3>
 
         {event.description && <p className="mt-2 text-xs text-stone-600 dark:text-stone-400 line-clamp-2 leading-relaxed">{event.description}</p>}
@@ -52,13 +52,15 @@ export const EventCard: React.FC<EventCardProps> = ({ event, className = '' }) =
       <div className="mt-5 pt-3 border-t border-stone-100 dark:border-stone-800/80 flex items-center justify-between gap-2">
         <Link
           href={href}
+          data-content-type="event"
+          data-content-id={event.id}
           className="text-xs font-semibold text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 transition-colors cursor-pointer"
         >
           Event History &rarr;
         </Link>
 
         {event.currentEditionUrl && (
-          <Link href={event.currentEditionUrl} className="text-xs font-semibold text-amber-700 dark:text-amber-400 hover:underline cursor-pointer">
+          <Link href={event.currentEditionUrl} data-content-type="edition" className="text-xs font-semibold text-amber-700 dark:text-amber-400 hover:underline cursor-pointer">
             {event.currentEditionYear} Guide &rarr;
           </Link>
         )}

@@ -8,7 +8,7 @@
 
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSite } from '../../context/SiteContext';
 import { BRANDING } from '../../config/branding';
@@ -27,9 +27,27 @@ interface HeaderProps {
   siteName?: string;
 }
 
+/**
+ * PHASE R UI/UX: a click-opened menu closes on Escape (focus returns to its
+ * button), on a click or tap outside it, and on navigation — not merely when
+ * the pointer leaves it (which stranded the Sports panel over the page and
+ * closed the sign-in form while typing).
+ */
+function useDismissible(open: boolean, close: () => void, wrapper: React.RefObject<HTMLElement | null>, trigger: React.RefObject<HTMLElement | null>, path: string) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { close(); trigger.current?.focus(); } };
+    const onPointer = (e: PointerEvent) => { if (wrapper.current && !wrapper.current.contains(e.target as Node)) close(); };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', onPointer);
+    return () => { document.removeEventListener('keydown', onKey); document.removeEventListener('pointerdown', onPointer); };
+  }, [open, close, wrapper, trigger]);
+  useEffect(() => { close(); }, [path]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
 export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) => {
   const brandName = siteName && siteName !== BRANDING.name ? siteName : BRANDING.shortName;
-  const { currentPath, navigate, theme, toggleTheme, currentUser, isAuthenticated, login, logout } = useSite();
+  const { currentPath, navigate, theme, themePreference, setThemePreference, currentUser, isAuthenticated, login, logout } = useSite();
   const [isSportsMenuOpen, setIsSportsMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -57,6 +75,15 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
       setLoginError(result.totpRequired && !totpRequired ? null : result.error || 'Login failed.');
     }
   };
+
+  const sportsMenuRef = useRef<HTMLDivElement>(null);
+  const sportsButtonRef = useRef<HTMLButtonElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+  const userButtonRef = useRef<HTMLButtonElement>(null);
+  const closeSportsMenu = React.useCallback(() => setIsSportsMenuOpen(false), []);
+  const closeUserMenu = React.useCallback(() => setIsUserMenuOpen(false), []);
+  useDismissible(isSportsMenuOpen, closeSportsMenu, sportsMenuRef, sportsButtonRef, currentPath);
+  useDismissible(isUserMenuOpen, closeUserMenu, userMenuRef, userButtonRef, currentPath);
 
   const isActive = (path: string) => {
     if (path === '/' && currentPath === '/') return true;
@@ -89,8 +116,9 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
           {/* ZONE 2: 4-6 clean text navigation links */}
           <nav aria-label="Main" className="hidden min-w-0 flex-1 flex-wrap justify-center md:flex items-center gap-x-3 gap-y-1 mx-3 text-sm font-medium lg:gap-x-6">
             {navigation.filter((item) => item.desktop).map((item) => item.kind === 'sportsMenu' ? (
-            <div key={item.id} className="relative">
+            <div key={item.id} className="relative" ref={sportsMenuRef}>
               <button
+                ref={sportsButtonRef}
                 type="button"
                 onClick={() => setIsSportsMenuOpen(!isSportsMenuOpen)}
                 aria-expanded={isSportsMenuOpen}
@@ -117,7 +145,6 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
               {isSportsMenuOpen && (
                 <div
                   className="absolute left-0 mt-2 w-96 rounded-xl bg-white dark:bg-stone-900 shadow-xl border border-stone-200 dark:border-stone-800 p-4 grid grid-cols-2 gap-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
-                  onMouseLeave={() => setIsSportsMenuOpen(false)}
                 >
                   <div className="col-span-2 pb-2 mb-2 border-b border-stone-100 dark:border-stone-800 flex justify-between items-center text-xs text-stone-500 dark:text-stone-400">
                     <span className="font-semibold uppercase tracking-wider">All Active Sports</span>
@@ -169,37 +196,38 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
 
           {/* ZONE 3: 1-2 primary actions */}
           <div className="flex items-center gap-3">
-            {/* Theme Toggle Button */}
-            <button
-              onClick={toggleTheme}
-              className="p-2 rounded-lg text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
-              aria-label={theme === 'dark' ? 'Switch to Light Theme' : 'Switch to Dark Theme'}
-              title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-            >
-              {theme === 'dark' ? (
-                <svg className="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"
-                  />
-                </svg>
-              ) : (
-                <svg className="w-5 h-5 text-stone-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
-                  />
-                </svg>
-              )}
-            </button>
+            {/* Theme: Light → Dark → System (PHASE R UI/UX; System follows the OS live) */}
+            {(() => {
+              const next = themePreference === 'light' ? 'dark' : themePreference === 'dark' ? 'system' : 'light';
+              const name = { light: 'Light', dark: 'Dark', system: 'System' } as const;
+              const label = `Theme: ${name[themePreference]}${themePreference === 'system' ? ` (${theme})` : ''}. Switch to ${name[next]}`;
+              return (
+                <button
+                  type="button"
+                  onClick={() => setThemePreference(next)}
+                  className="p-2 rounded-lg text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+                  aria-label={label}
+                  title={label}
+                  data-theme-preference={themePreference}
+                >
+                  {themePreference === 'system' ? (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2" strokeWidth={2} /><path strokeLinecap="round" strokeWidth={2} d="M8 20h8M12 16v4" /></svg>
+                  ) : themePreference === 'dark' ? (
+                    <svg className="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
+                  ) : (
+                    <svg className="w-5 h-5 text-stone-700" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                  )}
+                </button>
+              );
+            })()}
 
             {/* Staff Login / Account Menu (PHASE 1: real authentication, not a role simulator) */}
-            <div className="relative">
+            <div className="relative" ref={userMenuRef}>
               <button
+                ref={userButtonRef}
+                type="button"
+                aria-expanded={isUserMenuOpen}
+                aria-haspopup="true"
                 onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
                 className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full border border-stone-200 dark:border-stone-800 hover:bg-stone-50 dark:hover:bg-stone-900 transition-colors cursor-pointer text-xs"
               >
@@ -217,7 +245,6 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
               {isUserMenuOpen && (
                 <div
                   className="absolute right-0 mt-2 w-64 rounded-xl bg-white dark:bg-stone-900 shadow-xl border border-stone-200 dark:border-stone-800 p-2 z-50"
-                  onMouseLeave={() => setIsUserMenuOpen(false)}
                 >
                   {isAuthenticated ? (
                     <>

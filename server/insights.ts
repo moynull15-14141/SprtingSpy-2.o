@@ -8,6 +8,8 @@
  *   - SearchQueryStat              internal search analytics (server/searchAnalytics.ts)
  *   - SearchPerformanceStat        Google Search Console / Bing data (server/searchConsole.ts)
  *   - Article table                publishing activity
+ *   - PHASE Q: PageViewStat joined to Article / SportEvent / Sport for
+ *     content performance (top articles, events, sports, article types)
  * A source with no data is reported as empty, never filled with placeholders.
  *
  *   GET /api/insights/overview?period=today|7d|28d|3m|6m|12m|custom[&from=YYYY-MM-DD&to=YYYY-MM-DD]
@@ -20,6 +22,7 @@ import { searchInsights } from './searchAnalytics';
 import { searchProviders } from './searchConsole';
 import { BUCKETS, RUM_METRICS, THRESHOLDS, p75FromHistogram, type RumMetric } from './rum';
 import { publicCacheStats } from './publicCache';
+import { DEFAULT_RETENTION } from './analyticsRetention';
 
 export const PERIODS = { today: 1, '7d': 7, '28d': 28, '3m': 90, '6m': 180, '12m': 365 } as const;
 export type Period = keyof typeof PERIODS | 'custom';
@@ -87,20 +90,103 @@ export async function vitalRegressions(now = new Date()) {
   return out;
 }
 
-async function pageViews(from: Date, to: Date) {
-  const [byType, top, trend, total] = await Promise.all([
-    prisma.pageViewStat.groupBy({ by: ['pageType'], where: { day: { gte: from, lte: to } }, _sum: { views: true } }),
-    prisma.$queryRaw<{ path: string; pageType: string; views: bigint }[]>`
-      SELECT "path", MAX("pageType") AS "pageType", SUM("views") AS views FROM "PageViewStat" WHERE "day" >= ${from} AND "day" <= ${to}
-      GROUP BY "path" ORDER BY views DESC, "path" ASC LIMIT 25`,
+/**
+ * Page views and content performance from the first-party counters
+ * (PHASE R; PHASE Q). PHASE Q: ONE grouped pass over the period
+ * (path × page type, at most one row per site URL) feeds the totals, page
+ * types, top pages and the content tables, plus one pass for the daily trend
+ * — instead of a scan per figure. Article rows are resolved to their article
+ * by recomputing each article's public URL in SQL (src/lib/paths.ts#articlePath).
+ * Views of URLs that no longer resolve (deleted, unpublished or moved content)
+ * are reported as such, never attributed elsewhere.
+ */
+export async function pageViewsAndContent(from: Date, to: Date, limit = 25) {
+  const [rows, trend, events, sports] = await Promise.all([
+    prisma.$queryRaw<{ path: string; pageType: string; views: number; id: string | null; title: string | null; articleType: string | null; sportSlug: string | null; eventSlug: string | null; status: string | null }[]>`
+      WITH v AS (
+        SELECT "path", "pageType", SUM("views")::int AS views FROM "PageViewStat"
+        WHERE "day" >= ${from} AND "day" <= ${to} GROUP BY "path", "pageType"
+      )
+      SELECT DISTINCT ON (v."path", v."pageType") v."path", v."pageType", v.views, a."id", a."title", a."articleType", a."sportSlug", a."eventSlug", a."status"::text AS status
+      FROM v LEFT JOIN "Article" a ON v."pageType" = 'article' AND v."path" = CASE
+        WHEN a."eventSlug" IS NOT NULL AND a."editionYear" IS NOT NULL THEN '/' || a."sportSlug" || '/' || a."eventSlug" || '/' || a."editionYear" || '/' || a."slug" || '/'
+        ELSE '/' || a."sportSlug" || '/' || a."slug" || '/' END
+      ORDER BY v."path", v."pageType", (a."status" = 'published') DESC NULLS LAST`,
     prisma.pageViewStat.groupBy({ by: ['day'], where: { day: { gte: from, lte: to } }, _sum: { views: true }, orderBy: { day: 'asc' } }),
-    prisma.pageViewStat.aggregate({ where: { day: { gte: from, lte: to } }, _sum: { views: true } }),
+    prisma.sportEvent.findMany({ select: { id: true, sportSlug: true, slug: true, name: true } }),
+    prisma.sport.findMany({ select: { slug: true, name: true } }),
   ]);
+  const add = (m: Map<string, number>, k: string, n: number) => m.set(k, (m.get(k) ?? 0) + n);
+  const segment = (path: string, i: number) => path.split('/')[i] ?? '';
+  const sportName = new Map(sports.map((x) => [x.slug, x.name]));
+  const eventByKey = new Map(events.map((e) => [`${e.sportSlug}/${e.slug}`, e]));
+
+  let total = 0;
+  const byType = new Map<string, number>();
+  const byPath = new Map<string, { views: number; pageType: string }>();
+  const bySport = new Map<string, number>();
+  const byArticleType = new Map<string, number>();
+  const eventTotals = new Map<string, { eventViews: number; editionViews: number; articleViews: number }>();
+  const eventEntry = (key: string) => eventTotals.get(key) ?? eventTotals.set(key, { eventViews: 0, editionViews: 0, articleViews: 0 }).get(key)!;
+  let unmatchedArticleViews = 0;
+  const articles: typeof rows = [];
+  for (const r of rows) {
+    total += r.views;
+    add(byType, r.pageType, r.views);
+    const p = byPath.get(r.path);
+    byPath.set(r.path, { views: (p?.views ?? 0) + r.views, pageType: p && p.pageType > r.pageType ? p.pageType : r.pageType });
+    if (['sport', 'event', 'edition', 'article'].includes(r.pageType)) add(bySport, segment(r.path, 1), r.views);
+    if (r.pageType === 'event') eventEntry(`${segment(r.path, 1)}/${segment(r.path, 2)}`).eventViews += r.views;
+    if (r.pageType === 'edition') eventEntry(`${segment(r.path, 1)}/${segment(r.path, 2)}`).editionViews += r.views;
+    if (r.pageType === 'article') {
+      articles.push(r);
+      if (!r.id) unmatchedArticleViews += r.views;
+      else {
+        add(byArticleType, r.articleType ?? '', r.views);
+        if (r.eventSlug) eventEntry(`${r.sportSlug}/${r.eventSlug}`).articleViews += r.views;
+      }
+    }
+  }
+  const sorted = <T,>(xs: T[], views: (x: T) => number, key: (x: T) => string) => xs.sort((a, b) => views(b) - views(a) || key(a).localeCompare(key(b)));
   return {
-    total: total._sum.views ?? 0,
-    byPageType: byType.map((r) => ({ pageType: r.pageType, views: r._sum.views ?? 0 })).sort((a, b) => b.views - a.views),
-    topPages: top.map((r) => ({ path: r.path, pageType: r.pageType, views: Number(r.views) })),
-    trend: trend.map((r) => ({ day: r.day.toISOString().slice(0, 10), views: r._sum.views ?? 0 })),
+    pageViews: {
+      total,
+      byPageType: sorted([...byType].map(([pageType, views]) => ({ pageType, views })), (x) => x.views, (x) => x.pageType),
+      topPages: sorted([...byPath].map(([path, v]) => ({ path, pageType: v.pageType, views: v.views })), (x) => x.views, (x) => x.path).slice(0, limit),
+      trend: trend.map((r) => ({ day: r.day.toISOString().slice(0, 10), views: r._sum.views ?? 0 })),
+    },
+    content: {
+      topArticles: sorted(articles, (x) => x.views, (x) => x.path).slice(0, limit).map((r) => ({
+        path: r.path, views: r.views, id: r.id, title: r.title, articleType: r.articleType,
+        sport: r.sportSlug, sportName: r.sportSlug ? sportName.get(r.sportSlug) ?? r.sportSlug : null, status: r.id ? r.status : 'not found',
+      })),
+      topEvents: sorted([...eventTotals].map(([key, t]) => {
+        const [sport, slug] = key.split('/');
+        const e = eventByKey.get(key);
+        return { id: e?.id ?? null, name: e?.name ?? null, sport, sportName: sportName.get(sport) ?? sport, path: `/${sport}/${slug}/`, ...t, total: t.eventViews + t.editionViews + t.articleViews };
+      }), (x) => x.total, (x) => x.path).slice(0, limit),
+      bySport: sorted([...bySport].filter(([sport]) => sportName.has(sport)).map(([sport, views]) => ({ sport, sportName: sportName.get(sport)!, views })), (x) => x.views, (x) => x.sport),
+      byArticleType: sorted([...byArticleType].map(([articleType, views]) => ({ articleType, views })), (x) => x.views, (x) => x.articleType),
+      unmatchedArticleViews,
+    },
+  };
+}
+
+/** PHASE Q: totals of the same-length period just before `from` (for comparison). */
+async function previousTotals(from: Date, days: number) {
+  const prevTo = new Date(from.getTime() - DAY);
+  const prevFrom = new Date(from.getTime() - days * DAY);
+  const [views, searches] = await Promise.all([
+    prisma.pageViewStat.groupBy({ by: ['pageType'], where: { day: { gte: prevFrom, lte: prevTo } }, _sum: { views: true } }),
+    prisma.searchQueryStat.aggregate({ where: { day: { gte: prevFrom, lte: prevTo } }, _sum: { searches: true } }),
+  ]);
+  const byType: Record<string, number> = Object.fromEntries(views.map((r) => [r.pageType, r._sum.views ?? 0]));
+  return {
+    from: prevFrom.toISOString().slice(0, 10), to: prevTo.toISOString().slice(0, 10),
+    views: Object.values(byType).reduce((a, b) => a + b, 0),
+    articleViews: byType.article ?? 0,
+    eventViews: (byType.event ?? 0) + (byType.edition ?? 0),
+    searches: searches._sum.searches ?? 0,
   };
 }
 
@@ -135,8 +221,8 @@ export function insightsRouter(getLookup: () => AuthLookup) {
     if (!range.ok) return res.status(400).json({ error: (range as { error: string }).error });
     const { from, to, days } = range;
     const endExclusive = new Date(to.getTime() + DAY);
-    const [views, webVitals, regressions, search, providers, google, bing, publishedRows, snapshots, rumSetting] = await Promise.all([
-      pageViews(from, to),
+    const [viewsAndContent, webVitals, regressions, search, providers, google, bing, publishedRows, snapshots, rumSetting, previous, retention] = await Promise.all([
+      pageViewsAndContent(from, to),
       vitals(from, to),
       vitalRegressions(),
       searchInsights(from, to),
@@ -146,11 +232,15 @@ export function insightsRouter(getLookup: () => AuthLookup) {
       prisma.article.groupBy({ by: ['articleType'], where: { status: 'published', publishedAt: { gte: from, lt: endExclusive } }, _count: { _all: true } }),
       prisma.searchEngineSnapshot.findMany(),
       prisma.siteSetting.findUnique({ where: { key: 'realUserMonitoring' } }),
+      previousTotals(from, days),
+      prisma.siteSetting.findUnique({ where: { key: 'analyticsRetention' } }),
     ]);
     return res.json({
       period: { name: req.query.period || '28d', from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10), days },
-      measurement: { realUserMonitoring: rumSetting?.value !== 'disabled', metrics: RUM_METRICS, buckets: BUCKETS, thresholds: THRESHOLDS },
-      pageViews: views,
+      measurement: { realUserMonitoring: rumSetting?.value !== 'disabled', retention: retention?.value ?? DEFAULT_RETENTION, metrics: RUM_METRICS, buckets: BUCKETS, thresholds: THRESHOLDS },
+      pageViews: viewsAndContent.pageViews,
+      content: viewsAndContent.content,
+      previous,
       webVitals,
       regressions,
       search,

@@ -12,6 +12,7 @@ import { absoluteUrl, editionPath } from '../lib/paths';
 import { editionDates } from '../lib/eventDates';
 import { ContextFaq } from '../components/editorial/ContextFaq';
 import { RumPageType } from '../components/analytics/RumPageType';
+import { EventAnalytics } from '../components/editorial/EventAnalytics';
 import type { EventEdition } from '../types';
 import type { getEventPage } from '../../server/services/public/content';
 
@@ -48,10 +49,11 @@ export const EventPage: React.FC<{ data: EventPageData }> = ({ data }) => {
   return <div className="min-w-0 space-y-10">
     {eventSchema && <JsonLd data={eventSchema} />}
     <RumPageType type="event" />
+    <EventAnalytics id={event.id} sport={sport.slug} event={event.slug} />
     <Breadcrumbs items={[{ label: 'Sports', url: '/sports' }, { label: sport.name, url: `/${sport.slug}` }, { label: event.name }]} />
 
     <header className="overflow-hidden rounded-2xl border border-stone-200 bg-stone-900 shadow-sm dark:border-stone-800">
-      <div className="relative aspect-[16/7] min-h-64 max-h-[34rem]">
+      <div className="relative aspect-[16/7] min-h-64 max-h-[34rem] w-full">
         <CardImage src={event.featuredImage} alt={event.name} loading="eager" className="h-full w-full object-cover" fallback={<div className="h-full w-full bg-[radial-gradient(circle_at_80%_20%,rgba(217,119,6,0.28),transparent_34%),linear-gradient(135deg,#1c1917,#0c0a09)]" aria-hidden="true" />} />
         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/45 to-black/10" aria-hidden="true" />
         <div className="absolute inset-x-0 bottom-0 p-5 text-white sm:p-8 lg:p-10">

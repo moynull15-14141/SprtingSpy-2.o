@@ -70,18 +70,18 @@ export async function loadSiteIndex(origin: string) {
       seo: s.seo as SeoMetadata,
       publishedArticleCount: visibleArticles.filter((a) => a.sportSlug === s.slug).length,
       visibleEventCount: events.filter((e) => e.sportSlug === s.slug && e.isVisible).length,
-    });
+    }, sportPath(s.slug), origin);
     if (s.isVisible) pages.push({ path: sportPath(s.slug), kind: 'sport', id: s.id, title: s.name, status });
   }
   const eventStatus = new Map<string, Indexability>();
   for (const e of events) {
-    const status = eventIndexability({ isVisible: e.isVisible, sportVisible: !!sportBySlug.get(e.sportSlug)?.isVisible, seo: e.seo as SeoMetadata });
+    const status = eventIndexability({ isVisible: e.isVisible, sportVisible: !!sportBySlug.get(e.sportSlug)?.isVisible, seo: e.seo as SeoMetadata }, eventPath(e.sportSlug, e.slug), origin);
     eventStatus.set(`${e.sportSlug}/${e.slug}`, status);
     if (eventVisible(e.sportSlug, e.slug)) pages.push({ path: eventPath(e.sportSlug, e.slug), kind: 'event', id: e.id, title: e.name, status });
   }
   for (const ed of editions) {
     if (!eventVisible(ed.sportSlug, ed.eventSlug)) continue;
-    const status = editionIndexability({ eventIndexable: !!eventStatus.get(`${ed.sportSlug}/${ed.eventSlug}`)?.indexable, seo: ed.seo as SeoMetadata });
+    const status = editionIndexability({ eventIndexable: !!eventStatus.get(`${ed.sportSlug}/${ed.eventSlug}`)?.indexable, seo: ed.seo as SeoMetadata }, editionPath(ed.sportSlug, ed.eventSlug, ed.year), origin);
     pages.push({ path: editionPath(ed.sportSlug, ed.eventSlug, ed.year), kind: 'edition', id: ed.id, title: ed.title, status });
   }
   for (const a of visibleArticles) {

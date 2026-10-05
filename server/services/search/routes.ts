@@ -40,6 +40,24 @@ function limited(limiter: RateLimiter, req: Request, res: Response): boolean {
   return false;
 }
 
+/**
+ * PHASE P: the server-rendered /search/ page runs the same queries as
+ * GET /api/search, so it shares that per-IP budget (120 searches a minute
+ * across page and API). Requests without a query are a plain page and pass.
+ */
+export function searchPageRateLimit(req: Request, res: Response, next: NextFunction) {
+  if (typeof req.query.q !== 'string' || !req.query.q.trim()) return next();
+  const key = req.ip || req.socket.remoteAddress || 'unknown';
+  const state = searchLimiter.check(key);
+  if (state.limited) {
+    res.setHeader('Retry-After', String(state.retryAfterSeconds));
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(429).type('text/plain').send('Too many searches. Please wait a moment and try again.');
+  }
+  searchLimiter.record(key);
+  return next();
+}
+
 export function searchRouter(getAuthLookup: () => AuthLookup) {
   const router = express.Router();
 

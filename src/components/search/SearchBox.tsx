@@ -71,10 +71,12 @@ export function SearchBox({ defaultQuery, hidden, autoFocus = false }: {
   const showList = open && items.length > 0;
 
   return (
-    <form action="/search/" method="get" role="search" className="relative" onSubmit={() => setOpen(false)}>
+    <form action="/search/" method="get" role="search" className="relative flex min-h-16 min-w-0 items-center gap-2 rounded-2xl border border-stone-300 bg-white p-2 shadow-[0_4px_18px_-12px_rgba(28,25,23,0.4)] transition-[border-color,box-shadow] focus-within:border-amber-600 focus-within:ring-4 focus-within:ring-amber-500/15 dark:border-stone-700 dark:bg-stone-900 dark:shadow-[0_4px_20px_-12px_rgba(0,0,0,0.8)] dark:focus-within:border-amber-500" onSubmit={() => setOpen(false)}>
       {Object.entries(hidden).map(([k, v]) => (v ? <input key={k} type="hidden" name={k} value={v} /> : null))}
       <label htmlFor={`${listId}-input`} className="sr-only">Search SportingSpy</label>
-      <Search size={20} aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-stone-500 dark:text-stone-400" />
+      <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-xl bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">
+        <Search size={20} strokeWidth={2} />
+      </span>
       <input
         id={`${listId}-input`}
         type="search"
@@ -99,16 +101,16 @@ export function SearchBox({ defaultQuery, hidden, autoFocus = false }: {
           else if (e.key === 'ArrowUp') { e.preventDefault(); setOpen(true); setActive((i) => (i <= 0 ? items.length - 1 : i - 1)); }
           else if (e.key === 'Enter' && showList && active >= 0) { e.preventDefault(); choose(items[active]); }
         }}
-        className="w-full rounded-xl border border-stone-300 bg-white py-3 pl-12 pr-24 text-base text-stone-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-500 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-100 sm:text-lg"
+        className="min-w-0 flex-1 border-0 bg-transparent px-1 py-2.5 text-base text-stone-900 outline-none placeholder:text-stone-500 focus:outline-none dark:text-stone-100 dark:placeholder:text-stone-400 sm:px-2 sm:text-lg"
       />
-      <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
+      <div className="flex shrink-0 items-center gap-1">
         {loading && <span className="h-4 w-4 animate-spin rounded-full border-2 border-stone-300 border-t-amber-600" aria-hidden="true" />}
         {value && (
-          <button type="button" aria-label="Clear search" onClick={() => { typed.current = false; setValue(''); setItems([]); }} className="rounded-md p-1.5 text-stone-500 hover:text-stone-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:hover:text-stone-200 dark:text-stone-400">
+          <button type="button" aria-label="Clear search" onClick={() => { typed.current = false; setValue(''); setItems([]); }} className="rounded-lg p-2 text-stone-500 hover:bg-stone-100 hover:text-stone-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200">
             <X size={16} />
           </button>
         )}
-        <button type="submit" className="rounded-lg bg-amber-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-amber-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-1">
+        <button type="submit" className="min-h-11 rounded-xl bg-amber-700 px-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-amber-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-stone-900 sm:px-5">
           Search
         </button>
       </div>

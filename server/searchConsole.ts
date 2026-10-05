@@ -9,7 +9,7 @@
  *
  * Google (service account, read-only scope):
  *   env  GOOGLE_SEARCH_CONSOLE_CREDENTIALS  service-account JSON (client_email, private_key)
- *   set  searchConsoleProperty               e.g. "sc-domain:sportingspy.com" or "https://sportingspy.com/"
+ *   set  searchConsoleProperty               e.g. "sc-domain:sportingspy.com" or "https://www.sportingspy.com/"
  *   The service account's e-mail must be added as a user of the property in
  *   Search Console (OWNER action).
  *   Imported: daily clicks/impressions/CTR/position, queries, pages,
@@ -17,7 +17,7 @@
  *
  * Bing (API key):
  *   env  BING_WEBMASTER_API_KEY
- *   set  bingSiteUrl                         e.g. "https://sportingspy.com/"
+ *   set  bingSiteUrl                         e.g. "https://www.sportingspy.com/"
  *   Imported: daily traffic, queries, pages; crawl statistics snapshot.
  *
  * Index coverage per URL is not available as a bulk API from either

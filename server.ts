@@ -41,6 +41,7 @@ import { resolveSessionIdentity } from './server/sessionLookup';
 import { mediaRouter } from './server/media/routes';
 import { adCreativesRouter } from './server/adCreatives';
 import { mediaStorage } from './server/media/storage';
+import { profileImageOrigins, validateProfileImageUrl } from './server/profileImage';
 import { mediaUsageMap } from './server/media/service';
 import { redirectRouter, redirectMovedArticle, releasePath, RedirectConflict } from './server/redirects';
 import { settingsRouter } from './server/settings';
@@ -49,7 +50,7 @@ import { articlePath, siteOrigin } from './src/lib/paths';
 import { sitemapFiles } from './server/seo/sitemap';
 import { robotsTxt } from './server/seo/robots';
 import { seoRouter } from './server/seo/routes';
-import { searchRouter } from './server/services/search/routes';
+import { searchPageRateLimit, searchRouter } from './server/services/search/routes';
 import { trackingConfig } from './server/trackingConfig';
 import { assertProductionLaunchSafe, LaunchGuardError } from './server/launchGuards';
 import { siteExperienceRouter } from './server/siteExperienceRoutes';
@@ -85,7 +86,8 @@ import { securityHeaders } from './server/securityHeaders';
 import { corsPolicy } from './server/cors';
 // PHASE R
 import { recordAudit } from './server/audit';
-import { invalidateOnWrite, invalidatePublicCache, beginContentWrite } from './server/publicCache';
+import { cached, invalidateOnWrite, invalidatePublicCache, beginContentWrite } from './server/publicCache';
+import { purgeExpiredAnalytics } from './server/analyticsRetention';
 import { articleTypesRouter, allArticleTypes, validateArticleTypeForWrite } from './server/articleTypes';
 import { snapshotUrls, redirectChangedUrls, moveEventLevelArticles, assertSportSlugAllowed, assertArticleSlugFree, assertEventSlugFree, UrlConflict } from './server/urlStability';
 import { passwordResetRouter } from './server/passwordReset';
@@ -129,6 +131,9 @@ async function mediaIdForUrl(url: string | null | undefined): Promise<string | n
  */
 const LEGACY_SEED_DEFAULT_PASSWORD = 'ChangeMe123!';
 void LEGACY_SEED_DEFAULT_PASSWORD; // documented for operators; see .env.example
+
+/** PHASE P: article fields CMS lists never need (the editor fetches one article in full). */
+const ARTICLE_HEAVY_FIELDS = { body: true, content: true, tables: true, references: true } as const;
 
 /** A fixed, precomputed hash used only to give the "unknown email" login path a real scrypt computation to perform — see /api/auth/login. */
 const DUMMY_HASH_FOR_TIMING_CAMOUFLAGE = hashPassword('sportingspy-dummy-timing-camouflage');
@@ -242,6 +247,8 @@ async function publishScheduledArticles(): Promise<number> {
 
 async function startServer() {
   const deployment = deploymentConfig();
+  // Keep image URL validation and the CSP in sync before accepting traffic.
+  profileImageOrigins();
   const features = featureFlags();
   // Fail fast on a misconfigured media storage provider (with a readable reason).
   let storage: ReturnType<typeof mediaStorage>;
@@ -378,25 +385,30 @@ async function startServer() {
       // trailing-slash rule never adds a second hop.
       const finalDestination = canonicalPagePath(currentDest) + queryString;
 
-      console.log(`[Redirect Engine] Serving HTTP ${rule.statusCode} from ${req.url} -> ${finalDestination}`);
+      // PHASE P: path only — query strings (tracking or personal data) are never logged.
+      console.log(`[Redirect Engine] Serving HTTP ${rule.statusCode} from ${cleanPath} -> ${canonicalPagePath(currentDest)}`);
       return res.redirect(rule.statusCode, finalDestination);
     })
   );
 
   // 2. XML sitemaps + robots.txt (PHASE D: server/seo/sitemap.ts, robots.ts).
   // Only indexable URLs; sitemap index with per-type child sitemaps.
-  const seoOrigin = () => deployment.origin || 'https://sportingspy.com';
+  const seoOrigin = () => deployment.origin || siteOrigin();
   const sendXml = (res: Response, xml: string) => {
     res.header('Content-Type', 'application/xml; charset=utf-8');
     res.header('Cache-Control', 'public, max-age=900');
     return res.send(xml);
   };
+  // PHASE P: the index and every child file are built from one site-index
+  // pass, kept in the public data cache (cleared by every content write and
+  // after its TTL), instead of a full rebuild per crawler request.
+  const cachedSitemapFiles = cached('sitemapFiles', (origin: string) => sitemapFiles(origin));
   app.get('/sitemap.xml', asyncHandler(async (_req: Request, res: Response) => {
     await publishScheduledArticles();
-    return sendXml(res, (await sitemapFiles(seoOrigin())).index);
+    return sendXml(res, (await cachedSitemapFiles(seoOrigin())).index);
   }));
   app.get('/sitemaps/:file', asyncHandler(async (req: Request, res: Response) => {
-    const xml = (await sitemapFiles(seoOrigin())).files.get(req.params.file);
+    const xml = (await cachedSitemapFiles(seoOrigin())).files.get(req.params.file);
     return xml ? sendXml(res, xml) : res.status(404).json({ error: 'Not found.' });
   }));
   app.get('/robots.txt', (_req: Request, res: Response) => {
@@ -580,14 +592,19 @@ async function startServer() {
       const { role, userId } = req.authContext!;
       const previewAllowed = true;
 
-      const [sports, events, editions, articles, authors, users, comments, mediaItems, adSlots, auditLogs, redirectRules] =
+      // PHASE P: media usage and Article Types load in the same parallel batch.
+      const [sports, events, editions, articles, authors, users, comments, mediaItems, adSlots, auditLogs, redirectRules, mediaUsage, articleTypes] =
         await Promise.all([
           prisma.sport.findMany({ orderBy: { order: 'asc' } }),
           prisma.sportEvent.findMany(),
           prisma.eventEdition.findMany(),
+          // PHASE P: the list carries no body/plain text/tables/references
+          // (they were ~95 % of this payload: 317 MB at 20,000 articles). The
+          // editor loads the one article it opens from GET /api/articles/:id.
           prisma.article.findMany({
             where: articleReadWhere(req.authContext!),
             orderBy: { publishedAt: 'desc' },
+            omit: ARTICLE_HEAVY_FIELDS,
           }),
           prisma.author.findMany(),
           role === 'Admin' ? prisma.user.findMany() : Promise.resolve([]),
@@ -599,6 +616,8 @@ async function startServer() {
           // PHASE R: bounded (the full log is paged through /api/audit-logs).
           ['Admin', 'Editor'].includes(role) ? prisma.auditLog.findMany({ orderBy: { timestamp: 'desc' }, take: 500 }) : Promise.resolve([]),
           prisma.redirectRule.findMany({ orderBy: { createdAt: 'desc' } }),
+          mediaUsageMap(role === 'Author' ? {articleWhere: articleReadWhere(req.authContext!), publicSiteOnly: true} : {}),
+          allArticleTypes(),
         ]);
 
       // PHASE 1/2: never send passwordHash to the client, and never send a
@@ -616,9 +635,9 @@ async function startServer() {
         auditLogs,
         redirectRules,
         features,
-        mediaUsage: await mediaUsageMap(role === 'Author' ? {articleWhere: articleReadWhere(req.authContext!), publicSiteOnly: true} : {}),
+        mediaUsage,
         // PHASE R: database-backed Article Types (active and inactive).
-        articleTypes: await allArticleTypes(),
+        articleTypes,
       });
     })
   );
@@ -664,7 +683,7 @@ async function startServer() {
       // abuse surface — this keeps a single request bounded without
       // changing the existing unpaginated response shape the frontend
       // already expects.
-      const list = await prisma.article.findMany({ where, orderBy: { publishedAt: 'desc' }, take: 500 });
+      const list = await prisma.article.findMany({ where, orderBy: { publishedAt: 'desc' }, take: 500, omit: ARTICLE_HEAVY_FIELDS });
       return res.json(list);
     })
   );
@@ -1660,6 +1679,19 @@ async function startServer() {
   app.use(contactRouter(getAuthLookup));
   app.use('/api/sports', sportEventConfigurationRouter(getAuthLookup));
   app.use(editorialWorkflowRouter(getAuthLookup));
+
+  // PHASE P: one full article (body, tables, references) for the editor.
+  // Same read scope as the CMS list: Authors only reach their own articles.
+  // Registered after the workflow router so /api/articles/reviewers wins.
+  app.get(
+    '/api/articles/:id',
+    requireRole(getAuthLookup, ['Admin', 'Editor', 'Author']),
+    asyncHandler(async (req: Request, res: Response) => {
+      const article = await prisma.article.findFirst({ where: { AND: [{ id: req.params.id }, articleReadWhere(req.authContext!)] } });
+      if (!article) return res.status(404).json({ error: 'Article not found.' });
+      return res.json(article);
+    })
+  );
   app.use('/api/media', mediaRouter(getAuthLookup));
   app.use('/api/ad-creatives', adCreativesRouter(getAuthLookup));
   app.use('/api/settings', settingsRouter(getAuthLookup));
@@ -1707,12 +1739,12 @@ async function startServer() {
         validateSlug(body.slug, 'slug'),
         validateText(body.roleTitle, 'roleTitle', 150, false),
         validateText(body.bio, 'bio', 3000, false),
-        validateSafeUrl(body.avatar, 'avatar', { required: false }),
         validateText(body.twitter, 'twitter', 100, false),
         validateText(body.email, 'email', 200, false)
       );
-      if (authorValidationError) {
-        return res.status(400).json({ error: authorValidationError });
+      const avatarError = validateProfileImageUrl(body.avatar || '', 'avatar');
+      if (authorValidationError || avatarError) {
+        return res.status(400).json({ error: authorValidationError || avatarError });
       }
 
       const existing = await prisma.author.findUnique({ where: { slug: body.slug } });
@@ -1750,6 +1782,11 @@ async function startServer() {
 
       if (!existing) {
         return res.status(404).json({ error: 'Author not found.' });
+      }
+
+      if (Object.hasOwn(req.body, 'avatar')) {
+        const avatarError = validateProfileImageUrl(req.body.avatar, 'avatar');
+        if (avatarError) return res.status(400).json({ error: avatarError });
       }
 
       const updated = await prisma.author.update({ where: { id: existing.id }, data: req.body });
@@ -2057,7 +2094,20 @@ async function startServer() {
       // Explicit types: the static server's MIME table has no entry for .avif.
       setHeaders: (res, filePath) => res.setHeader('Content-Type', mediaTypes[path.extname(filePath).toLowerCase()] || 'application/octet-stream'),
     }));
+  } else if (process.env.MEDIA_PUBLIC_BASE_URL) {
+    // PHASE R (deployment): media lives in object storage. Rows written before
+    // the switch store /media/<key> URLs (ad creatives, image fallbacks); the
+    // objects were copied under the same keys (npm run media:copy-to-r2), so
+    // such requests are sent to the public bucket URL. Keys are validated.
+    const mediaBase = process.env.MEDIA_PUBLIC_BASE_URL.replace(/\/+$/, '');
+    app.get(/^\/media\/(.+)$/, (req: Request, res: Response, next: NextFunction) => {
+      const key = req.params[0];
+      if (!/^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/.test(key) || key.split('/').some((part) => part === '.' || part === '..')) return next();
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      return res.redirect(301, `${mediaBase}/${key}`);
+    });
   }
+
 
   const nextApp = next({ dev: !deployment.production, dir: process.cwd() });
   const handleNext = nextApp.getRequestHandler();
@@ -2067,6 +2117,9 @@ async function startServer() {
   // started streaming, leaving HTTP 200 on a disabled /faq/ page. Decide the
   // optional page's existence before rendering so visitors and crawlers get
   // a real 404, consistent with the sitemap and the final FAQ requirement.
+  // PHASE P: /search/?q=… shares the search API's per-IP rate limit.
+  app.get(['/search', '/search/'], searchPageRateLimit);
+
   app.get(['/faq', '/faq/'], asyncHandler(async (req: Request, res: Response) => {
     const { globalFaqPageEnabled } = await import('./server/services/public/faq');
     if (!(await globalFaqPageEnabled())) return nextApp.render404(req, res);
@@ -2138,6 +2191,8 @@ async function startServer() {
       })().catch(() => console.error('[Scheduler] Site Experience publication failed. Check database availability.')),
       // PHASE R: daily Search Console / Bing import, only when configured (no-op otherwise).
       runScheduledSearchSync(seoOrigin()).catch(() => console.error('[Scheduler] Search performance import failed. See Admin → Insights.')),
+      // PHASE Q: aggregate analytics retention (self-throttled to every 6 hours; never throws).
+      purgeExpiredAnalytics(),
     ]).finally(() => { schedulerWork = undefined; });
   }, 30000);
   scheduler.unref();

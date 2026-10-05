@@ -3,7 +3,7 @@
 **Phase 2.1 deliverable.** This document is the practical, local-development
 recovery baseline requested in Phase 2.1 — it deliberately does not build a
 backup platform, just documents the commands that exist and the ones that
-must never be run casually. This file is separate from `PROJECT_BRAIN.md`
+must never be run casually. This file is separate from the archived project notes
 (which is not modified in this phase) and from `.env.example` (which only
 holds placeholder configuration).
 
@@ -19,7 +19,7 @@ holds placeholder configuration).
 | Generated Prisma Client (build output — gitignored, regenerate anytime with `npm run db:generate`) | `server/generated/prisma/` |
 | Live PostgreSQL connection string (local only, gitignored) | `.env` (`DATABASE_URL`) |
 | Placeholder connection string for onboarding | `.env.example` |
-| **Historical JSON backup / migration source** | `data/db.json` — untouched by the running server since Phase 2; kept permanently as a point-in-time backup of everything that existed before the PostgreSQL cutover |
+| **Historical JSON backup / migration source** | `data/db.json` — removed from the repository after the PostgreSQL cutover; the point-in-time copy is kept in the project archive outside this repository, from before the PostgreSQL cutover |
 | Prisma → PostgreSQL data importer (idempotent, read-only against the JSON) | `server/scripts/migrate-json-to-postgres.ts` (`npm run db:migrate-data`) |
 | Database safety guard used by the importer | `server/dbSafety.ts` |
 
@@ -101,7 +101,7 @@ pg_restore -h <host> -U <user> -d sportingspy_restored --no-owner --exit-on-erro
 `npm run db:backup-drill` performs this whole cycle against a local
 database (dump → new drill database → restore → compare every table →
 drop only the drill database) and is the verified reference for the steps.
-See PHASE_G_IMPLEMENTATION.md, "Recovery runbook".
+See DEPLOYMENT.md, "Backup, restore and disaster recovery".
 
 ## 7. About the Prisma "shadow database" (Phase 2.1 investigation)
 
@@ -183,5 +183,5 @@ a real test suite is introduced.
 
 *This document covers local development recovery only. Production
 deployment, automated backups, and a hosted database are explicitly out of
-scope for this phase — see PROJECT_BRAIN.md's NEXT DEVELOPMENT MAP for
+scope for this phase — see the archived project notes for
 later phases.*

@@ -109,9 +109,9 @@ export class S3StorageProvider implements MediaStorageProvider {
 }
 
 /** Reads S3 settings from the environment; throws a clear message when incomplete. */
-export function s3ConfigFromEnv(env: NodeJS.ProcessEnv = process.env): S3Config {
+export function s3ConfigFromEnv(env: NodeJS.ProcessEnv = process.env, provider = 's3'): S3Config {
   const missing = ['MEDIA_S3_BUCKET', 'MEDIA_S3_REGION', 'MEDIA_S3_ACCESS_KEY_ID', 'MEDIA_S3_SECRET_ACCESS_KEY'].filter((k) => !env[k]?.trim());
-  if (missing.length) throw new Error(`MEDIA_STORAGE_PROVIDER=s3 needs ${missing.join(', ')}.`);
+  if (missing.length) throw new Error(`MEDIA_STORAGE_PROVIDER=${provider} needs ${missing.join(', ')}.`);
   const publicBase = env.MEDIA_PUBLIC_BASE_URL?.trim();
   const validHttpsUrl = (value: string | undefined, originOnly = false): boolean => {
     if (!value) return false;
@@ -121,10 +121,13 @@ export function s3ConfigFromEnv(env: NodeJS.ProcessEnv = process.env): S3Config 
     } catch { return false; }
   };
   if (!validHttpsUrl(publicBase)) {
-    throw new Error('MEDIA_STORAGE_PROVIDER=s3 needs MEDIA_PUBLIC_BASE_URL set to the https:// public URL of the bucket or its CDN (media is not served by this server).');
+    throw new Error(`MEDIA_STORAGE_PROVIDER=${provider} needs MEDIA_PUBLIC_BASE_URL set to the https:// public URL of the bucket or its CDN (media is not served by this server).`);
   }
   const endpoint = env.MEDIA_S3_ENDPOINT?.trim();
   if (endpoint && !validHttpsUrl(endpoint, true)) throw new Error('MEDIA_S3_ENDPOINT must be an https:// origin (no path, credentials, query or fragment).');
+  if (provider === 'r2' && (!endpoint || env.MEDIA_S3_REGION?.trim() !== 'auto' || env.MEDIA_S3_FORCE_PATH_STYLE !== 'true')) {
+    throw new Error('MEDIA_STORAGE_PROVIDER=r2 needs MEDIA_S3_ENDPOINT, MEDIA_S3_REGION=auto and MEDIA_S3_FORCE_PATH_STYLE=true.');
+  }
   if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(env.MEDIA_S3_BUCKET!.trim())) throw new Error('MEDIA_S3_BUCKET is not a valid bucket name.');
   if (!/^[a-z0-9-]+$/.test(env.MEDIA_S3_REGION!.trim())) throw new Error('MEDIA_S3_REGION is invalid.');
   if (env.MEDIA_S3_FORCE_PATH_STYLE && !['true', 'false'].includes(env.MEDIA_S3_FORCE_PATH_STYLE)) throw new Error('MEDIA_S3_FORCE_PATH_STYLE must be true or false.');

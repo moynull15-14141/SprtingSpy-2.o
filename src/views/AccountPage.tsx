@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useSite } from '../context/SiteContext';
 import { TwoFactorSettings } from './TwoFactorSettings';
 import { Button } from '../components/ui/Button';
+import { Avatar } from '../components/ui/Avatar';
 import type { AccountProfile, AccountSession } from '../types';
 
 const inputClass = 'mt-1 block w-full rounded-lg border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-950 p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500';
@@ -45,7 +46,7 @@ export const AccountPage: React.FC = () => {
 
 const AccountDetails: React.FC = () => {
   const router = useRouter();
-  const { apiCall, updateAccountIdentity, logout, theme, toggleTheme, accountLanguage, setAccountLanguage, features } = useSite();
+  const { apiCall, updateAccountIdentity, logout, themePreference, setThemePreference, accountLanguage, setAccountLanguage, features } = useSite();
   const t = (en: string, bn: string) => accountLanguage === 'bn' ? bn : en;
   const [profile, setProfile] = useState<AccountProfile | null>(null);
   const [sessions, setSessions] = useState<AccountSession[]>([]);
@@ -123,13 +124,13 @@ const AccountDetails: React.FC = () => {
       <p className="text-xs text-stone-500 dark:text-stone-400">{t('Contact an administrator for changes to your sign-in email or account access.', 'সাইন ইন ইমেইল বা অ্যাকাউন্টের অনুমতি পরিবর্তনের জন্য প্রশাসকের সাথে যোগাযোগ করুন।')}</p>
       <form onSubmit={saveProfile} className="space-y-4"><fieldset disabled={!!busy} className="space-y-4">
         <label className="block text-sm">{t('Display name', 'প্রদর্শিত নাম')}<input className={inputClass} autoComplete="name" required maxLength={150} value={name} onChange={e => setName(e.target.value)} /></label>
-        <label className="block text-sm">{t('Avatar image URL', 'প্রোফাইল ছবির URL')}<input className={inputClass} required maxLength={2048} value={avatar} onChange={e => setAvatar(e.target.value)} /></label>
+        <div className="flex items-center gap-3"><Avatar src={avatar} name={name} className="h-12 w-12 rounded-full object-cover" /><label className="block flex-1 text-sm">{t('Avatar image URL', 'প্রোফাইল ছবির URL')}<input className={inputClass} maxLength={2048} value={avatar} onChange={e => setAvatar(e.target.value)} /></label></div>
         {profile.authorProfile && <fieldset className="space-y-4 border-t border-stone-200 dark:border-stone-800 pt-4">
           <legend className="font-semibold text-sm">{t('Public author profile', 'লেখকের প্রকাশ্য প্রোফাইল')}</legend>
           <p className="text-xs text-stone-500 dark:text-stone-400">{profile.authorProfile.roleTitle} · /author/{profile.authorProfile.slug}</p>
           <label className="block text-sm">{t('Byline name', 'লেখকের নাম')}<input className={inputClass} required maxLength={150} value={authorName} onChange={e => setAuthorName(e.target.value)} /></label>
           <label className="block text-sm">{t('Author bio', 'লেখকের পরিচিতি')}<textarea className={inputClass} rows={4} maxLength={3000} value={bio} onChange={e => setBio(e.target.value)} /></label>
-          <label className="block text-sm">{t('Author image URL', 'লেখকের ছবির URL')}<input className={inputClass} required maxLength={2048} value={authorAvatar} onChange={e => setAuthorAvatar(e.target.value)} /></label>
+          <label className="block text-sm">{t('Author image URL', 'লেখকের ছবির URL')}<input className={inputClass} maxLength={2048} value={authorAvatar} onChange={e => setAuthorAvatar(e.target.value)} /></label>
         </fieldset>}
         <Button type="submit" isLoading={busy === 'profile'}>{t('Save profile', 'প্রোফাইল সংরক্ষণ করুন')}</Button>
       </fieldset></form>
@@ -153,7 +154,7 @@ const AccountDetails: React.FC = () => {
     <section id="preferences" className={cardClass}>
       <h2 className="font-serif text-xl font-bold">{t('Preferences', 'পছন্দ')}</h2>
       <p className="text-sm text-stone-500 dark:text-stone-400">{t('Saved in this browser. Language applies to the account area; theme applies across the site.', 'এই ব্রাউজারে সংরক্ষিত। ভাষা অ্যাকাউন্ট বিভাগে এবং থিম পুরো সাইটে প্রযোজ্য।')}</p>
-      <label className="block text-sm">{t('Theme', 'থিম')}<select aria-label={t('Theme', 'থিম')} className={inputClass} value={theme} onChange={e => { if (e.target.value !== theme) toggleTheme(); }}><option value="light">{t('Light', 'হালকা')}</option><option value="dark">{t('Dark', 'গাঢ়')}</option></select></label>
+      <label className="block text-sm">{t('Theme', 'থিম')}<select aria-label={t('Theme', 'থিম')} className={inputClass} value={themePreference} onChange={e => setThemePreference(e.target.value === 'light' || e.target.value === 'dark' ? e.target.value : 'system')}><option value="system">{t('System', 'সিস্টেম')}</option><option value="light">{t('Light', 'হালকা')}</option><option value="dark">{t('Dark', 'গাঢ়')}</option></select></label>
       {features.readerAccounts && <label className="block text-sm">{t('Account language', 'অ্যাকাউন্টের ভাষা')}<select aria-label={t('Account language', 'অ্যাকাউন্টের ভাষা')} className={inputClass} value={accountLanguage} onChange={e => setAccountLanguage(e.target.value === 'bn' ? 'bn' : 'en')}><option value="en">English</option><option value="bn">বাংলা</option></select></label>}
     </section>
   </div>;
