@@ -11,6 +11,18 @@ import { legacyToDoc, validateRichDoc, type RichDoc } from '../../lib/richText';
 import { MediaPicker, ReviewBadge, thumbnailUrl } from './media/MediaShared';
 import { ArticleAppearanceEditor } from './editor/ArticleAppearanceEditor';
 import { ArticleReviewPanel } from './editor/ArticleReviewPanel';
+import { useAutosave } from '../../lib/autosave/useAutosave';
+import { discardDraft, fetchDraftFor, listDrafts, markRecovered, takeOpenDraft } from '../../lib/autosave/api';
+import { docHasText, findRecoverable, forgetLocal, loadNewDraft, type Recoverable } from '../../lib/autosave/recovery';
+import { AutosaveStatus, DraftRecoveryBanner, StaleSaveWarning } from './autosave/AutosaveUI';
+
+/** PHASE AUTOSAVE: the editor form as stored in the working copy. */
+interface ArticleDraftPayload {
+  sportSlug: string; isAboutEvent: boolean; eventSlug: string; editionYear: number | null; articleType: string; faqSchemaEnabled: boolean;
+  title: string; subtitle: string; slug: string; excerpt: string; body: RichDoc; featuredImage: string; featuredMediaId: string | null;
+  authorId: string; metaTitle: string; metaDescription: string; ogTitle: string; ogDescription: string; ogImage: string;
+  otherSeo: SeoMetadata; status: string; scheduledLocal: string; references: Reference[];
+}
 import { REVIEW_LABELS } from '../../lib/editorialWorkflow';
 
 // The rich-text editor (TipTap) is loaded on demand, only inside the CMS.
@@ -115,6 +127,49 @@ export const AdminArticles: React.FC = () => {
   const [assistantResult, setAssistantResult] = useState<AssistantResult['suggestions'] | null>(null);
   const [runningAssistant, setRunningAssistant] = useState(false);
 
+  // PHASE AUTOSAVE: the form is autosaved to a server working copy (never to the live article).
+  const [recovery, setRecovery] = useState<Recoverable<ArticleDraftPayload> | null>(null);
+  const [staleSave, setStaleSave] = useState(false);
+  const [unsavedIds, setUnsavedIds] = useState<Set<string>>(new Set());
+  const draftPayload: ArticleDraftPayload = {
+    sportSlug, isAboutEvent, eventSlug, editionYear: editionYear ?? null, articleType, faqSchemaEnabled, title, subtitle, slug, excerpt, body: bodyDoc,
+    featuredImage, featuredMediaId, authorId, metaTitle, metaDescription, ogTitle, ogDescription, ogImage, otherSeo, status, scheduledLocal, references,
+  };
+  const autosave = useAutosave({
+    kind: 'article', userId: currentUser.id, enabled: isCreating && !authorLocked && !recovery, title: title.trim() || 'Untitled article', payload: draftPayload,
+    meaningful: !!title.trim() || !!excerpt.trim() || docHasText(bodyDoc),
+  });
+  const applyPayload = (p: Partial<ArticleDraftPayload>) => {
+    if (p.sportSlug !== undefined) setSportSlug(p.sportSlug);
+    if (p.isAboutEvent !== undefined) setIsAboutEvent(p.isAboutEvent);
+    if (p.eventSlug !== undefined) setEventSlug(p.eventSlug);
+    if (p.editionYear !== undefined) setEditionYear(p.editionYear ?? undefined);
+    if (p.articleType !== undefined) setArticleType(p.articleType as ArticleType);
+    if (p.faqSchemaEnabled !== undefined) setFaqSchemaEnabled(p.faqSchemaEnabled);
+    if (p.title !== undefined) setTitle(p.title);
+    if (p.subtitle !== undefined) setSubtitle(p.subtitle);
+    if (p.slug !== undefined) setSlug(p.slug);
+    if (p.excerpt !== undefined) setExcerpt(p.excerpt);
+    if (p.body) { setBodyDoc(p.body); setEditorKey((k) => k + 1); }
+    if (p.featuredImage !== undefined) setFeaturedImage(p.featuredImage);
+    if (p.featuredMediaId !== undefined) setFeaturedMediaId(p.featuredMediaId);
+    if (p.authorId !== undefined && !isAuthor) setAuthorId(p.authorId);
+    if (p.metaTitle !== undefined) setMetaTitle(p.metaTitle);
+    if (p.metaDescription !== undefined) setMetaDescription(p.metaDescription);
+    if (p.ogTitle !== undefined) setOgTitle(p.ogTitle);
+    if (p.ogDescription !== undefined) setOgDescription(p.ogDescription);
+    if (p.ogImage !== undefined) setOgImage(p.ogImage);
+    if (p.otherSeo !== undefined) setOtherSeo(p.otherSeo);
+    // Autosave never changes the workflow state: the status stays what the saved article has.
+    if (p.scheduledLocal !== undefined) setScheduledLocal(p.scheduledLocal);
+    if (p.references !== undefined) setReferences(p.references);
+  };
+  /** Restart autosave from the form as it is now (call in the same tick as the form setters). */
+  const restartAutosave = (id: string | null) => {
+    autosave.start({ entityId: id, baseVersion: null });
+    if (id) void fetchDraftFor('article', id).then((r) => { if (r) autosave.setBaseVersion(r.currentVersion); });
+  };
+
   // Filter events and editions by selected sport
   const availableEvents = events.filter((e) => e.sportSlug === sportSlug);
   const availableEditions = editions.filter((ed) => ed.eventSlug === eventSlug);
@@ -158,6 +213,11 @@ export const AdminArticles: React.FC = () => {
     setEditingId(null);
   };
 
+  useEffect(() => {
+    if (isCreating) return;
+    void listDrafts().then((r) => setUnsavedIds(new Set((r?.drafts ?? []).filter((d) => d.kind === 'article' && d.entityId).map((d) => d.entityId!))));
+  }, [isCreating, articles]);
+
   const startCreate = () => {
     setFirstParagraphFocusRequest(0);
     // The CMS dataset may finish loading after this component's first render,
@@ -168,7 +228,45 @@ export const AdminArticles: React.FC = () => {
     setFeedback(null);
     setEditingId(null);
     setIsCreating(true);
+    setRecovery(null);
+    setStaleSave(false);
+    autosave.start({ entityId: null, baseVersion: null });
     requestAnimationFrame(() => document.getElementById('article-title')?.focus());
+  };
+
+  /** Back to the list: unsaved changes stay in the working copy for later. */
+  const closeEditor = async () => {
+    await autosave.stop();
+    setRecovery(null);
+    setStaleSave(false);
+    resetForm();
+  };
+  /** Discard: remove the working copy (confirmed); the saved article is unchanged. */
+  const discardAndClose = async () => {
+    if (!window.confirm('Discard your unsaved changes? The saved article itself is not changed.')) return;
+    const ok = await autosave.discard();
+    autosave.end();
+    setRecovery(null);
+    setStaleSave(false);
+    resetForm();
+    if (!ok) setFeedback('Another editor changed the working copy meanwhile, so it was kept. Open the article to review it.');
+  };
+  const continueDraft = () => {
+    if (!recovery) return;
+    applyPayload(recovery.payload);
+    autosave.start(recovery.start);
+    if (recovery.serverDraft) markRecovered(recovery.serverDraft.id);
+    setRecovery(null);
+    setFeedback('Unsaved work restored. Save or publish to apply it to the article.');
+  };
+  const discardRecovery = async () => {
+    if (!recovery || !window.confirm('Discard the unsaved working copy? The saved article itself is not changed.')) return;
+    if (recovery.serverDraft && !(await discardDraft(recovery.serverDraft.id, recovery.serverDraft.revision))) {
+      setFormError('The working copy changed meanwhile, so it was kept. Reopen the article to see it.');
+      return;
+    }
+    forgetLocal(recovery.localKey);
+    setRecovery(null);
   };
 
   const seoDraft = () => ({
@@ -277,12 +375,15 @@ export const AdminArticles: React.FC = () => {
     setSaving(true);
     try {
       if (editingId) {
-        const updated = await updateArticle(editingId, articlePayload as never);
+        let stale = false;
+        const updated = await updateArticle(editingId, articlePayload as never, { expectedVersion: autosave.baseVersion(), onStale: () => { stale = true; } });
+        if (stale) { setStaleSave(true); return null; }
         if (!updated) setFormError('The article was not saved. Check the server message and try again; your changes are still in the editor.');
+        if (updated) await autosave.applied(); // the working copy is now the article itself
         return updated ? editingId : null;
       }
       const created = await addArticle(articlePayload as never);
-      if (created) setEditingId(created.id); // further saves/previews update the same article
+      if (created) { await autosave.applied(); setEditingId(created.id); } // further saves/previews update the same article
       else setFormError('The article was not saved. Check the server message and try again; your changes are still in the editor.');
       return created?.id ?? null;
     } finally {
@@ -307,6 +408,7 @@ export const AdminArticles: React.FC = () => {
     if (nextStatus === 'scheduled') setFeedback(`Article “${title}” scheduled for ${formatWhen(new Date(scheduledLocal))}. It stays unpublished until then.`);
     else setFeedback(`Article “${title}” saved as ${nextStatus}.${wasScheduled && nextStatus !== 'published' ? ' The scheduled publication was cancelled.' : ''}`);
     if (nextStatus !== 'scheduled') setScheduledLocal('');
+    restartAutosave(id);
   };
 
   /**
@@ -325,6 +427,7 @@ export const AdminArticles: React.FC = () => {
       return;
     }
     if (tab) tab.location.href = `/admin/preview/${id}/`;
+    if (!willBeLive) restartAutosave(id);
   };
 
   const featuredMedia = featuredMediaId ? mediaItems.find((m) => m.id === featuredMediaId) : undefined;
@@ -342,9 +445,29 @@ export const AdminArticles: React.FC = () => {
   const openEditor = async (id: string) => {
     setFeedback(null);
     const res = await apiCall<Article>(`/api/articles/${encodeURIComponent(id)}`);
-    if (res.data) startEdit(res.data);
-    else setFeedback(res.error || 'This article could not be loaded. Please try again.');
+    if (!res.data) { setFeedback(res.error || 'This article could not be loaded. Please try again.'); return; }
+    if (isCreating) await autosave.stop(); // the previous item's working copy is kept
+    startEdit(res.data);
+    autosave.start({ entityId: res.data.id, baseVersion: null });
+    setRecovery(null);
+    setStaleSave(false);
+    const found = await findRecoverable<ArticleDraftPayload>('article', currentUser.id, res.data.id);
+    autosave.setBaseVersion(found.currentVersion);
+    if (found.recoverable) setRecovery(found.recoverable);
   };
+  /** "Continue editing" a new article from Unsaved Work. */
+  const openNewDraft = async (draftId: string) => {
+    const d = await loadNewDraft<ArticleDraftPayload>('article', currentUser.id, draftId);
+    if (!d) { setFeedback('That unsaved work is no longer available.'); return; }
+    startCreate();
+    applyPayload(d.payload);
+    autosave.start(d.start);
+    if (d.start.draft?.revision) markRecovered(draftId);
+  };
+  useEffect(() => {
+    const req = takeOpenDraft(['article']);
+    if (req) void (req.entityId ? openEditor(req.entityId) : req.draftId ? openNewDraft(req.draftId) : undefined);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startEdit = (art: Article) => {
     setFirstParagraphFocusRequest(0);
@@ -409,14 +532,17 @@ export const AdminArticles: React.FC = () => {
             <h3 className="min-w-0 truncate font-serif text-lg font-bold text-stone-900 dark:text-stone-100">
               {editingId ? 'Edit Article Dossier' : 'New Article Guided Workflow'}
             </h3>
+            <AutosaveStatus autosave={autosave} onLoadNewer={autosave.conflict ? () => { const c = autosave.conflict!; applyPayload(c.payload as Partial<ArticleDraftPayload>); autosave.start({ entityId: c.entityId, baseVersion: c.baseVersion, draft: c }); } : undefined} />
             <button
               type="button"
-              onClick={resetForm}
+              onClick={() => void closeEditor()}
               className="shrink-0 rounded-md px-2 py-1 text-xs font-semibold text-stone-500 hover:bg-stone-100 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:hover:bg-stone-800 dark:hover:text-stone-200 dark:text-stone-400"
             >
               &larr; Back to articles
             </button>
           </div>
+          {recovery && <div className="px-4 pt-3 sm:px-5"><DraftRecoveryBanner offer={recovery} onContinue={continueDraft} onDiscard={() => void discardRecovery()} /></div>}
+          {staleSave && <div className="px-4 pt-3 sm:px-5"><StaleSaveWarning onDismiss={() => setStaleSave(false)} onApplyAnyway={() => { autosave.setBaseVersion(null); setStaleSave(false); void saveAs(status); }} /></div>}
           {formError && (
             <p role="alert" className="mx-3 mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200 sm:mx-4">{formError}</p>
           )}
@@ -698,7 +824,7 @@ export const AdminArticles: React.FC = () => {
           </fieldset>
 
           <aside className="cms-seo-sidebar min-w-0 space-y-4 break-words" aria-label="Publishing and SEO sidebar">
-          <ArticleReviewPanel article={editingArticle} saveDraft={() => saveArticle('draft')} />
+          <ArticleReviewPanel article={editingArticle} saveDraft={() => saveArticle('draft')} onWorkflowChange={() => restartAutosave(editingId)} />
 
           {/* WORKFLOW STEP 7: SEO CHECK */}
           <section className="space-y-4 rounded-xl border border-amber-300 bg-white p-4 shadow-sm dark:border-amber-800 dark:bg-stone-950" aria-labelledby="seo-intelligence-heading">
@@ -904,7 +1030,7 @@ export const AdminArticles: React.FC = () => {
             )}
 
             <div className="grid grid-cols-2 gap-2">
-              <Button type="button" variant="ghost" size="sm" onClick={resetForm}>
+              <Button type="button" variant="ghost" size="sm" onClick={() => void discardAndClose()}>
                 Discard
               </Button>
               <Button type="button" variant="outline" size="sm" onClick={handlePreview} disabled={saving || (willBeLive && !editingId)} title={willBeLive ? 'Shows the last saved version; does not save or publish.' : 'Saves as ' + status + ' and opens the preview.'}>
@@ -932,6 +1058,7 @@ export const AdminArticles: React.FC = () => {
           authors={authors}
           onView={(url) => navigate(url)}
           onEdit={(id) => void openEditor(id)}
+          unsavedIds={unsavedIds}
           onReview={(id) => { const art = articles.find((a) => a.id === id); if (art) confirmFreshness(art); }}
           onDelete={(id, title) => { if (confirm(`Delete "${title}"?`)) deleteArticle(id); }}
         />
@@ -950,7 +1077,7 @@ const STATUS_BADGE: Record<string, string> = {
 const filterClass = 'rounded-lg border border-stone-300 bg-white p-2 text-xs dark:border-stone-700 dark:bg-stone-950';
 
 /** Article list with keyword search (title/body/id/slug) and filters, one server page at a time. */
-function ArticleRepository({ reloadKey, sports, authors, onView, onEdit, onReview, onDelete }: {
+function ArticleRepository({ reloadKey, sports, authors, onView, onEdit, onReview, onDelete, unsavedIds }: {
   reloadKey: unknown;
   sports: { id: string; slug: string; name: string }[];
   authors: { id: string; slug: string; name: string }[];
@@ -958,6 +1085,8 @@ function ArticleRepository({ reloadKey, sports, authors, onView, onEdit, onRevie
   onEdit: (id: string) => void;
   onReview: (id: string) => void;
   onDelete: (id: string, title: string) => void;
+  /** PHASE AUTOSAVE: articles with an unsaved working copy. */
+  unsavedIds?: Set<string>;
 }) {
   const [q, setQ] = useState('');
   const { currentUser, articleTypes } = useApp();
@@ -1046,6 +1175,7 @@ function ArticleRepository({ reloadKey, sports, authors, onView, onEdit, onRevie
               <tr key={art.id} className="hover:bg-stone-50 dark:hover:bg-stone-900/40">
                 <td className="p-3 max-w-xs">
                   <p className="font-semibold text-stone-900 dark:text-stone-100 truncate">{art.title}</p>
+                  {unsavedIds?.has(art.id) && <span className="mt-0.5 inline-block rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-900 dark:bg-sky-950 dark:text-sky-300" data-testid="unsaved-badge">Unsaved changes</span>}
                   <p className="text-[11px] text-stone-500 truncate font-mono dark:text-stone-400">
                     {art.eventSlug ? `${art.eventSlug}${art.editionYear ? ` (${art.editionYear})` : ''} / ` : ''}{art.slug}
                   </p>

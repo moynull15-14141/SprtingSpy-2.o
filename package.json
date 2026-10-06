@@ -36,6 +36,7 @@
     "test:search-states": "tsx server/scripts/verify-search-states.ts",
     "test:phase-f": "tsx server/scripts/verify-phase-f.ts",
     "test:pages": "tsx server/scripts/verify-pages.ts",
+    "test:autosave": "tsx server/scripts/verify-autosave.ts",
     "perf:measure": "tsx server/scripts/measure-web-perf.ts",
     "users:set-password": "tsx server/scripts/set-password.ts",
     "db:backup-drill": "tsx server/scripts/backup-restore-drill.ts",

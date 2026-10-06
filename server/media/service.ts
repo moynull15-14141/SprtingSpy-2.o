@@ -127,14 +127,14 @@ export async function createMediaFromUpload(file: { buffer: Buffer; originalname
   }
 }
 
-export type MediaUsage = { kind: 'article' | 'event' | 'edition' | 'sport' | 'site' | 'page'; id: string; title: string; role: 'featured' | 'body' | 'image' };
+export type MediaUsage = { kind: 'article' | 'event' | 'edition' | 'sport' | 'site' | 'page' | 'draft'; id: string; title: string; role: 'featured' | 'body' | 'image' };
 
 /**
  * Where each media item is used: article featured images and body images
  * (relations), plus sport/event/edition images that reference its URL.
  */
 export async function mediaUsageMap(options: {articleWhere?: Prisma.ArticleWhereInput; publicSiteOnly?: boolean} = {}): Promise<Record<string, MediaUsage[]>> {
-  const [media, featured, body, sports, events, editions, site, pages] = await Promise.all([
+  const [media, featured, body, sports, events, editions, site, pages, drafts] = await Promise.all([
     prisma.mediaItem.findMany({ select: { id: true, url: true } }),
     prisma.article.findMany({ where: { AND: [{ featuredMediaId: { not: null } }, options.articleWhere ?? {}] }, select: { id: true, title: true, featuredMediaId: true } }),
     prisma.articleMedia.findMany({ where: { article: options.articleWhere ?? {} }, select: { mediaId: true, article: { select: { id: true, title: true } } } }),
@@ -144,6 +144,8 @@ export async function mediaUsageMap(options: {articleWhere?: Prisma.ArticleWhere
     prisma.siteExperience.findUnique({ where: { area: 'homepage' }, select: { draft: true, published: true, scheduled: true } }),
     // PHASE PAGES: body images and the social image of CMS pages (drafts included).
     prisma.page.findMany({ where: options.publicSiteOnly ? { status: 'published' } : {}, select: { id: true, title: true, mediaIds: true, ogMediaId: true } }),
+    // PHASE AUTOSAVE: unsaved working copies still reference their images (never public).
+    options.publicSiteOnly ? Promise.resolve([] as { id: string; title: string; mediaIds: string[] }[]) : prisma.editorDraft.findMany({ select: { id: true, title: true, mediaIds: true } }),
   ]);
   const byUrl = new Map(media.map((m) => [m.url, m.id]));
   const map: Record<string, MediaUsage[]> = Object.fromEntries(media.map((m) => [m.id, []]));
@@ -156,6 +158,7 @@ export async function mediaUsageMap(options: {articleWhere?: Prisma.ArticleWhere
   sports.forEach((s) => byRef('sport', s.id, s.name, s.heroImage));
   events.forEach((e) => byRef('event', e.id, e.name, e.featuredImage));
   editions.forEach((e) => byRef('edition', e.id, e.title, e.featuredImage));
+  for (const d of drafts) for (const id of new Set(d.mediaIds)) map[id]?.push({ kind: 'draft', id: d.id, title: `Unsaved draft: ${d.title}`, role: 'body' });
   for (const p of pages) {
     for (const id of new Set(p.mediaIds)) map[id]?.push({ kind: 'page', id: p.id, title: p.title, role: 'body' });
     if (p.ogMediaId) map[p.ogMediaId]?.push({ kind: 'page', id: p.id, title: p.title, role: 'featured' });

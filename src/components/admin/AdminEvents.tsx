@@ -6,6 +6,10 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
+import { useAutosave } from '../../lib/autosave/useAutosave';
+import { discardDraft, listDrafts, markRecovered, takeOpenDraft } from '../../lib/autosave/api';
+import { findRecoverable, forgetLocal, loadNewDraft, type Recoverable } from '../../lib/autosave/recovery';
+import { AutosaveStatus, DraftRecoveryBanner, StaleSaveWarning } from './autosave/AutosaveUI';
 import { useApp } from '../../context/AppContext';
 import { Button } from '../ui/Button';
 import { EDITION_STATUSES, EditionStatus, EventEdition, SportEvent, type SeoMetadata, type SportEventFieldDefinition, type SportEventFieldValues } from '../../types';
@@ -18,6 +22,18 @@ const eventSeoDefaults = (name: string, description: string) => ({ title: `${nam
 const editionSeoDefaults = (title: string, description: string) => ({ title: `${title || 'Edition title'} – Official Dates, Venue & Guides | SportingSpy`, description });
 const QUICK_FACT_FIELDS: RecordField[] = [{ key: 'label', label: 'Label', placeholder: 'e.g. Surface', maxLength: 80 }, { key: 'value', label: 'Value', placeholder: 'e.g. Red clay', maxLength: 300 }];
 const CHAMPION_FIELDS: RecordField[] = [{ key: 'category', label: 'Category', placeholder: "e.g. Men's singles", maxLength: 80 }, { key: 'name', label: 'Champion', placeholder: 'e.g. Carlos Alcaraz', maxLength: 150 }];
+/** PHASE AUTOSAVE: the event and edition forms as stored in their working copies. */
+interface EventDraftPayload {
+  name: string; slug: string; shortName: string; altNames: string; faqSchema: boolean; sportSlug: string; description: string; history: string;
+  venue: string; location: string; frequency: string; currentEditionYear: string; eventType: string; officialSourceUrl: string; image: string;
+  seo: SeoDraft; values: SportEventFieldValues; valuesDirty: boolean;
+}
+interface EditionDraftPayload {
+  eventSlug: string; year: number; title: string; startDate: string; endDate: string; venue: string; location: string; purse: string; status: EditionStatus;
+  description: string; officialSourceUrl: string; image: string; qualification: string; participants: string;
+  facts: Record<string, string>[]; champions: Record<string, string>[]; faqSchema: boolean; seo: SeoDraft;
+}
+
 const wordCount = (s: string) => (s.trim() ? s.trim().split(/\s+/).length : 0);
 
 export const AdminEvents: React.FC = () => {
@@ -98,6 +114,77 @@ export const AdminEvents: React.FC = () => {
   const [formError, setFormError] = useState<string | null>(null);
   const flash = (message: string) => { setFeedback(message); setTimeout(() => setFeedback(null), 5000); };
 
+  // ── PHASE AUTOSAVE: event and edition forms autosave to server working copies (never the live rows). ──
+  const { currentUser } = useApp();
+  const [eventRecovery, setEventRecovery] = useState<Recoverable<EventDraftPayload> | null>(null);
+  const [editionRecovery, setEditionRecovery] = useState<Recoverable<EditionDraftPayload> | null>(null);
+  const [staleEvent, setStaleEvent] = useState(false);
+  const [staleEdition, setStaleEdition] = useState(false);
+  const [unsaved, setUnsaved] = useState<Set<string>>(new Set());
+  const eventPayload: EventDraftPayload = {
+    name: eventName, slug: eventSlug, shortName: eventShortName, altNames: eventAltNames, faqSchema: eventFaqSchema, sportSlug: eventSportSlug,
+    description: eventDesc, history: eventHistory, venue: eventVenue, location: eventLocation, frequency: eventFreq, currentEditionYear: eventCurrentEditionYear,
+    eventType, officialSourceUrl: eventOfficialSourceUrl, image: eventImage, seo: eventSeo, values: eventValues, valuesDirty: eventValuesDirty,
+  };
+  const editionPayload: EditionDraftPayload = {
+    eventSlug: editionEventSlug, year: editionYear, title: editionTitle, startDate: editionStart, endDate: editionEnd, venue: editionVenue, location: editionLocation,
+    purse: editionPurse, status: editionStatus, description: editionDesc, officialSourceUrl: editionSourceUrl, image: editionImage, qualification: editionQualification,
+    participants: editionParticipants, facts: editionFacts, champions: editionChampions, faqSchema: editionFaqSchema, seo: editionSeo,
+  };
+  const eventAutosave = useAutosave({
+    kind: 'event', userId: currentUser.id, enabled: isCreatingEvent && !eventRecovery, title: eventName.trim() || 'Untitled event', payload: eventPayload,
+    meaningful: !!eventName.trim() || !!eventDesc.trim(),
+  });
+  const editionAutosave = useAutosave({
+    kind: 'edition', userId: currentUser.id, enabled: isCreatingEdition && !editionRecovery, title: editionTitle.trim() || `Untitled edition${editionYear ? ` ${editionYear}` : ''}`, payload: editionPayload,
+    meaningful: !!editionTitle.trim() || !!editionDesc.trim(),
+  });
+  const applyEventPayload = (p: Partial<EventDraftPayload>) => {
+    if (p.name !== undefined) setEventName(p.name);
+    if (p.slug !== undefined) setEventSlug(p.slug);
+    if (p.shortName !== undefined) setEventShortName(p.shortName);
+    if (p.altNames !== undefined) setEventAltNames(p.altNames);
+    if (p.faqSchema !== undefined) setEventFaqSchema(p.faqSchema);
+    if (p.sportSlug !== undefined) setEventSportSlug(p.sportSlug);
+    if (p.description !== undefined) setEventDesc(p.description);
+    if (p.history !== undefined) setEventHistory(p.history);
+    if (p.venue !== undefined) setEventVenue(p.venue);
+    if (p.location !== undefined) setEventLocation(p.location);
+    if (p.frequency !== undefined) setEventFreq(p.frequency);
+    if (p.currentEditionYear !== undefined) setEventCurrentEditionYear(p.currentEditionYear);
+    if (p.eventType !== undefined) setEventType(p.eventType);
+    if (p.officialSourceUrl !== undefined) setEventOfficialSourceUrl(p.officialSourceUrl);
+    if (p.image !== undefined) setEventImage(p.image);
+    if (p.seo !== undefined) setEventSeo(p.seo);
+    if (p.values !== undefined) setEventValues(p.values);
+    if (p.valuesDirty !== undefined) setEventValuesDirty(p.valuesDirty);
+  };
+  const applyEditionPayload = (p: Partial<EditionDraftPayload>) => {
+    if (p.eventSlug !== undefined) setEditionEventSlug(p.eventSlug);
+    if (p.year !== undefined) setEditionYear(p.year);
+    if (p.title !== undefined) setEditionTitle(p.title);
+    if (p.startDate !== undefined) setEditionStart(p.startDate);
+    if (p.endDate !== undefined) setEditionEnd(p.endDate);
+    if (p.venue !== undefined) setEditionVenue(p.venue);
+    if (p.location !== undefined) setEditionLocation(p.location);
+    if (p.purse !== undefined) setEditionPurse(p.purse);
+    if (p.status !== undefined) setEditionStatus(p.status);
+    if (p.description !== undefined) setEditionDesc(p.description);
+    if (p.officialSourceUrl !== undefined) setEditionSourceUrl(p.officialSourceUrl);
+    if (p.image !== undefined) setEditionImage(p.image);
+    if (p.qualification !== undefined) setEditionQualification(p.qualification);
+    if (p.participants !== undefined) setEditionParticipants(p.participants);
+    if (p.facts !== undefined) setEditionFacts(p.facts);
+    if (p.champions !== undefined) setEditionChampions(p.champions);
+    if (p.faqSchema !== undefined) setEditionFaqSchema(p.faqSchema);
+    if (p.seo !== undefined) setEditionSeo(p.seo);
+  };
+  useEffect(() => {
+    if (isCreatingEvent || isCreatingEdition) return;
+    void listDrafts().then((r) => setUnsaved(new Set((r?.drafts ?? []).filter((d) => d.entityId && (d.kind === 'event' || d.kind === 'edition')).map((d) => `${d.kind}:${d.entityId}`))));
+  }, [isCreatingEvent, isCreatingEdition, events, editions]);
+  const unsavedBadge = (key: string) => unsaved.has(key) && <span className="ml-2 rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-900 dark:bg-sky-950 dark:text-sky-300" data-testid="unsaved-badge">Unsaved changes</span>;
+
   const resetEventForm = () => {
     setEditingEventId(null);
     setIsCreatingEvent(false);
@@ -164,6 +251,45 @@ export const AdminEvents: React.FC = () => {
     return () => { cancelled = true; };
   }, [isCreatingEvent, eventSportSlug]);
 
+  const openEvent = async (evt: SportEvent) => {
+    if (isCreatingEvent) await eventAutosave.stop(); // the previous item's working copy is kept
+    setStaleEvent(false);
+    setEventRecovery(null);
+    startEditEvent(evt);
+    eventAutosave.start({ entityId: evt.id, baseVersion: null });
+    const found = await findRecoverable<EventDraftPayload>('event', currentUser.id, evt.id);
+    eventAutosave.setBaseVersion(found.currentVersion);
+    if (found.recoverable) setEventRecovery(found.recoverable);
+  };
+  const newEvent = () => {
+    resetEventForm();
+    setIsCreatingEvent(true);
+    setEventRecovery(null);
+    setStaleEvent(false);
+    eventAutosave.start({ entityId: null, baseVersion: null });
+  };
+  /** Close keeps unsaved changes in the working copy; Discard removes it (confirmed). */
+  const closeEvent = async () => { await eventAutosave.stop(); setEventRecovery(null); setStaleEvent(false); resetEventForm(); };
+  const discardEvent = async () => {
+    if (!window.confirm('Discard your unsaved changes? The saved event itself is not changed.')) return;
+    const ok = await eventAutosave.discard();
+    eventAutosave.end(); setEventRecovery(null); setStaleEvent(false); resetEventForm();
+    if (!ok) flash('Another editor changed the working copy meanwhile, so it was kept.');
+  };
+  const continueEventDraft = () => {
+    if (!eventRecovery) return;
+    applyEventPayload(eventRecovery.payload);
+    eventAutosave.start(eventRecovery.start);
+    if (eventRecovery.serverDraft) markRecovered(eventRecovery.serverDraft.id);
+    setEventRecovery(null);
+  };
+  const discardEventRecovery = async () => {
+    if (!eventRecovery || !window.confirm('Discard the unsaved working copy? The saved event itself is not changed.')) return;
+    if (eventRecovery.serverDraft && !(await discardDraft(eventRecovery.serverDraft.id, eventRecovery.serverDraft.revision))) { setFormError('The working copy changed meanwhile, so it was kept. Reopen the event to see it.'); return; }
+    forgetLocal(eventRecovery.localKey);
+    setEventRecovery(null);
+  };
+
   const changeEventSport = (slug: string) => {
     if (slug === eventSportSlug) return;
     if (Object.keys(eventValues).length && !window.confirm('Changing Sport clears this Event’s sport-specific values. Continue?')) return;
@@ -195,6 +321,7 @@ export const AdminEvents: React.FC = () => {
     if (originalEvent && (originalEvent.slug !== eventSlug || originalEvent.sportSlug !== eventSportSlug)
       && !confirm(`Change the URL from /${originalEvent.sportSlug}/${originalEvent.slug}/ to /${eventSportSlug}/${eventSlug}/? The event, its editions and its articles move; old URLs will redirect (301) to the new ones.`)) return;
     setEventSaving(true);
+    let staleEventSave = false;
     const ok = editingEventId
       ? await updateEvent(editingEventId, {
           alternativeNames: eventAltNames,
@@ -214,7 +341,7 @@ export const AdminEvents: React.FC = () => {
           ...(originalEvent && eventImage !== (originalEvent.featuredImage || '') ? { featuredImage: eventImage || null } : {}),
           seo,
           ...customPayload,
-        })
+        }, { expectedVersion: eventAutosave.baseVersion(), onStale: () => { staleEventSave = true; } })
       : await addEvent({
           name: eventName,
           slug: eventSlug,
@@ -238,8 +365,10 @@ export const AdminEvents: React.FC = () => {
           ...customPayload,
         });
     setEventSaving(false);
+    if (staleEventSave) { setStaleEvent(true); return; }
     // On failure the server's message is shown and the form keeps what was typed.
     if (!ok) { setFormError('The event was not saved. Check the message above and try again.'); return; }
+    await eventAutosave.applied(); // the working copy is now the event itself
     flash(`Permanent event "${eventName}" ${editingEventId ? 'updated' : 'created'}.`);
     resetEventForm();
   };
@@ -272,7 +401,64 @@ export const AdminEvents: React.FC = () => {
   const startCreateEdition = () => {
     resetEditionForm();
     setIsCreatingEdition(true);
+    setEditionRecovery(null);
+    setStaleEdition(false);
+    editionAutosave.start({ entityId: null, baseVersion: null });
   };
+  const openEdition = async (ed: EventEdition) => {
+    if (isCreatingEdition) await editionAutosave.stop();
+    setStaleEdition(false);
+    setEditionRecovery(null);
+    startEditEdition(ed);
+    editionAutosave.start({ entityId: ed.id, baseVersion: null });
+    const found = await findRecoverable<EditionDraftPayload>('edition', currentUser.id, ed.id);
+    editionAutosave.setBaseVersion(found.currentVersion);
+    if (found.recoverable) setEditionRecovery(found.recoverable);
+  };
+  const closeEdition = async () => { await editionAutosave.stop(); setEditionRecovery(null); setStaleEdition(false); resetEditionForm(); };
+  const discardEdition = async () => {
+    if (!window.confirm('Discard your unsaved changes? The saved edition itself is not changed.')) return;
+    const ok = await editionAutosave.discard();
+    editionAutosave.end(); setEditionRecovery(null); setStaleEdition(false); resetEditionForm();
+    if (!ok) flash('Another editor changed the working copy meanwhile, so it was kept.');
+  };
+  const continueEditionDraft = () => {
+    if (!editionRecovery) return;
+    applyEditionPayload(editionRecovery.payload);
+    editionAutosave.start(editionRecovery.start);
+    if (editionRecovery.serverDraft) markRecovered(editionRecovery.serverDraft.id);
+    setEditionRecovery(null);
+  };
+  const discardEditionRecovery = async () => {
+    if (!editionRecovery || !window.confirm('Discard the unsaved working copy? The saved edition itself is not changed.')) return;
+    if (editionRecovery.serverDraft && !(await discardDraft(editionRecovery.serverDraft.id, editionRecovery.serverDraft.revision))) { setFormError('The working copy changed meanwhile, so it was kept. Reopen the edition to see it.'); return; }
+    forgetLocal(editionRecovery.localKey);
+    setEditionRecovery(null);
+  };
+  /** "Continue editing" from Unsaved Work (another CMS screen). */
+  useEffect(() => {
+    const req = takeOpenDraft(['event', 'edition']);
+    if (!req) return;
+    setActiveSubTab(req.kind === 'event' ? 'events' : 'editions');
+    void (async () => {
+      if (req.entityId) {
+        if (req.kind === 'event') { const evt = events.find((x) => x.id === req.entityId); if (evt) await openEvent(evt); }
+        else { const ed = editions.find((x) => x.id === req.entityId); if (ed) await openEdition(ed); }
+        return;
+      }
+      if (!req.draftId) return;
+      if (req.kind === 'event') {
+        const d = await loadNewDraft<EventDraftPayload>('event', currentUser.id, req.draftId);
+        if (!d) return;
+        resetEventForm(); setIsCreatingEvent(true); applyEventPayload(d.payload); eventAutosave.start(d.start);
+      } else {
+        const d = await loadNewDraft<EditionDraftPayload>('edition', currentUser.id, req.draftId);
+        if (!d) return;
+        resetEditionForm(); setIsCreatingEdition(true); applyEditionPayload(d.payload); editionAutosave.start(d.start);
+      }
+      if (req.draftId) markRecovered(req.draftId);
+    })();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startEditEdition = (ed: EventEdition) => {
     setFormError(null);
@@ -334,6 +520,7 @@ export const AdminEvents: React.FC = () => {
       faqSchemaEnabled: editionFaqSchema,
     };
     setEditionSaving(true);
+    let staleEditionSave = false;
     const ok = editingEditionId
       ? await updateEdition(editingEditionId, {
           ...details,
@@ -343,7 +530,7 @@ export const AdminEvents: React.FC = () => {
           qualificationInfo: editionQualification.trim(),
           participantsCount: participants as number,
           ...(editionImage !== (editions.find((ed) => ed.id === editingEditionId)?.featuredImage || '') ? { featuredImage: editionImage || null } : {}),
-        })
+        }, { expectedVersion: editionAutosave.baseVersion(), onStale: () => { staleEditionSave = true; } })
       : await addEdition({
           ...details,
           eventSlug: editionEventSlug,
@@ -352,7 +539,9 @@ export const AdminEvents: React.FC = () => {
           featuredImage: editionImage || null,
         });
     setEditionSaving(false);
+    if (staleEditionSave) { setStaleEdition(true); return; }
     if (!ok) { setFormError('The edition was not saved. Check the message above and try again.'); return; }
+    await editionAutosave.applied(); // the working copy is now the edition itself
     flash(editingEditionId ? `Edition ${editionYear} updated.` : `Edition ${editionYear} for ${parentEvent.name} staged.`);
     resetEditionForm();
   };
@@ -405,17 +594,20 @@ export const AdminEvents: React.FC = () => {
         <div className="space-y-4">
           <div className="flex justify-end">
             {!isCreatingEvent && (
-              <Button disabled={sports.length === 0} onClick={() => { resetEventForm(); setIsCreatingEvent(true); }} size="sm">
+              <Button disabled={sports.length === 0} onClick={newEvent} size="sm">
                 + New Permanent Event
               </Button>
             )}
           </div>
 
           {isCreatingEvent && (
-            <form onSubmit={handleSaveEvent} className="p-5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900/60 space-y-4">
+            <form id="event-form" onSubmit={handleSaveEvent} className="p-5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900/60 space-y-4">
               <h3 className="font-serif text-base font-bold text-stone-900 dark:text-stone-100">
                 {editingEventId ? 'Edit Permanent Event' : 'Register Permanent Event Institution'}
               </h3>
+              <AutosaveStatus autosave={eventAutosave} onLoadNewer={eventAutosave.conflict ? () => { const c = eventAutosave.conflict!; applyEventPayload(c.payload as Partial<EventDraftPayload>); eventAutosave.start({ entityId: c.entityId, baseVersion: c.baseVersion, draft: c }); } : undefined} />
+              {eventRecovery && <DraftRecoveryBanner offer={eventRecovery} onContinue={continueEventDraft} onDiscard={() => void discardEventRecovery()} />}
+              {staleEvent && <StaleSaveWarning onDismiss={() => setStaleEvent(false)} onApplyAnyway={() => { eventAutosave.setBaseVersion(null); setStaleEvent(false); (document.getElementById('event-form') as HTMLFormElement | null)?.requestSubmit(); }} />}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                 <div>
                   <label htmlFor="event-editor-field-1" className="block font-semibold mb-1">Event Name *</label>
@@ -566,7 +758,10 @@ export const AdminEvents: React.FC = () => {
               <label className="flex items-start gap-2 text-xs"><input type="checkbox" checked={eventFaqSchema} onChange={(e) => setEventFaqSchema(e.target.checked)} className="mt-0.5" /><span><span className="font-semibold">FAQPage structured data</span> for this event&apos;s published FAQ (manage questions in FAQ; only output when they pass validation).</span></label>
 
               <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" size="sm" onClick={resetEventForm} disabled={eventSaving}>
+                <Button type="button" variant="ghost" size="sm" onClick={() => void discardEvent()} disabled={eventSaving}>
+                  Discard changes
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => void closeEvent()} disabled={eventSaving} title="Closes the editor. Unsaved changes stay in the working copy.">
                   Cancel
                 </Button>
                 <Button type="submit" size="sm" isLoading={eventSaving}>
@@ -594,7 +789,7 @@ export const AdminEvents: React.FC = () => {
                   return (
                     <tr key={evt.id} className="hover:bg-stone-50 dark:hover:bg-stone-900/40">
                       <td className="p-3 font-semibold text-stone-900 dark:text-stone-100">
-                        {evt.name}
+                        {evt.name}{unsavedBadge(`event:${evt.id}`)}
                         <span className="block text-[11px] font-mono text-stone-500 dark:text-stone-400">/{evt.sportSlug}/{evt.slug}</span>
                       </td>
                       <td className="p-3">{sp?.name}</td>
@@ -608,7 +803,7 @@ export const AdminEvents: React.FC = () => {
                           View
                         </button>
                         <button
-                          onClick={() => startEditEvent(evt)}
+                          onClick={() => void openEvent(evt)}
                           className="text-amber-700 dark:text-amber-400 font-semibold hover:underline cursor-pointer"
                         >
                           Edit
@@ -645,10 +840,13 @@ export const AdminEvents: React.FC = () => {
           </div>
 
           {isCreatingEdition && (
-            <form onSubmit={handleSaveEdition} className="p-5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900/60 space-y-4">
+            <form id="edition-form" onSubmit={handleSaveEdition} className="p-5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900/60 space-y-4">
               <h3 className="font-serif text-base font-bold text-stone-900 dark:text-stone-100">
                 {editingEditionId ? 'Edit Tournament Edition' : 'Stage Yearly Tournament Edition (e.g. 2028)'}
               </h3>
+              <AutosaveStatus autosave={editionAutosave} onLoadNewer={editionAutosave.conflict ? () => { const c = editionAutosave.conflict!; applyEditionPayload(c.payload as Partial<EditionDraftPayload>); editionAutosave.start({ entityId: c.entityId, baseVersion: c.baseVersion, draft: c }); } : undefined} />
+              {editionRecovery && <DraftRecoveryBanner offer={editionRecovery} onContinue={continueEditionDraft} onDiscard={() => void discardEditionRecovery()} />}
+              {staleEdition && <StaleSaveWarning onDismiss={() => setStaleEdition(false)} onApplyAnyway={() => { editionAutosave.setBaseVersion(null); setStaleEdition(false); (document.getElementById('edition-form') as HTMLFormElement | null)?.requestSubmit(); }} />}
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
                 <div>
                   <label htmlFor="event-editor-field-10" className="block font-semibold mb-1">Parent Event *</label>
@@ -786,7 +984,10 @@ export const AdminEvents: React.FC = () => {
               <label className="flex items-start gap-2 text-xs"><input type="checkbox" checked={editionFaqSchema} onChange={(e) => setEditionFaqSchema(e.target.checked)} className="mt-0.5" /><span><span className="font-semibold">FAQPage structured data</span> for this edition&apos;s published FAQ (manage questions in FAQ; only output when they pass validation).</span></label>
 
               <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" size="sm" onClick={resetEditionForm} disabled={editionSaving}>
+                <Button type="button" variant="ghost" size="sm" onClick={() => void discardEdition()} disabled={editionSaving}>
+                  Discard changes
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => void closeEdition()} disabled={editionSaving} title="Closes the editor. Unsaved changes stay in the working copy.">
                   Cancel
                 </Button>
                 <Button type="submit" size="sm" isLoading={editionSaving}>
@@ -824,7 +1025,7 @@ export const AdminEvents: React.FC = () => {
                 {!editions.some((ed) => !editionStatusFilter || ed.status === editionStatusFilter) && <tr><td colSpan={6} className="p-6 text-center text-stone-500 dark:text-stone-400">{editionStatusFilter ? 'No editions with this status.' : events.length ? 'No editions yet. Stage the first edition above.' : 'Register an event before staging an edition.'}</td></tr>}
                 {editions.filter((ed) => !editionStatusFilter || ed.status === editionStatusFilter).map((ed) => (
                   <tr key={ed.id} className="hover:bg-stone-50 dark:hover:bg-stone-900/40">
-                    <td className="p-3 font-semibold text-stone-900 dark:text-stone-100">{ed.title}</td>
+                    <td className="p-3 font-semibold text-stone-900 dark:text-stone-100">{ed.title}{unsavedBadge(`edition:${ed.id}`)}</td>
                     <td className="p-3 font-mono tabular-nums">{ed.year}</td>
                     <td className="p-3 text-stone-500 tabular-nums dark:text-stone-400">
                       {ed.startDate && ed.endDate ? `${ed.startDate} - ${ed.endDate}` : ed.startDate || ed.endDate || 'Not confirmed'}
@@ -843,7 +1044,7 @@ export const AdminEvents: React.FC = () => {
                         View
                       </button>
                       <button
-                        onClick={() => startEditEdition(ed)}
+                        onClick={() => void openEdition(ed)}
                         className="text-amber-700 dark:text-amber-400 font-semibold hover:underline cursor-pointer"
                       >
                         Edit

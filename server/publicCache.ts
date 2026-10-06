@@ -119,6 +119,8 @@ const NON_CONTENT_WRITES = [
   /^\/api\/faq\/suggestions$/,
   /^\/api\/migration\/validate$/,
   /^\/api\/search-console\/sync$/,
+  // PHASE AUTOSAVE: editor working copies are never public.
+  /^\/api\/drafts(?:\/|$)/,
 ];
 
 /**

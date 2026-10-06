@@ -344,7 +344,7 @@ export interface MediaItem {
 
 /** PHASE C: where a media item is used. */
 export interface MediaUsage {
-  kind: 'article' | 'event' | 'edition' | 'sport' | 'site' | 'page';
+  kind: 'article' | 'event' | 'edition' | 'sport' | 'site' | 'page' | 'draft';
   id: string;
   title: string;
   role: 'featured' | 'body' | 'image';

@@ -20,6 +20,11 @@ import { Button } from '../ui/Button';
 import { MediaPicker } from './media/MediaShared';
 import { PAGE_LIMITS, PAGE_SLUG_PATTERN, pagePath, slugifyPageTitle, type AdminPage, type PageStatus } from '../../lib/pages';
 import type { RichDoc } from '../../lib/richText';
+import { EXPECTED_VERSION_HEADER } from '../../lib/drafts';
+import { useAutosave } from '../../lib/autosave/useAutosave';
+import { discardDraft, listDrafts, markRecovered, takeOpenDraft } from '../../lib/autosave/api';
+import { docHasText, findRecoverable, forgetLocal, loadNewDraft, type Recoverable } from '../../lib/autosave/recovery';
+import { AutosaveStatus, DraftRecoveryBanner, StaleSaveWarning } from './autosave/AutosaveUI';
 
 const RichTextEditor = dynamic(() => import('./editor/RichTextEditor'), {
   ssr: false,
@@ -66,6 +71,14 @@ export function AdminPages() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
+  // PHASE AUTOSAVE: working-copy recovery, stale-save warning and list badges.
+  const [recovery, setRecovery] = useState<Recoverable<Form> | null>(null);
+  const [staleVersion, setStaleVersion] = useState<string | null>(null);
+  const [draftIds, setDraftIds] = useState<Set<string>>(new Set());
+  const autosave = useAutosave({
+    kind: 'page', userId: currentUser.id, enabled: open && !recovery, title: form.title.trim() || 'Untitled page', payload: form,
+    meaningful: !!form.title.trim() || docHasText(form.body),
+  });
 
   const load = async () => {
     setLoading(true);
@@ -75,6 +88,8 @@ export function AdminPages() {
     const res = await apiCall<{ pages: ListPage[] }>(`/api/pages${params.size ? `?${params}` : ''}`);
     setLoading(false);
     if (res.data) { setPages(res.data.pages); setLoadError(''); } else setLoadError(res.error || 'Could not load pages.');
+    const drafts = await listDrafts();
+    setDraftIds(new Set((drafts?.drafts ?? []).filter((d) => d.kind === 'page' && d.entityId).map((d) => d.entityId!)));
   };
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [query, statusFilter]);
 
@@ -94,9 +109,11 @@ export function AdminPages() {
   const begin = (action: string) => { setBusy(action); setError(''); setNotice(''); };
 
   const openPage = async (id: string | null) => {
-    setError(''); setNotice('');
+    setError(''); setNotice(''); setStaleVersion(null); setRecovery(null);
+    if (open) await autosave.stop(); // the previous item's working copy is kept
     if (!id) {
       setEditing(null); setForm(EMPTY_FORM); setSaved(EMPTY_FORM); setSlugTouched(false); setEditorKey((k) => k + 1); setOpen(true);
+      autosave.start({ entityId: null, baseVersion: null });
       return;
     }
     begin('open');
@@ -105,15 +122,52 @@ export function AdminPages() {
     if (!res.data) { setError(res.error || 'Could not open the page.'); return; }
     const f = toForm(res.data);
     setEditing(res.data); setForm(f); setSaved(f); setSlugTouched(true); setEditorKey((k) => k + 1); setOpen(true);
+    autosave.start({ entityId: res.data.id, baseVersion: res.data.updatedAt });
+    const found = await findRecoverable<Form>('page', currentUser.id, res.data.id);
+    if (found.recoverable) setRecovery(found.recoverable);
   };
-  const close = () => {
-    if (dirty && !confirm('Discard unsaved changes to this page?')) return;
-    setOpen(false); setEditing(null); void load();
+  /** "Continue editing" a new page from Unsaved Work. */
+  const openNewDraft = async (draftId: string) => {
+    const d = await loadNewDraft<Form>('page', currentUser.id, draftId);
+    if (!d) { setError('That unsaved work is no longer available.'); return; }
+    setEditing(null); setForm({ ...EMPTY_FORM, ...d.payload }); setSaved(EMPTY_FORM); setSlugTouched(true); setEditorKey((k) => k + 1); setOpen(true);
+    autosave.start(d.start);
+    if (d.start.draft?.revision) markRecovered(draftId);
+  };
+  useEffect(() => {
+    const req = takeOpenDraft(['page']);
+    if (req) void (req.entityId ? openPage(req.entityId) : req.draftId ? openNewDraft(req.draftId) : undefined);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const continueDraft = () => {
+    if (!recovery) return;
+    setForm({ ...EMPTY_FORM, ...recovery.payload }); setEditorKey((k) => k + 1);
+    autosave.start(recovery.start);
+    if (recovery.serverDraft) markRecovered(recovery.serverDraft.id);
+    setRecovery(null);
+    setNotice('Unsaved work restored. Save or publish to apply it to the page.');
+  };
+  const discardRecovery = async () => {
+    if (!recovery || !confirm('Discard the unsaved working copy? The saved page itself is not changed.')) return;
+    if (recovery.serverDraft && !(await discardDraft(recovery.serverDraft.id, recovery.serverDraft.revision))) {
+      setError('The working copy changed meanwhile, so it was kept. Reopen the page to see it.');
+      return;
+    }
+    forgetLocal(recovery.localKey);
+    setRecovery(null);
   };
 
+  const close = async () => {
+    // Unsaved changes stay in the working copy (autosave) and can be continued later.
+    await autosave.stop();
+    setOpen(false); setEditing(null); setRecovery(null); setStaleVersion(null); void load();
+  };
+
+  /** Show the saved page and restart autosave from it (synchronously, so the restart adopts this exact form). */
   const accept = (page: AdminPage, message: string) => {
     const f = toForm(page);
     setEditing(page); setForm(f); setSaved(f); setNotice(message);
+    autosave.start({ entityId: page.id, baseVersion: page.updatedAt });
   };
 
   /** Saves the form; returns the saved page (or null on error). */
@@ -125,10 +179,14 @@ export function AdminPages() {
       seoTitle: form.seoTitle || null, seoDescription: form.seoDescription || null, noIndex: form.noIndex, ogMediaId: form.ogMediaId,
       ...(system ? {} : { slug: form.slug }),
     };
+    const base = autosave.baseVersion();
     const res = editing
-      ? await apiCall<AdminPage>(`/api/pages/${editing.id}`, { method: 'PUT', body })
+      ? await apiCall<AdminPage>(`/api/pages/${editing.id}`, { method: 'PUT', body, headers: base ? { [EXPECTED_VERSION_HEADER]: base } : undefined })
       : await apiCall<AdminPage>('/api/pages', { method: 'POST', body });
+    if (res.status === 409 && res.details?.code === 'stale_version') { setStaleVersion(String(res.details.currentVersion ?? '')); return null; }
     if (!res.data) { setError(res.error || 'Could not save the page.'); return null; }
+    setStaleVersion(null);
+    await autosave.applied(); // the working copy is now the page itself
     return res.data;
   };
 
@@ -175,6 +233,7 @@ export function AdminPages() {
     const res = await apiCall<{ success: boolean }>(`/api/pages/${editing.id}`, { method: 'DELETE' });
     setBusy('');
     if (!res.data) { setError(res.error || 'Could not delete the page.'); return; }
+    await autosave.applied();
     setOpen(false); setEditing(null); setNotice(`Deleted "${editing.title}".`); void load();
   };
 
@@ -196,6 +255,7 @@ export function AdminPages() {
               {system && <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-300"><Lock size={11} /> Required site page</span>}
               {dirty && <span className="font-semibold text-amber-700 dark:text-amber-400">Unsaved changes</span>}
               {editing && <span>Updated {date(editing.updatedAt)} by {editing.updatedBy} · Published {date(editing.publishedAt)}</span>}
+              <AutosaveStatus autosave={autosave} onLoadNewer={autosave.conflict ? () => { const c = autosave.conflict!; setForm({ ...EMPTY_FORM, ...(c.payload as Partial<Form>) }); setEditorKey((k) => k + 1); autosave.start({ entityId: c.entityId, baseVersion: c.baseVersion, draft: c }); } : undefined} />
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -208,6 +268,8 @@ export function AdminPages() {
           </div>
         </div>
         {messages}
+        {recovery && <DraftRecoveryBanner offer={recovery} onContinue={continueDraft} onDiscard={discardRecovery} />}
+        {staleVersion !== null && <StaleSaveWarning onDismiss={() => setStaleVersion(null)} onApplyAnyway={() => { autosave.setBaseVersion(staleVersion || null); setStaleVersion(null); void onSave(); }} />}
 
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-4">
@@ -315,6 +377,7 @@ export function AdminPages() {
               <tr key={p.id} className="cursor-pointer hover:bg-stone-50 dark:hover:bg-stone-900/60" onClick={() => openPage(p.id)}>
                 <td className="p-3 font-semibold text-stone-900 dark:text-stone-100">
                   <button type="button" className="text-left hover:underline" onClick={(e) => { e.stopPropagation(); void openPage(p.id); }}>{p.title}</button>
+                  {draftIds.has(p.id) && <span className="ml-2 rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-900 dark:bg-sky-950 dark:text-sky-300" data-testid="unsaved-badge">Unsaved changes</span>}
                   {p.system && <span className="ml-2 inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-300"><Lock size={10} /> Required</span>}
                 </td>
                 <td className="p-3 font-mono text-[11px] text-stone-600 dark:text-stone-300">{pagePath(p.slug)}</td>

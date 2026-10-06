@@ -15,6 +15,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
 import type { FeatureFlags, SafeUser } from '../types';
 import { LEGACY_PAGE_REDIRECTS, canonicalPagePath, stripTrailingSlash } from '../config/urls';
+import { clearDraftBuffers } from '../lib/autosave/buffer';
 
 /** A safe placeholder shown to logged-out visitors. It carries no real identity and the server never treats it as authenticated. */
 const GUEST_READER: SafeUser = {
@@ -32,7 +33,7 @@ export interface AppNotification {
   message: string;
 }
 
-export type ApiCall = <T>(endpoint: string, options?: { method?: string; body?: unknown }) => Promise<{ data: T | null; error: string | null; status?: number; details?: Record<string, unknown> }>;
+export type ApiCall = <T>(endpoint: string, options?: { method?: string; body?: unknown; headers?: Record<string, string> }) => Promise<{ data: T | null; error: string | null; status?: number; details?: Record<string, unknown> }>;
 
 export interface SiteContextType {
   theme: 'light' | 'dark';
@@ -153,11 +154,11 @@ export const SiteProvider: React.FC<{ features: FeatureFlags; children: React.Re
     return match ? decodeURIComponent(match[1]) : undefined;
   };
 
-  const apiCall: ApiCall = async <T,>(endpoint: string, options: { method?: string; body?: unknown } = {}) => {
+  const apiCall: ApiCall = async <T,>(endpoint: string, options: { method?: string; body?: unknown; headers?: Record<string, string> } = {}) => {
     const generation = authGeneration.current;
     try {
       const method = options.method || 'GET';
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const headers: Record<string, string> = { ...options.headers, 'Content-Type': 'application/json' };
       if (method !== 'GET' && method !== 'HEAD') {
         const csrfToken = readCsrfCookie();
         if (csrfToken) headers['x-csrf-token'] = csrfToken;
@@ -205,6 +206,8 @@ export const SiteProvider: React.FC<{ features: FeatureFlags; children: React.Re
       return false;
     }
     clearPrivateData();
+    // PHASE AUTOSAVE: unsynced editor buffers belong to this sign-in only.
+    clearDraftBuffers();
     try { localStorage.setItem('sportingspy_logout', String(Date.now())); } catch { /* ignore */ }
     showNotification('Logged out.', 'info');
     navigate('/');

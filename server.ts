@@ -61,6 +61,7 @@ import { assertSafeAuthBoot, getAuthContext, requireAuth, requireRole, AuthLooku
 import { validateSlug, validateText, validateSafeUrl, validateRedirectSource, validateEmail, validateOneOf, validateSeo, firstError, validateRecordList, validateIsoDate, parseScheduledFor, ARTICLE_STATUSES } from './server/validation';
 import { faqRouter } from './server/faq';
 import { pagesRouter } from './server/pages';
+import { draftsRouter, staleVersionConflict } from './server/drafts';
 import { contactRouter } from './server/contact';
 import { sportEventConfigurationRouter } from './server/sportEventConfigurationRoutes';
 import { parseSportEventValues, resolveSportEventConfiguration } from './server/sportEventConfiguration';
@@ -850,6 +851,9 @@ async function startServer() {
       const updates: Record<string, any> = req.body;
 
       await authorWriteGuard(req.authContext!, updates, existing);
+      // PHASE AUTOSAVE: optional X-Expected-Version precondition (no header = unchanged behaviour).
+      const staleArticle = await staleVersionConflict(req, 'article', existing.id);
+      if (staleArticle) return res.status(409).json(staleArticle);
 
       const validationError = firstError(
         validateText(updates.title, 'title', 300, false),
@@ -1257,6 +1261,9 @@ async function startServer() {
       if (!existing) {
         return res.status(404).json({ error: 'Event not found.' });
       }
+      // PHASE AUTOSAVE: optional X-Expected-Version precondition (no header = unchanged behaviour).
+      const staleEvent = await staleVersionConflict(req, 'event', existing.id);
+      if (staleEvent) return res.status(409).json(staleEvent);
 
       const updates: Record<string, any> = req.body;
       const validationError = firstError(
@@ -1476,6 +1483,9 @@ async function startServer() {
       if (!existing) {
         return res.status(404).json({ error: 'Edition not found.' });
       }
+      // PHASE AUTOSAVE: optional X-Expected-Version precondition (no header = unchanged behaviour).
+      const staleEdition = await staleVersionConflict(req, 'edition', existing.id);
+      if (staleEdition) return res.status(409).json(staleEdition);
 
       const updates: Record<string, any> = req.body;
       const validationError = firstError(
@@ -1684,6 +1694,8 @@ async function startServer() {
   app.use('/api/faq', faqRouter(getAuthLookup));
   // PHASE PAGES: CMS-managed informational pages (Admin/Editor; delete Admin).
   app.use('/api/pages', pagesRouter(getAuthLookup));
+  // PHASE AUTOSAVE: editor working copies (never public; exempt from cache invalidation).
+  app.use('/api/drafts', draftsRouter(getAuthLookup));
   app.use(contactRouter(getAuthLookup));
   app.use('/api/sports', sportEventConfigurationRouter(getAuthLookup));
   app.use(editorialWorkflowRouter(getAuthLookup));

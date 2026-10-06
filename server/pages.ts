@@ -31,6 +31,7 @@ import { recordAudit } from './audit';
 import { prepareRichBody, usableMedia } from './articleContent';
 import { RESERVED_SPORT_SLUGS } from './urlStability';
 import { normalizeSource, releasePath, saveRedirect, RedirectConflict } from './redirects';
+import { staleVersionConflict } from './drafts';
 import type { Page, Prisma } from './generated/prisma/client';
 import { PAGE_LIMITS, PAGE_SLUG_PATTERN, PAGE_STATUSES, pagePath, type AdminPage } from '../src/lib/pages';
 import type { RichDoc } from '../src/lib/richText';
@@ -184,6 +185,9 @@ export function pagesRouter(getLookup: () => AuthLookup) {
 
   router.put('/:id', staff, wrap(async (req, res) => {
     const existing = await load(req.params.id);
+    // PHASE AUTOSAVE: optional X-Expected-Version precondition (no header = unchanged behaviour).
+    const stale = await staleVersionConflict(req, 'page', existing.id);
+    if (stale) return res.status(409).json(stale);
     const data = await parsePageInput(req.body, existing);
     if (!Object.keys(data).length) fail(400, 'Nothing to update.');
     const { userName } = actor(req);

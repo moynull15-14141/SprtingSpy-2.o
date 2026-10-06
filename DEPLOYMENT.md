@@ -98,6 +98,8 @@ Do not set `SHADOW_DATABASE_URL`, `DEV_BYPASS_USER_ID` or `SHOW_AD_PLACEHOLDERS`
 
 If the code is deployed first, startup logs `Startup error codes: ... P2021` (missing table) and the previous release keeps serving; apply the migration and redeploy.
 
+**Release with CMS autosave (migration `20261012090000_phase_autosave`):** adds the `EditorDraft` table (editor working copies). Additive only: one table, its indexes, a foreign key to `User` and two CHECK constraints; no existing table, row or enum changes. The new code reads the table, so the same order applies as for Pages: back up, `npm run db:migrate:deploy` against Aiven, `npm run db:status`, then deploy. Old code ignores the table, so migrating first is safe.
+
 **After the first deploy:** check `/api/health/ready`, sign in to `/admin/`, upload and then delete a test image, schedule an article two minutes ahead and watch it publish, and confirm `X-Robots-Tag: noindex` on staging pages.
 
 ## Provider action: persistent media

@@ -9,7 +9,7 @@ interface Reviewer { id: string; name: string; role: Role; status?: string }
 interface Workflow { reviewStatus: ReviewStatus; reviewerId: string | null; reviewer: Reviewer | null; reviewComment: string | null; reviewVersion: number; reviewDecidedAt?: string | null; history: {id:string;action:string;userName:string;timestamp:string;details:string}[] }
 const field='w-full rounded border border-stone-300 bg-white p-2 text-xs dark:border-stone-700 dark:bg-stone-900';
 
-export function ArticleReviewPanel({ article, saveDraft }: {article?: Article; saveDraft:()=>Promise<string|null>}) {
+export function ArticleReviewPanel({ article, saveDraft, onWorkflowChange }: {article?: Article; saveDraft:()=>Promise<string|null>; /** PHASE AUTOSAVE: the article version changed (refresh the editor's base version). */ onWorkflowChange?:()=>void}) {
   const {currentUser,apiCall,refreshData}=useApp();
   const [reviewers,setReviewers]=useState<Reviewer[]>([]);
   const [workflow,setWorkflow]=useState<Workflow|null>(null);
@@ -47,7 +47,7 @@ export function ArticleReviewPanel({ article, saveDraft }: {article?: Article; s
       if(!fresh.data){setError(fresh.error||'Could not confirm the saved review version.');return;}
       const result=await apiCall<Article>(`/api/articles/${id}/submit-review`,{method:'POST',body:{reviewerId:selected,version:fresh.data.reviewVersion}});
       if(!result.data){setError(result.error||'Submission failed.');return;}
-      await refreshData();setNotice('Submitted for review. Publication remains controlled by Admin/Editor.');
+      await refreshData();onWorkflowChange?.();setNotice('Submitted for review. Publication remains controlled by Admin/Editor.');
     } finally {setBusy(false);}
   }
   async function decide(decision:'approve'|'request_changes'){
@@ -55,7 +55,7 @@ export function ArticleReviewPanel({ article, saveDraft }: {article?: Article; s
     try {
       const result=await apiCall<Article>(`/api/articles/${article.id}/review-decision`,{method:'POST',body:{decision,reason,version:workflow.reviewVersion}});
       if(!result.data){setError(result.error||'The review decision was not saved.');return;}
-      await refreshData();setRequestOpen(false);setReason('');setNotice(decision==='approve'?'Approved. This article is still private until published or scheduled.':'Changes requested. The Author can edit and resubmit.');
+      await refreshData();onWorkflowChange?.();setRequestOpen(false);setReason('');setNotice(decision==='approve'?'Approved. This article is still private until published or scheduled.':'Changes requested. The Author can edit and resubmit.');
     } finally {setBusy(false);}
   }
   return <section className="space-y-3 rounded-xl border border-stone-200 bg-white p-4 text-xs dark:border-stone-800 dark:bg-stone-950" aria-labelledby="editorial-review-heading">

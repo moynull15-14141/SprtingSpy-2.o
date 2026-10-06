@@ -388,6 +388,8 @@ model User {
 
   @@index([email])
   @@index([role, status])
+  // PHASE AUTOSAVE: editor working copies started by this user.
+  editorDrafts EditorDraft[]
 }
 
 // Phase 1: opaque-token sessions. Deleting the user cascades to their
@@ -825,4 +827,34 @@ model Page {
   ogMedia MediaItem? @relation("PageOgMedia", fields: [ogMediaId], references: [id], onDelete: Restrict)
 
   @@index([status])
+}
+
+// PHASE AUTOSAVE: server-side editor working copies (autosave + recovery).
+// Never rendered publicly and never a publishing state: the live
+// Article/SportEvent/EventEdition/Page row changes only through its existing
+// save/publish endpoints. `entityId` NULL = new content not yet created; such
+// a draft is private to `ownerId`. For an existing item there is at most one
+// shared working copy (unique kind+entityId; PostgreSQL treats NULLs as
+// distinct, so new drafts are not limited). `revision` guards concurrent
+// autosaves; `baseVersion` is the item's version when editing began, so a
+// stale apply can be detected. `mediaIds` keeps referenced media from being
+// deleted as unused.
+model EditorDraft {
+  id          String   @id
+  kind        String
+  entityId    String?
+  ownerId     String
+  title       String
+  payload     Json
+  baseVersion String?
+  revision    Int      @default(1)
+  mediaIds    String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([kind, entityId])
+  @@index([ownerId])
+  @@index([updatedAt])
 }

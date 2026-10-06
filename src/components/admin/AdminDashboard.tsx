@@ -6,6 +6,7 @@
 import React from 'react';
 import { useApp } from '../../context/AppContext';
 import { AdminTab } from './AdminLayout';
+import { UnsavedWorkPanel } from './autosave/UnsavedWorkPanel';
 import { UNPLACED_AD_SLOTS } from '../../types';
 
 interface AdminDashboardProps {
@@ -36,6 +37,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ setActiveTab }) 
           Real-time summary of sporting disciplines, tournament editions, and content workflow.
         </p>
       </div>
+
+      {/* PHASE AUTOSAVE: unsaved working copies the user can continue. */}
+      <UnsavedWorkPanel setActiveTab={setActiveTab} />
 
       {/* METRIC CARDS */}
       <button type="button" onClick={() => setActiveTab('articles')} className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-left text-xs font-semibold text-amber-900 focus-visible:ring-2 focus-visible:ring-amber-500 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">{pendingArticles} article{pendingArticles === 1 ? '' : 's'} awaiting editorial review · Open Articles review queues →</button>

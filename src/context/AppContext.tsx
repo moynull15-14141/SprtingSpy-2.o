@@ -32,8 +32,13 @@ import {
   UserStatus,
 } from '../types';
 import { useSite, type SiteContextType } from './SiteContext';
+import { EXPECTED_VERSION_HEADER } from '../lib/drafts';
 
 const STAFF_ROLES = ['Admin', 'Editor', 'Author'];
+
+/** PHASE AUTOSAVE: optional optimistic-concurrency precondition for item saves. */
+export interface SaveOptions { expectedVersion?: string | null; onStale?: () => void }
+const versionHeaders = (opts?: SaveOptions): Record<string, string> | undefined => (opts?.expectedVersion ? { [EXPECTED_VERSION_HEADER]: opts.expectedVersion } : undefined);
 
 interface AdminDataContextType {
   users: User[];
@@ -59,13 +64,13 @@ interface AdminDataContextType {
   updateSport: (id: string, updates: Partial<Sport>) => Promise<boolean>;
   deleteSport: (id: string) => Promise<boolean>;
   addEvent: (event: Omit<SportEvent, 'id'>) => Promise<boolean>;
-  updateEvent: (id: string, updates: Partial<SportEvent>) => Promise<boolean>;
+  updateEvent: (id: string, updates: Partial<SportEvent>, opts?: SaveOptions) => Promise<boolean>;
   deleteEvent: (id: string) => Promise<boolean>;
   addEdition: (edition: Omit<EventEdition, 'id'>) => Promise<boolean>;
-  updateEdition: (id: string, updates: Partial<EventEdition>) => Promise<boolean>;
+  updateEdition: (id: string, updates: Partial<EventEdition>, opts?: SaveOptions) => Promise<boolean>;
   deleteEdition: (id: string) => Promise<boolean>;
   addArticle: (article: Omit<Article, 'id' | 'publishedAt' | 'content'> & { content?: string }) => Promise<Article | null>;
-  updateArticle: (id: string, updates: Partial<Article>) => Promise<boolean>;
+  updateArticle: (id: string, updates: Partial<Article>, opts?: SaveOptions) => Promise<boolean>;
   deleteArticle: (id: string) => Promise<boolean>;
 
   // Authors & Users
@@ -254,11 +259,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return false;
   };
 
-  const updateEvent = async (id: string, updates: Partial<SportEvent>): Promise<boolean> => {
+  const updateEvent = async (id: string, updates: Partial<SportEvent>, opts?: SaveOptions): Promise<boolean> => {
     const res = await apiCall<SportEvent>(`/api/events/${id}`, {
       method: 'PUT',
       body: updates,
+      headers: versionHeaders(opts),
     });
+    if (res.status === 409 && res.details?.code === 'stale_version') opts?.onStale?.();
     if (res.data) {
       setEvents((prev) => prev.map((e) => (e.id === id ? res.data! : e)));
       const moved = (res.data as SportEvent & { movedUrls?: number }).movedUrls || 0;
@@ -296,11 +303,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return false;
   };
 
-  const updateEdition = async (id: string, updates: Partial<EventEdition>): Promise<boolean> => {
+  const updateEdition = async (id: string, updates: Partial<EventEdition>, opts?: SaveOptions): Promise<boolean> => {
     const res = await apiCall<EventEdition>(`/api/editions/${id}`, {
       method: 'PUT',
       body: updates,
+      headers: versionHeaders(opts),
     });
+    if (res.status === 409 && res.details?.code === 'stale_version') opts?.onStale?.();
     if (res.data) {
       setEditions((prev) => prev.map((ed) => (ed.id === id ? res.data! : ed)));
       showNotification('Edition updated.', 'success');
@@ -337,11 +346,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return null;
   };
 
-  const updateArticle = async (id: string, updates: Partial<Article>): Promise<boolean> => {
+  const updateArticle = async (id: string, updates: Partial<Article>, opts?: SaveOptions): Promise<boolean> => {
     const res = await apiCall<Article>(`/api/articles/${id}`, {
       method: 'PUT',
       body: updates,
+      headers: versionHeaders(opts),
     });
+    if (res.status === 409 && res.details?.code === 'stale_version') opts?.onStale?.();
     if (res.data) {
       setArticles((prev) => prev.map((a) => (a.id === id ? res.data! : a)));
       showNotification('Article updated successfully.', 'success');
