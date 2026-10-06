@@ -81,6 +81,33 @@ const AccountDetails: React.FC = () => {
     return () => { active = false; };
   }, [retry]);
   const begin = (action: string) => { setBusy(action); setError(''); setSuccess(''); };
+  // Device upload goes through the media library pipeline (type/size checks,
+  // re-encoding); its URL is a library path the profile validator accepts.
+  // The field still takes a pasted link. Save profile persists either.
+  const uploadImage = async (file: File | undefined, apply: (url: string) => void) => {
+    if (!file) return;
+    begin('upload');
+    const form = new FormData();
+    form.append('title', `Profile photo – ${name || profile?.email || 'staff'}`.slice(0, 200));
+    form.append('altText', name.slice(0, 300));
+    form.append('file', file);
+    const csrf = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/)?.[1];
+    try {
+      const res = await fetch('/api/media/upload', { method: 'POST', body: form, credentials: 'include', headers: csrf ? { 'x-csrf-token': decodeURIComponent(csrf) } : {} });
+      const json = await res.json().catch(() => ({ error: `Upload failed (HTTP ${res.status}).` }));
+      // The same file already in the library: reuse it instead of a copy.
+      const url: string | undefined = res.ok ? json.url : res.status === 409 ? json.duplicateOf?.url : undefined;
+      if (!url) { setError(json.error || t('Upload failed.', 'আপলোড ব্যর্থ হয়েছে।')); return; }
+      apply(url);
+      setSuccess(t('Image uploaded. Click Save profile to apply it.', 'ছবি আপলোড হয়েছে। প্রয়োগ করতে প্রোফাইল সংরক্ষণ করুন।'));
+    } catch { setError(t('Upload failed: network error.', 'আপলোড ব্যর্থ: নেটওয়ার্ক ত্রুটি।')); }
+    finally { setBusy(''); }
+  };
+  const canUpload = profile?.role !== 'Reader';
+  const uploadButton = (label: string, apply: (url: string) => void) => canUpload && <label className={`mt-1 inline-flex shrink-0 cursor-pointer items-center rounded-lg border border-stone-300 dark:border-stone-700 px-3 py-2.5 text-sm font-medium hover:bg-stone-100 dark:hover:bg-stone-800 ${busy ? 'pointer-events-none opacity-50' : ''}`}>
+    {busy === 'upload' ? t('Uploading…', 'আপলোড হচ্ছে…') : t('Upload from device', 'ডিভাইস থেকে আপলোড')}
+    <input type="file" accept="image/jpeg,image/png,image/webp,image/avif" className="sr-only" aria-label={label} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; void uploadImage(file, apply); }} />
+  </label>;
   const saveProfile = async (event: React.FormEvent) => {
     event.preventDefault(); begin('profile');
     const result = await apiCall<{ user: AccountProfile }>('/api/auth/me', { method: 'PATCH', body: {
@@ -124,13 +151,13 @@ const AccountDetails: React.FC = () => {
       <p className="text-xs text-stone-500 dark:text-stone-400">{t('Contact an administrator for changes to your sign-in email or account access.', 'সাইন ইন ইমেইল বা অ্যাকাউন্টের অনুমতি পরিবর্তনের জন্য প্রশাসকের সাথে যোগাযোগ করুন।')}</p>
       <form onSubmit={saveProfile} className="space-y-4"><fieldset disabled={!!busy} className="space-y-4">
         <label className="block text-sm">{t('Display name', 'প্রদর্শিত নাম')}<input className={inputClass} autoComplete="name" required maxLength={150} value={name} onChange={e => setName(e.target.value)} /></label>
-        <div className="flex items-center gap-3"><Avatar src={avatar} name={name} className="h-12 w-12 rounded-full object-cover" /><label className="block flex-1 text-sm">{t('Avatar image URL', 'প্রোফাইল ছবির URL')}<input className={inputClass} maxLength={2048} value={avatar} onChange={e => setAvatar(e.target.value)} /></label></div>
+        <div className="flex items-center gap-3"><Avatar src={avatar} name={name} className="h-12 w-12 rounded-full object-cover" /><div className="flex flex-1 items-end gap-2"><label className="block flex-1 text-sm">{t('Avatar image URL', 'প্রোফাইল ছবির URL')}<input className={inputClass} maxLength={2048} value={avatar} onChange={e => setAvatar(e.target.value)} /></label>{uploadButton(t('Upload avatar image', 'প্রোফাইল ছবি আপলোড'), setAvatar)}</div></div>
         {profile.authorProfile && <fieldset className="space-y-4 border-t border-stone-200 dark:border-stone-800 pt-4">
           <legend className="font-semibold text-sm">{t('Public author profile', 'লেখকের প্রকাশ্য প্রোফাইল')}</legend>
           <p className="text-xs text-stone-500 dark:text-stone-400">{profile.authorProfile.roleTitle} · /author/{profile.authorProfile.slug}</p>
           <label className="block text-sm">{t('Byline name', 'লেখকের নাম')}<input className={inputClass} required maxLength={150} value={authorName} onChange={e => setAuthorName(e.target.value)} /></label>
           <label className="block text-sm">{t('Author bio', 'লেখকের পরিচিতি')}<textarea className={inputClass} rows={4} maxLength={3000} value={bio} onChange={e => setBio(e.target.value)} /></label>
-          <label className="block text-sm">{t('Author image URL', 'লেখকের ছবির URL')}<input className={inputClass} maxLength={2048} value={authorAvatar} onChange={e => setAuthorAvatar(e.target.value)} /></label>
+          <div className="flex items-end gap-2"><label className="block flex-1 text-sm">{t('Author image URL', 'লেখকের ছবির URL')}<input className={inputClass} maxLength={2048} value={authorAvatar} onChange={e => setAuthorAvatar(e.target.value)} /></label>{uploadButton(t('Upload author image', 'লেখকের ছবি আপলোড'), setAuthorAvatar)}</div>
         </fieldset>}
         <Button type="submit" isLoading={busy === 'profile'}>{t('Save profile', 'প্রোফাইল সংরক্ষণ করুন')}</Button>
       </fieldset></form>
