@@ -137,25 +137,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ setActiveTab }) 
           </button>
           <button
             onClick={() => setActiveTab('events')}
-            className="px-3 py-1.5 rounded-lg bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 text-stone-800 dark:text-stone-200 text-xs font-semibold hover:bg-stone-50 cursor-pointer"
+            className="px-3 py-1.5 rounded-lg bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 text-stone-800 dark:text-stone-200 text-xs font-semibold hover:bg-stone-50 dark:hover:bg-stone-900 dark:hover:text-amber-400 dark:hover:border-amber-500 transition-colors cursor-pointer"
           >
             + Create Event / Edition
           </button>
           <button
             onClick={() => setActiveTab('authors')}
-            className="px-3 py-1.5 rounded-lg bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 text-stone-800 dark:text-stone-200 text-xs font-semibold hover:bg-stone-50 cursor-pointer"
+            className="px-3 py-1.5 rounded-lg bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 text-stone-800 dark:text-stone-200 text-xs font-semibold hover:bg-stone-50 dark:hover:bg-stone-900 dark:hover:text-amber-400 dark:hover:border-amber-500 transition-colors cursor-pointer"
           >
             + Add Author
           </button>
           <button
             onClick={() => setActiveTab('redirects')}
-            className="px-3 py-1.5 rounded-lg bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 text-stone-800 dark:text-stone-200 text-xs font-semibold hover:bg-stone-50 cursor-pointer"
+            className="px-3 py-1.5 rounded-lg bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 text-stone-800 dark:text-stone-200 text-xs font-semibold hover:bg-stone-50 dark:hover:bg-stone-900 dark:hover:text-amber-400 dark:hover:border-amber-500 transition-colors cursor-pointer"
           >
             + URL Redirect
           </button>
           <button
             onClick={() => setActiveTab('ads')}
-            className="px-3 py-1.5 rounded-lg bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 text-stone-800 dark:text-stone-200 text-xs font-semibold hover:bg-stone-50 cursor-pointer"
+            className="px-3 py-1.5 rounded-lg bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 text-stone-800 dark:text-stone-200 text-xs font-semibold hover:bg-stone-50 dark:hover:bg-stone-900 dark:hover:text-amber-400 dark:hover:border-amber-500 transition-colors cursor-pointer"
           >
             Ad Slots ({activeAdsCount} Active)
           </button>
