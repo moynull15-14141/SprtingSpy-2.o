@@ -2218,5 +2218,13 @@ async function startServer() {
 
 startServer().catch((err) => {
   console.error('[SportingSpy] Startup refused:', err instanceof DeploymentConfigError || err instanceof LaunchGuardError ? err.message : 'Database/schema or server initialization failed. Check configuration and applied migrations.');
+  // Error class and codes only (never messages, which can carry hosts or credentials),
+  // so a hosted log can tell a missing CA file from refused auth or a missing table.
+  const codes = (e: unknown): string[] => {
+    if (!e || typeof e !== 'object') return [];
+    const o = e as { name?: unknown; code?: unknown; kind?: unknown; originalCode?: unknown; cause?: unknown };
+    return [o.name, o.code, o.kind, o.originalCode].filter(v => typeof v === 'string' && /^[\w.-]{1,60}$/.test(v)).map(String).concat(codes(o.cause));
+  };
+  if (!(err instanceof DeploymentConfigError || err instanceof LaunchGuardError)) console.error('[SportingSpy] Startup error codes:', codes(err).join(' / ') || 'none');
   process.exit(1);
 });
