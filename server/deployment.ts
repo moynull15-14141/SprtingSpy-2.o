@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { isIP } from 'node:net';
+import { BlockList, isIP } from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Request, Response, NextFunction } from 'express';
@@ -78,6 +78,19 @@ export function deploymentConfig(env: NodeJS.ProcessEnv = process.env, buildExis
 }
 
 let proxyHintLogged = false;
+let proxyChainLogged = false;
+
+// Loopback and private ranges: a client address resolving into one of these
+// behind a platform proxy means TRUST_PROXY is missing a hop (or trusts too few).
+const internalAddresses = new BlockList();
+for (const [net, prefix] of [['127.0.0.0', 8], ['10.0.0.0', 8], ['172.16.0.0', 12], ['192.168.0.0', 16], ['169.254.0.0', 16], ['100.64.0.0', 10]] as const) internalAddresses.addSubnet(net, prefix, 'ipv4');
+for (const [net, prefix] of [['::1', 128], ['fc00::', 7], ['fe80::', 10]] as const) internalAddresses.addSubnet(net, prefix, 'ipv6');
+const addressClass = (ip: string | undefined) => {
+  const v4 = ip?.startsWith('::ffff:') && isIP(ip.slice(7)) === 4 ? ip.slice(7) : ip;
+  const family = v4 ? isIP(v4) : 0;
+  if (!family) return 'unknown';
+  return internalAddresses.check(v4!, family === 4 ? 'ipv4' : 'ipv6') ? 'internal' : 'public';
+};
 
 export function enforceProductionTransport(req: Request, res: Response, next: NextFunction) {
   // Direct HTTP health probes (liveness and readiness) are allowed, but receive neither cookies nor HSTS.
@@ -87,9 +100,19 @@ export function enforceProductionTransport(req: Request, res: Response, next: Ne
     // once, with the proxy's address only (no client data).
     if (!proxyHintLogged && req.get('x-forwarded-proto') === 'https') {
       proxyHintLogged = true;
-      console.warn(`[SportingSpy] HTTPS request rejected: the reverse proxy at ${req.socket.remoteAddress} is not in TRUST_PROXY. Add its network (e.g. 10.0.0.0/8) to TRUST_PROXY.`);
+      const peer = req.socket.remoteAddress || 'unknown';
+      const exact = isIP(peer) === 4 ? `${peer}/32` : isIP(peer) === 6 ? `${peer}/128` : peer;
+      console.warn(`[SportingSpy] HTTPS request rejected: the reverse proxy at ${peer} is not in TRUST_PROXY. Add exactly ${exact} to TRUST_PROXY (never blanket trust).`);
     }
     return res.status(426).json({ error: 'HTTPS is required.' });
+  }
+  // Once per process, confirm the forwarded chain resolves to a real client so
+  // per-client rate limits work. Logs hop count and address classes, never addresses.
+  if (!proxyChainLogged && req.secure && req.get('x-forwarded-for')) {
+    proxyChainLogged = true;
+    const hops = (req.get('x-forwarded-for') || '').split(',').map(v => v.trim()).filter(Boolean);
+    const resolved = addressClass(req.ip);
+    console.log(`[SportingSpy] Proxy chain: peer ${addressClass(req.socket.remoteAddress)}, X-Forwarded-For ${hops.length} hop(s) [${hops.map(addressClass).join(', ')}], client address resolves ${resolved}.${resolved === 'public' ? '' : ' Rate limits would group visitors: add the internal hop to TRUST_PROXY.'}`);
   }
   next();
 }

@@ -70,7 +70,7 @@ SportingSpy runs on Render as **one Web Service**: Express and Next.js in one No
 | `APP_ENV` | `staging` on the Render URL. Switch to `production` only when the service serves `https://www.sportingspy.com`; startup rejects `APP_ENV=production` with any other origin. |
 | `AUTH_MODE` | `production` |
 | `ALLOWED_ORIGIN` | The service's HTTPS URL, e.g. `https://<service>.onrender.com` (no trailing slash) |
-| `TRUST_PROXY` | `10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` (Render's proxy reaches the app from a private address). If HTTPS pages answer 426, the log names the proxy address to add. |
+| `TRUST_PROXY` | `127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16`. Render's in-container proxy connects from `127.0.0.1` (that entry makes HTTPS, Secure cookies and HSTS work); the private ranges let `X-Forwarded-For` skip Render's internal hops so rate limits see the real visitor. Only `127.0.0.1` is trusted on loopback, not `127.0.0.0/8`. Never use `true`, a hop count or `0.0.0.0/0` (startup rejects them). If HTTPS pages answer 426, the log names the exact address to add. After deploy the log prints one `Proxy chain:` line; it must end `client address resolves public`. |
 | `HOST` | `0.0.0.0` (`PORT` is set by Render) |
 | `DATABASE_URL` | Aiven URL with `sslmode=verify-full&sslrootcert=/etc/secrets/aiven-ca.pem` |
 | `MEDIA_STORAGE_PROVIDER` | `r2` |
