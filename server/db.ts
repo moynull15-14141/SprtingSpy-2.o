@@ -39,9 +39,18 @@ const globalForPrisma = globalThis as unknown as { __sportingspyPrisma?: PrismaC
 // PHASE P (diagnostics, off by default): PRISMA_QUERY_LOG=true prints one
 // "[db-query] <ms>ms <sql>" line per query, so performance audits can count
 // and time the queries behind a request. Never enable it in production.
+// Pool size cap: managed PostgreSQL plans allow few connections (Aiven's
+// smallest: 20, 3 reserved), and a zero-downtime deploy briefly runs the old
+// and new instance side by side, plus any local process on the same database.
+// pg's default of 10 per process can exhaust that (P2037), so default to 5.
+export function poolMax(env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number(env.DATABASE_POOL_MAX);
+  return Number.isInteger(n) && n >= 1 && n <= 50 ? n : 5;
+}
+
 function createClient(): PrismaClient {
   const queryLog = process.env.PRISMA_QUERY_LOG === 'true';
-  const client = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }), ...(queryLog ? { log: [{ emit: 'event' as const, level: 'query' as const }] } : {}) });
+  const client = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL, max: poolMax(), idleTimeoutMillis: 10_000 }), ...(queryLog ? { log: [{ emit: 'event' as const, level: 'query' as const }] } : {}) });
   if (queryLog) (client as unknown as { $on: (e: 'query', cb: (q: { duration: number; query: string }) => void) => void }).$on('query', (q) => console.log(`[db-query] ${q.duration}ms ${q.query.replace(/\s+/g, ' ').slice(0, 300)}`));
   return client;
 }

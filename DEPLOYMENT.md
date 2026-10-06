@@ -72,6 +72,7 @@ SportingSpy runs on Render as **one Web Service**: Express and Next.js in one No
 | `ALLOWED_ORIGIN` | The service's HTTPS URL, e.g. `https://<service>.onrender.com` (no trailing slash) |
 | `TRUST_PROXY` | `127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16`. Render's in-container proxy connects from `127.0.0.1` (that entry makes HTTPS, Secure cookies and HSTS work); the private ranges let `X-Forwarded-For` skip Render's internal hops so rate limits see the real visitor. Only `127.0.0.1` is trusted on loopback, not `127.0.0.0/8`. Never use `true`, a hop count or `0.0.0.0/0` (startup rejects them). If HTTPS pages answer 426, the log names the exact address to add. After deploy the log prints one `Proxy chain:` line; it must end `client address resolves public`. |
 | `HOST` | `0.0.0.0` (`PORT` is set by Render) |
+| `DATABASE_POOL_MAX` | Optional; default `5` connections per process. During a deploy the old and new instance both connect, and a local `npm run dev` pointed at Aiven adds its own pool; keep the total under the Aiven plan limit (20, 3 reserved), or startup fails with `P2037`. |
 | `DATABASE_URL` | Aiven URL with `sslmode=verify-full&sslrootcert=/etc/secrets/aiven-ca.pem` |
 | `MEDIA_STORAGE_PROVIDER` | `r2` |
 | `MEDIA_S3_ENDPOINT`, `MEDIA_S3_BUCKET`, `MEDIA_S3_ACCESS_KEY_ID`, `MEDIA_S3_SECRET_ACCESS_KEY` | R2 API endpoint, bucket and token |
