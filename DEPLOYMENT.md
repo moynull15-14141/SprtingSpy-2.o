@@ -89,6 +89,14 @@ Do not set `SHADOW_DATABASE_URL`, `DEV_BYPASS_USER_ID` or `SHOW_AD_PLACEHOLDERS`
 
 **Scaling:** run **one instance**. The scheduler and the public cache are in-process. Several instances would each run the scheduler, and their caches would refresh only within the TTL. A short overlap during a zero-downtime deploy is safe: scheduled publication uses a conditional update, so an article is never published twice.
 
+**Release with CMS Pages (migration `20261011090000_phase_pages`):** this release adds the `Page` table and seeds the five existing pages (About, Contact, Privacy Policy, Terms, DMCA) with their current text. The migration is additive (one table, one audit enum value, five rows; nothing existing is changed) and safe to re-run. Order matters, because the new code serves those URLs from the database and startup refuses to run without the `Page` table:
+1. Back up the Aiven database (see `DATABASE_OPERATIONS.md`).
+2. From a trusted machine, with `DATABASE_URL` set to the Aiven URL: `npm run db:migrate:deploy`, then `npm run db:status`.
+3. Deploy the code on Render.
+4. Check `/about/`, `/contact/`, `/privacy-policy/`, `/terms-and-conditions/` and `/dmca/` load, and that Admin → Pages lists those five as "Required" pages.
+
+If the code is deployed first, startup logs `Startup error codes: ... P2021` (missing table) and the previous release keeps serving; apply the migration and redeploy.
+
 **After the first deploy:** check `/api/health/ready`, sign in to `/admin/`, upload and then delete a test image, schedule an article two minutes ahead and watch it publish, and confirm `X-Robots-Tag: noindex` on staging pages.
 
 ## Provider action: persistent media

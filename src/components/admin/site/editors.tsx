@@ -2,9 +2,10 @@
 
 /** Area editors for the Site Experience Control Center (PHASE F.1). Each edits one draft document. */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
+import { pagePath } from '../../../lib/pages';
 import { IntroAppearanceEditor } from './IntroAppearanceEditor';
 import {
   BLOCK_PLACEMENTS, SOCIAL_PLATFORMS,
@@ -192,8 +193,21 @@ export function NavigationEditor({ value, onChange }: { value: NavigationConfig;
 // ── Footer ──
 const PLATFORM_LABEL: Record<SocialPlatform, string> = { x: 'X (Twitter)', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', linkedin: 'LinkedIn', bluesky: 'Bluesky', tiktok: 'TikTok' };
 
+/** PHASE PAGES: published CMS pages a footer link can point at. */
+function usePublishedPages() {
+  const { apiCall } = useApp();
+  const [pages, setPages] = useState<{ id: string; slug: string; title: string; shortTitle: string | null }[]>([]);
+  useEffect(() => {
+    let active = true;
+    void apiCall<{ pages: { id: string; slug: string; title: string; shortTitle: string | null }[] }>('/api/pages?status=published').then((res) => { if (active && res.data) setPages(res.data.pages); });
+    return () => { active = false; };
+  }, []);
+  return pages;
+}
+
 export function FooterEditor({ value, onChange }: { value: FooterConfig; onChange: (v: FooterConfig) => void }) {
   const setCol = (i: number, patch: Partial<FooterConfig['columns'][number]>) => onChange({ ...value, columns: value.columns.map((c, j) => (j === i ? { ...c, ...patch } : c)) });
+  const pages = usePublishedPages();
   const missing = SOCIAL_PLATFORMS.filter((p) => !value.social.some((s) => s.platform === p));
   return (
     <div className="space-y-4">
@@ -224,9 +238,18 @@ export function FooterEditor({ value, onChange }: { value: FooterConfig; onChang
           </div>
           <ul className="mt-3 space-y-2">
             {col.links.map((l, j) => (
-              <li key={l.id} className="grid items-end gap-2 rounded-lg bg-stone-50 p-2 sm:grid-cols-[1fr_1fr_auto_auto] dark:bg-stone-900/60">
+              <li key={l.id} className="grid items-end gap-2 rounded-lg bg-stone-50 p-2 sm:grid-cols-[1fr_1fr_1fr_auto_auto] dark:bg-stone-900/60">
                 <Text label="Label" value={l.label} max={60} onChange={(label) => setCol(i, { links: col.links.map((x, k) => (k === j ? { ...x, label } : x)) })} />
                 {l.kind === 'privacyChoices' ? <p className="pb-2 text-[11px] text-stone-500 dark:text-stone-400">Opens the privacy preferences (no link).</p> : <Text label="Link" value={l.href} max={500} onChange={(href) => setCol(i, { links: col.links.map((x, k) => (k === j ? { ...x, href } : x)) })} />}
+                {l.kind === 'privacyChoices' ? <span /> : (
+                  <label className={labelClass}>Page
+                    <select className={inputClass} value={pages.find((p) => pagePath(p.slug) === l.href)?.id ?? ''} aria-label={`Link “${l.label}” to a page`}
+                      onChange={(e) => { const p = pages.find((x) => x.id === e.target.value); if (!p) return; setCol(i, { links: col.links.map((x, k) => (k === j ? { ...x, href: pagePath(p.slug), label: x.label === 'New link' || !x.label.trim() ? p.shortTitle || p.title : x.label } : x)) }); }}>
+                      <option value="">Custom link</option>
+                      {pages.map((p) => <option key={p.id} value={p.id}>{p.title} ({pagePath(p.slug)})</option>)}
+                    </select>
+                  </label>
+                )}
                 <Toggle label={l.system ? 'Visible (required)' : 'Visible'} checked={l.enabled} onChange={(enabled) => { if (!enabled && l.system && !confirm(`“${l.label}” is a required site link. Hiding it removes it from the footer only — the page stays online. Hide it?`)) return; setCol(i, { links: col.links.map((x, k) => (k === j ? { ...x, enabled } : x)) }); }} />
                 <RowControls index={j} count={col.links.length} label={l.label} onMove={(to) => setCol(i, { links: move(col.links, j, to) })} onRemove={l.system ? undefined : () => setCol(i, { links: col.links.filter((_, k) => k !== j) })} />
               </li>

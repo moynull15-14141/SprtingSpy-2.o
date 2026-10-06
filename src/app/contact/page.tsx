@@ -1,15 +1,11 @@
 import type { Metadata } from 'next';
-import { ContactPage } from '../../views/StaticPages';
-import { pageMetadata } from '../../lib/seo';
-import { RumPageType } from '../../components/analytics/RumPageType';
+import { publishedPageMetadata, renderPublishedPage } from '../../lib/pageRoute';
 
-export const generateMetadata = (): Promise<Metadata> =>
-  pageMetadata({
-  title: 'Contact Editorial Desk | SportingSpy',
-  description: 'Submit corrections, media inquiries, or tournament credentials to the SportingSpy editorial team.',
-  path: '/contact/',
-});
+// PHASE PAGES: Contact is a CMS page (Admin → Pages); this route keeps its URL.
+const SLUG = 'contact';
+
+export const generateMetadata = (): Promise<Metadata> => publishedPageMetadata(SLUG);
 
 export default function Page() {
-  return <><RumPageType type="static" /><ContactPage /></>;
+  return renderPublishedPage(SLUG);
 }

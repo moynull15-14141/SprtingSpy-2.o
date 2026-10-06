@@ -54,7 +54,7 @@ export interface RedirectInput {
   statusCode?: number;
   isActive?: boolean;
   notes?: string | null;
-  origin?: 'manual' | 'article-slug' | 'slug-change' | 'migration';
+  origin?: 'manual' | 'article-slug' | 'slug-change' | 'migration' | 'page-slug';
 }
 
 /**

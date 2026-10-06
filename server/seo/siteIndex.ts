@@ -7,6 +7,7 @@
 
 import { prisma } from '../db';
 import { articlePath, authorPath, editionPath, eventPath, sportPath } from '../../src/lib/paths';
+import { pagePath } from '../../src/lib/pages';
 import { canonicalPagePath, stripTrailingSlash } from '../../src/config/urls';
 import {
   STATIC_INDEXABLE_PATHS,
@@ -17,11 +18,12 @@ import {
   editionIndexability,
   eventIndexability,
   sportIndexability,
+  pageIndexability,
   type Indexability,
 } from '../../src/lib/indexability';
 import type { SeoMetadata } from '../../src/types';
 
-export type PageKind = 'static' | 'sport' | 'event' | 'edition' | 'article' | 'author';
+export type PageKind = 'static' | 'page' | 'sport' | 'event' | 'edition' | 'article' | 'author';
 
 export interface IndexedPage {
   path: string;
@@ -34,7 +36,7 @@ export interface IndexedPage {
 }
 
 export async function loadSiteIndex(origin: string) {
-  const [sports, events, editions, articles, authors, redirects, publishedFaqs, faqPageSetting] = await Promise.all([
+  const [sports, events, editions, articles, authors, redirects, publishedFaqs, faqPageSetting, cmsPages] = await Promise.all([
     prisma.sport.findMany(),
     prisma.sportEvent.findMany(),
     prisma.eventEdition.findMany(),
@@ -43,6 +45,8 @@ export async function loadSiteIndex(origin: string) {
     prisma.redirectRule.findMany({ where: { isActive: true } }),
     prisma.faqEntry.count({ where: { status: 'published', eventId: null, articleId: null, editionId: null, sportId: null } }),
     prisma.siteSetting.findUnique({ where: { key: 'globalFaqPage' } }),
+    // PHASE PAGES: only published pages exist publicly (drafts are 404s, not index candidates).
+    prisma.page.findMany({ where: { status: 'published' }, select: { id: true, slug: true, title: true, status: true, noIndex: true, updatedAt: true } }),
   ]);
 
   const sportBySlug = new Map(sports.map((s) => [s.slug, s]));
@@ -57,6 +61,7 @@ export async function loadSiteIndex(origin: string) {
   const pages: IndexedPage[] = [];
   for (const path of STATIC_INDEXABLE_PATHS) pages.push({ path, kind: 'static', id: path, title: path, status: { indexable: true } });
   for (const [path, reason] of Object.entries(STATIC_NON_INDEXABLE_PATHS)) pages.push({ path, kind: 'static', id: path, title: path, status: { indexable: false, reason } });
+  for (const p of cmsPages) pages.push({ path: pagePath(p.slug), kind: 'page', id: p.id, title: p.title, status: pageIndexability(p) });
   // PHASE H: the FAQ is indexable once it has published questions (an empty page is thin).
   // PHASE R (v2.2): the site-wide page exists only when enabled in Settings (otherwise a real 404).
   if (faqPageSetting?.value === 'enabled') {

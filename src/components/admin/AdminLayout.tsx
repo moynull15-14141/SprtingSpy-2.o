@@ -6,7 +6,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   PanelLeftClose, PanelLeftOpen, LayoutDashboard, FileText, Trophy, CalendarDays, UserSquare2, ShieldCheck,
-  MessageSquare, Image, Megaphone, SearchCheck, ArrowLeftRight, ScrollText, Settings, PanelsTopLeft, HelpCircle, Inbox, Tags, ChartNoAxesCombined, Route, type LucideIcon,
+  MessageSquare, Image, Megaphone, SearchCheck, ArrowLeftRight, ScrollText, Settings, PanelsTopLeft, HelpCircle, Files, Inbox, Tags, ChartNoAxesCombined, Route, type LucideIcon,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
@@ -25,6 +25,7 @@ export type AdminTab =
   | 'audit'
   | 'site'
   | 'faq'
+  | 'pages'
   | 'inbox'
   | 'types'
   | 'insights'
@@ -72,6 +73,8 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
     // PHASE R: database-backed Article Types (Admin edits; Editor/Author can view).
     ...(['Admin', 'Editor'].includes(currentUser.role) ? [{ id: 'types' as AdminTab, label: 'Article Types', icon: Tags }] : []),
     ...(['Admin', 'Editor'].includes(currentUser.role) ? [{ id: 'site' as AdminTab, label: 'Site Experience', icon: PanelsTopLeft }] : []),
+    // PHASE PAGES: CMS pages (About, legal pages, custom pages). API is Admin/Editor only.
+    ...(['Admin', 'Editor'].includes(currentUser.role) ? [{ id: 'pages' as AdminTab, label: 'Pages', icon: Files }] : []),
     // PHASE H: FAQ content and the contact-form inbox (APIs are Admin/Editor only).
     ...(['Admin', 'Editor'].includes(currentUser.role) ? [{ id: 'faq' as AdminTab, label: 'FAQ', icon: HelpCircle }, { id: 'inbox' as AdminTab, label: 'Contact Inbox', icon: Inbox }] : []),
     { id: 'sports', label: 'Sports', icon: Trophy },

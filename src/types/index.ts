@@ -344,7 +344,7 @@ export interface MediaItem {
 
 /** PHASE C: where a media item is used. */
 export interface MediaUsage {
-  kind: 'article' | 'event' | 'edition' | 'sport' | 'site';
+  kind: 'article' | 'event' | 'edition' | 'sport' | 'site' | 'page';
   id: string;
   title: string;
   role: 'featured' | 'body' | 'image';
@@ -417,7 +417,7 @@ export interface RedirectRule {
   createdAt: string;
   isActive: boolean;
   /** PHASE C: "manual" or "article-slug" (automatic on article URL change). */
-  origin?: 'manual' | 'article-slug';
+  origin?: 'manual' | 'article-slug' | 'slug-change' | 'migration' | 'page-slug';
   notes?: string | null;
   updatedAt?: string | null;
 }

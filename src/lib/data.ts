@@ -32,6 +32,8 @@ export const getApprovedComments = cache(content.getApprovedComments);
 export const search = cache(searchPublic);
 export const getFeatures = featureFlags;
 /** PHASE H: published FAQ entries for /faq/. */
+// PHASE PAGES: published CMS pages by slug (drafts are never cached or served).
+export const getPublishedPage = cache(cached('publishedPage', async (slug: string) => (await import('../../server/services/public/pages')).getPublishedPage(slug)));
 export const getFaqs = cache(cached('globalFaqs', async () => (await import('../../server/services/public/faq')).getPublishedFaqs()));
 /** PHASE R: whether /faq/ and its FAQPage markup are switched on (Admin → Settings → FAQ). */
 export const getGlobalFaqSettings = cache(cached('globalFaqSettings', async () => {

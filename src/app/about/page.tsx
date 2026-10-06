@@ -1,15 +1,11 @@
 import type { Metadata } from 'next';
-import { AboutPage } from '../../views/StaticPages';
-import { pageMetadata } from '../../lib/seo';
-import { RumPageType } from '../../components/analytics/RumPageType';
+import { publishedPageMetadata, renderPublishedPage } from '../../lib/pageRoute';
 
-export const generateMetadata = (): Promise<Metadata> =>
-  pageMetadata({
-  title: 'About SportingSpy – Multi-Sport Editorial Standards',
-  description: 'The founding principles, editorial mission, and verification methodology of SportingSpy.com.',
-  path: '/about/',
-});
+// PHASE PAGES: About is a CMS page (Admin → Pages); this route keeps its URL.
+const SLUG = 'about';
+
+export const generateMetadata = (): Promise<Metadata> => publishedPageMetadata(SLUG);
 
 export default function Page() {
-  return <><RumPageType type="static" /><AboutPage /></>;
+  return renderPublishedPage(SLUG);
 }

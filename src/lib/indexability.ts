@@ -13,8 +13,12 @@ export type Indexability = { indexable: true } | { indexable: false; reason: str
 const yes: Indexability = { indexable: true };
 const no = (reason: string): Indexability => ({ indexable: false, reason });
 
-/** Public static pages. /search/ is a user tool and is never indexable. */
-export const STATIC_INDEXABLE_PATHS = ['/', '/sports/', '/events/', '/latest/', '/about/', '/contact/', '/privacy-policy/', '/terms-and-conditions/', '/dmca/'];
+/**
+ * Public static pages. /search/ is a user tool and is never indexable.
+ * PHASE PAGES: About, Contact, Privacy Policy, Terms and DMCA are CMS pages
+ * now and enter the site index from the Page table (see pageIndexability).
+ */
+export const STATIC_INDEXABLE_PATHS = ['/', '/sports/', '/events/', '/latest/'];
 export const STATIC_NON_INDEXABLE_PATHS: Record<string, string> = { '/search/': 'search results are a user tool, not index targets' };
 /** PHASE H: indexable only while it has published questions (see server/seo/siteIndex.ts). */
 export const FAQ_PATH = '/faq/';
@@ -63,4 +67,11 @@ export function articleIndexability(a: { status: string; visible: boolean; seo?:
 
 export function authorIndexability(publishedArticleCount: number): Indexability {
   return publishedArticleCount > 0 ? yes : no('thin: no published articles');
+}
+
+/** PHASE PAGES: a CMS page is public only when published; editors may noindex it. */
+export function pageIndexability(p: { status: string; noIndex: boolean }): Indexability {
+  if (p.status !== 'published') return no(`status is ${p.status}`);
+  if (p.noIndex) return no('editor set noindex');
+  return yes;
 }

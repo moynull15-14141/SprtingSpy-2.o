@@ -164,7 +164,7 @@ export const AdminRedirects: React.FC = () => {
                 <td className="p-3 text-stone-900 dark:text-stone-100 font-semibold">
                   {rule.sourceUrl}
                   <div className="font-sans font-normal text-[10px] text-stone-500 mt-0.5 dark:text-stone-400">
-                    {rule.origin === 'article-slug' ? 'Automatic: article URL changed' : 'Manual'}
+                    {rule.origin === 'article-slug' ? 'Automatic: article URL changed' : rule.origin === 'page-slug' ? 'Automatic: page URL changed' : 'Manual'}
                     {rule.updatedAt ? ` · updated ${new Date(rule.updatedAt).toLocaleDateString('en-GB')}` : ''}
                   </div>
                   {rule.notes && <div className="font-sans font-normal text-[10px] text-stone-500 whitespace-pre-line dark:text-stone-400">{rule.notes}</div>}

@@ -1,15 +1,11 @@
 import type { Metadata } from 'next';
-import { TermsPage } from '../../views/StaticPages';
-import { pageMetadata } from '../../lib/seo';
-import { RumPageType } from '../../components/analytics/RumPageType';
+import { publishedPageMetadata, renderPublishedPage } from '../../lib/pageRoute';
 
-export const generateMetadata = (): Promise<Metadata> =>
-  pageMetadata({
-  title: 'Terms of Service | SportingSpy',
-  description: 'Terms of service and reader agreement for SportingSpy.com.',
-  path: '/terms-and-conditions/',
-});
+// PHASE PAGES: Terms is a CMS page (Admin → Pages); this route keeps its URL.
+const SLUG = 'terms-and-conditions';
+
+export const generateMetadata = (): Promise<Metadata> => publishedPageMetadata(SLUG);
 
 export default function Page() {
-  return <><RumPageType type="static" /><TermsPage /></>;
+  return renderPublishedPage(SLUG);
 }

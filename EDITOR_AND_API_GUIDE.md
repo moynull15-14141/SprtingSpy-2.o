@@ -7,7 +7,7 @@ Last updated 4 October 2026 (Phase R). This guide is for editors and for the dev
 | Role | Can do |
 | --- | --- |
 | Admin | Everything, including users, settings, Article Types, redirects, migration apply, deletions of sports/events/editions |
-| Editor | Write, review and publish articles; sports are Admin-only; events, editions, FAQ, migration sheet editing, insights |
+| Editor | Write, review and publish articles; sports are Admin-only; events, editions, FAQ, Pages (not delete), migration sheet editing, insights |
 | Author | Write own drafts and submit them for review; cannot publish, schedule or approve |
 
 ## Everyday editorial tasks
@@ -19,6 +19,8 @@ Last updated 4 October 2026 (Phase R). This guide is for editors and for the dev
 **Sports, events and editions.** Sports: image/logo (from the Media Library), SEO and social fields, featured events (ordered), FAQ structured-data switch. Changing a sport or event slug moves every page under it; old URLs redirect (301) to the new ones and the CMS reports how many moved. Events have *Alternative names* (one per line) that search understands. Write the edition's short description in 80–150 words.
 
 **FAQ & Reader Questions.** FAQ → choose the page (article, edition, event or sport). Add, edit, reorder, publish, archive or delete questions. Only published questions appear on that page. *Suggest from stored facts* and *Suggest with AI* propose questions; accepting one saves a **draft** that you must check against the official source before publishing. Quality checks flag duplicates, repetitive or outdated questions, contradictions with the page, irrelevant questions, answers without a source, and missing useful questions. FAQPage structured data is off until you tick it on the article/edition/event/sport, and it is only output when the published questions pass validation. The site-wide `/faq/` page is off unless Settings → FAQ enables it.
+
+**Pages.** Pages (Admin, Editor) holds the informational pages served at `/your-slug/`: About, Contact, Privacy Policy, Terms and DMCA (marked *Required*) plus any page you add, such as an editorial or corrections policy. New pages start as drafts; *Preview* shows the draft privately, *Publish* makes it public and adds it to the sitemap, *Unpublish* returns it to draft (its URL then shows "page not found"). Saving a published page updates it at once. Changing a published page's slug adds a 301 from the old URL. Required pages keep their URL and stay published; their text is editable. The Privacy Policy's cookie table and analytics/advertising sections, and the Contact form, are added automatically below the text. A slug cannot be a sport's slug or a reserved path. To add a page to the footer, use Site Experience → Footer → *Page* on a link row; a page linked from the live header or footer cannot be unpublished or deleted until the link is removed. Only Admins delete, and only unpublished pages.
 
 **Media Library.** Upload JPEG/PNG/WebP/AVIF; the system creates responsive WebP/AVIF sizes. Record title, alt text, caption, creation type (SportingSpy Original / AI-Created / AI-Assisted/Edited, Licensed, Official Source, Creative Commons, Other), credit, source, licence, AI tool, human editing and the copyright review. Uploading a byte-identical copy of an existing image is flagged; you can use the existing item or confirm a copy. Images in use cannot be deleted.
 
@@ -35,6 +37,7 @@ Last updated 4 October 2026 (Phase R). This guide is for editors and for the dev
 | Auth | `POST /auth/login` (`totpCode` when 2FA is on), `POST /auth/logout`, `GET/PATCH /auth/me`, `POST /auth/change-password`, sessions; `POST /auth/password-reset/request`, `GET /auth/password-reset/verify`, `POST /auth/password-reset/confirm`, `POST /auth/admin/users/:id/reset-link`; `/auth/totp/{status,setup,enable,disable}`, `POST /auth/totp/admin/:userId/reset` |
 | Content | `GET /cms/data` (article list without body/content/tables/references); `GET /articles/:id` (one full article, same read scope); `POST/PUT/DELETE /articles[/:id]`; `/sports`, `/events`, `/editions`; `/article-types` |
 | FAQ | `GET /faq?context=article:<id>\|edition:<id>\|event:<id>\|sport:<id>\|site`, `POST /faq`, `PUT/DELETE /faq/:id`, `POST /faq/reorder`, `GET /faq/diagnostics?context=`, `POST /faq/suggestions` |
+| Pages | `GET /pages?status=&q=`, `GET /pages/:id`, `POST /pages` (draft), `PUT /pages/:id`, `POST /pages/:id/publish`, `POST /pages/:id/unpublish` (Admin, Editor); `DELETE /pages/:id` (Admin, unpublished non-required pages) |
 | SEO | `/seo/scan`, `/seo/runs`, `/seo/rules`, `/seo/article-check`, `/seo/assistant`, `/seo/technical` |
 | Redirects & migration | `/redirects` (+ `/bulk`, `GET /export` CSV backup); `/migration`, `/migration/import`, `/migration/validate`, `/migration/apply`, `/migration/export` |
 | Insights | `GET /insights/overview?period=`; `GET /search-console/status`, `POST /search-console/sync` |

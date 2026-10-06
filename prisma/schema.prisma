@@ -102,6 +102,8 @@ enum AuditEntityType {
   Migration
   Media
   Integration
+  // PHASE PAGES
+  Page
 }
 
 // PHASE R (Spec v2.0 §9.3 "editable and expandable"): the Article Type list
@@ -482,6 +484,7 @@ model MediaItem {
   sportHeroes    Sport[]        @relation("SportHeroMedia")
   eventImages    SportEvent[]   @relation("EventFeaturedMedia")
   editionImages  EventEdition[] @relation("EditionFeaturedMedia")
+  pageOgImages   Page[]         @relation("PageOgMedia")
 
   @@index([contentHash])
 }
@@ -785,4 +788,41 @@ model SiteExperience {
   draftUpdatedBy String
   publishedAt    DateTime?
   publishedBy    String?
+}
+
+// PHASE PAGES: CMS-managed informational pages served at /{slug}/ (About,
+// Privacy Policy, Terms, editorial policies …). The body uses the same
+// allow-listed rich-text document as articles (src/lib/richText.ts); `content`
+// is its derived plain text. `system` rows are the site's required pages:
+// editable, but their slug is fixed and they cannot be unpublished or deleted.
+// `template` adds the one non-text part a page may need (the contact form, or
+// the Privacy Policy's disclosures generated from the live configuration).
+model Page {
+  id             String    @id
+  slug           String    @unique
+  title          String
+  // Breadcrumb / footer label when shorter than the title.
+  shortTitle     String?
+  // Subtitle under the heading (tagline, "Last revised …").
+  summary        String?
+  body           Json
+  content        String
+  status         String    @default("draft")
+  template       String    @default("standard")
+  system         Boolean   @default(false)
+  seoTitle       String?
+  seoDescription String?
+  noIndex        Boolean   @default(false)
+  ogMediaId      String?
+  // Media Library ids used in the body (Media Library usage / delete guard).
+  mediaIds       String[]  @default([])
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  publishedAt    DateTime?
+  createdBy      String
+  updatedBy      String
+
+  ogMedia MediaItem? @relation("PageOgMedia", fields: [ogMediaId], references: [id], onDelete: Restrict)
+
+  @@index([status])
 }

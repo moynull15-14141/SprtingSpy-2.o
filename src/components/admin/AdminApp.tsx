@@ -26,6 +26,7 @@ import { AdminRedirects } from './AdminRedirects';
 import { AdminSettings } from './AdminSettings';
 import { AdminSiteExperience } from './site/AdminSiteExperience';
 import { AdminFaq } from './AdminFaq';
+import { AdminPages } from './AdminPages';
 import { AdminInbox } from './AdminInbox';
 import { AdminArticleTypes } from './AdminArticleTypes';
 import { AdminInsights } from './AdminInsights';
@@ -69,6 +70,8 @@ export function AdminApp() {
                 return <AdminSiteExperience />;
               case 'faq':
                 return <AdminFaq />;
+              case 'pages':
+                return <AdminPages />;
               case 'inbox':
                 return <AdminInbox />;
               case 'types':

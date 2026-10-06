@@ -25,13 +25,51 @@ export interface PreparedContent {
 
 const words = (text: string) => text.split(/\s+/).filter(Boolean).length;
 
-async function usableMedia(ids: string[]) {
+export async function usableMedia(ids: string[]) {
   const rows = await prisma.mediaItem.findMany({ where: { id: { in: ids } } });
   const missing = ids.filter((id) => !rows.some((r) => r.id === id));
   if (missing.length) return { error: `Unknown media item(s): ${missing.join(', ')}.` };
   const restricted = rows.filter((r) => r.copyrightReview === 'restricted');
   if (restricted.length) return { error: `"${restricted[0].title}" is marked copyright-restricted and cannot be used.` };
   return { rows };
+}
+
+/**
+ * Validates a rich-text body against the allow-list and resolves its
+ * references: image URLs come from the Media Library (never the client) and
+ * related-story cards from the live article. Shared by articles and Pages
+ * (PHASE PAGES) so both store exactly the same safe document format.
+ */
+export async function prepareRichBody(input: unknown, emptyError = 'The body has no text.', allowEmpty = false): Promise<{ error: string } | { doc: RichDoc; text: string; mediaIds: string[] }> {
+  const result = validateRichDoc(input);
+  if (!result.ok) return { error: (result as { error: string }).error };
+  const media = await usableMedia(result.mediaIds);
+  if ('error' in media) return { error: media.error! };
+  const byId = new Map(media.rows!.map((m) => [m.id, m]));
+  const relatedIds = new Set<string>();
+  const collectRelated = (nodes: RichNode[]) => nodes.forEach((n) => { if (n.type === 'relatedStory') relatedIds.add(String(n.attrs?.articleId)); if (n.content) collectRelated(n.content); });
+  collectRelated(result.doc.content);
+  const relatedRows = relatedIds.size ? await prisma.article.findMany({ where: { id: { in: [...relatedIds] }, status: { not: 'archived' } } }) : [];
+  const relatedById = new Map(relatedRows.map((a) => [a.id, a]));
+  const missingRelated = [...relatedIds].filter((id) => !relatedById.has(id));
+  if (missingRelated.length) return { error: `Unknown related article(s): ${missingRelated.join(', ')}.` };
+  // Image URLs always come from the library.
+  const withUrls = (nodes: RichNode[]): RichNode[] =>
+    nodes.map((n) =>
+      n.type === 'image'
+        ? { ...n, attrs: { ...n.attrs, src: toMediaAsset(byId.get(String(n.attrs?.mediaId))!).url } }
+        : n.type === 'mediaGroup'
+          ? { ...n, attrs: { ...n.attrs, mediaIds: (n.attrs?.mediaIds as string[]).filter((id) => byId.has(id)) } }
+        : n.type === 'relatedStory'
+          ? (() => { const a = relatedById.get(String(n.attrs?.articleId))!; return { ...n, attrs: { ...n.attrs, href: articlePath(a), title: a.title, category: a.articleType, date: a.publishedAt.toISOString(), image: a.featuredImage || '' } }; })()
+        : n.content
+          ? { ...n, content: withUrls(n.content) }
+          : n
+    );
+  const doc: RichDoc = { ...result.doc, content: withUrls(result.doc.content) };
+  const text = docToPlainText(doc);
+  if (!text.trim() && !allowEmpty) return { error: emptyError };
+  return { doc, text, mediaIds: result.mediaIds };
 }
 
 /** Validates body/featuredMediaId from a create/update request. Returns an error message or the data to write. */
@@ -43,38 +81,12 @@ export async function prepareArticleContent(input: Record<string, unknown>): Pro
     if (input.body === null) {
       data.body = null; // revert to the legacy plain-text body
     } else {
-      const result = validateRichDoc(input.body);
-      if (!result.ok) return { error: (result as { error: string }).error };
-      const media = await usableMedia(result.mediaIds);
-      if ('error' in media) return { error: media.error! };
-      const byId = new Map(media.rows!.map((m) => [m.id, m]));
-      const relatedIds = new Set<string>();
-      const collectRelated = (nodes: RichNode[]) => nodes.forEach((n) => { if (n.type === 'relatedStory') relatedIds.add(String(n.attrs?.articleId)); if (n.content) collectRelated(n.content); });
-      collectRelated(result.doc.content);
-      const relatedRows = relatedIds.size ? await prisma.article.findMany({ where: { id: { in: [...relatedIds] }, status: { not: 'archived' } } }) : [];
-      const relatedById = new Map(relatedRows.map((a) => [a.id, a]));
-      const missingRelated = [...relatedIds].filter((id) => !relatedById.has(id));
-      if (missingRelated.length) return { error: `Unknown related article(s): ${missingRelated.join(', ')}.` };
-      // Image URLs always come from the library.
-      const withUrls = (nodes: RichNode[]): RichNode[] =>
-        nodes.map((n) =>
-          n.type === 'image'
-            ? { ...n, attrs: { ...n.attrs, src: toMediaAsset(byId.get(String(n.attrs?.mediaId))!).url } }
-            : n.type === 'mediaGroup'
-              ? { ...n, attrs: { ...n.attrs, mediaIds: (n.attrs?.mediaIds as string[]).filter((id) => byId.has(id)) } }
-            : n.type === 'relatedStory'
-              ? (() => { const a = relatedById.get(String(n.attrs?.articleId))!; return { ...n, attrs: { ...n.attrs, href: articlePath(a), title: a.title, category: a.articleType, date: a.publishedAt.toISOString(), image: a.featuredImage || '' } }; })()
-            : n.content
-              ? { ...n, content: withUrls(n.content) }
-              : n
-        );
-      const doc: RichDoc = { ...result.doc, content: withUrls(result.doc.content) };
-      const text = docToPlainText(doc);
-      if (!text.trim()) return { error: 'The article body has no text.' };
-      data.body = doc as unknown as object;
-      data.content = text;
-      data.readingTimeMinutes = Math.max(1, Math.ceil(words(text) / 200));
-      bodyMediaIds = result.mediaIds;
+      const prepared = await prepareRichBody(input.body, 'The article body has no text.');
+      if ('error' in prepared) return { error: prepared.error };
+      data.body = prepared.doc as unknown as object;
+      data.content = prepared.text;
+      data.readingTimeMinutes = Math.max(1, Math.ceil(words(prepared.text) / 200));
+      bodyMediaIds = prepared.mediaIds;
     }
   }
 

@@ -60,6 +60,7 @@ import { indexNowKey, notifyIndexNow } from './server/seo/indexnow';
 import { assertSafeAuthBoot, getAuthContext, requireAuth, requireRole, AuthLookup } from './server/auth';
 import { validateSlug, validateText, validateSafeUrl, validateRedirectSource, validateEmail, validateOneOf, validateSeo, firstError, validateRecordList, validateIsoDate, parseScheduledFor, ARTICLE_STATUSES } from './server/validation';
 import { faqRouter } from './server/faq';
+import { pagesRouter } from './server/pages';
 import { contactRouter } from './server/contact';
 import { sportEventConfigurationRouter } from './server/sportEventConfigurationRoutes';
 import { parseSportEventValues, resolveSportEventConfiguration } from './server/sportEventConfiguration';
@@ -258,7 +259,7 @@ async function startServer() {
   const allowedRoles: Role[] = features.readerAccounts ? ['Admin', 'Editor', 'Author', 'Reader'] : ['Admin', 'Editor', 'Author'];
   assertSafeAuthBoot();
   // Read-only connection/schema check. Startup never runs migrations or imports.
-  await Promise.all([prisma.user.count(), prisma.faqEntry.count(), prisma.contactMessage.count(), prisma.article.findFirst({ select: { reviewStatus: true, reviewVersion: true } })]);
+  await Promise.all([prisma.user.count(), prisma.faqEntry.count(), prisma.contactMessage.count(), prisma.page.count(), prisma.article.findFirst({ select: { reviewStatus: true, reviewVersion: true } })]);
   // PHASE G: a real production site must not start with documented default passwords.
   await assertProductionLaunchSafe(deployment);
   const app = express();
@@ -1016,6 +1017,11 @@ async function startServer() {
     if (error) return error;
     if (body.slug !== undefined) {
       try { assertSportSlugAllowed(body.slug); } catch (err) { if (err instanceof UrlConflict) return err.message; throw err; }
+      // PHASE PAGES: CMS pages also live at /{slug}/.
+      if (body.slug !== sportSlug) {
+        const page = await prisma.page.findUnique({ where: { slug: String(body.slug) }, select: { title: true } });
+        if (page) return `/${body.slug}/ is the URL of the page "${page.title}". Choose a different sport slug.`;
+      }
     }
     if ('heroImage' in body && !(await imageIsManaged(body.heroImage))) return 'heroImage must reference a Media Library item.';
     if (Array.isArray(body.featuredEventIds) && body.featuredEventIds.length) {
@@ -1676,6 +1682,8 @@ async function startServer() {
   app.use('/api/site-experience', siteExperienceRouter(getAuthLookup));
   // PHASE H: editor-managed FAQ and the stored contact-form inbox.
   app.use('/api/faq', faqRouter(getAuthLookup));
+  // PHASE PAGES: CMS-managed informational pages (Admin/Editor; delete Admin).
+  app.use('/api/pages', pagesRouter(getAuthLookup));
   app.use(contactRouter(getAuthLookup));
   app.use('/api/sports', sportEventConfigurationRouter(getAuthLookup));
   app.use(editorialWorkflowRouter(getAuthLookup));
