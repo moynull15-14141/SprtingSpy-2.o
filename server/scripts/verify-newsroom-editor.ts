@@ -41,7 +41,7 @@ assert(css.includes('grid-template-rows: minmax(0, 1fr)'), 'viewport-bound grid 
 pass('desktop sidebar, article, SEO and pinned-toolbar regions are viewport-bound regions with controlled overflow');
 
 const articlesUi = read('src/components/admin/AdminArticles.tsx');
-for (const token of ['const startCreate', 'type="button" onClick={startCreate}', 'data-testid="create-article-button"', 'requestAnimationFrame', 'Title &amp; hierarchy']) assert(articlesUi.includes(token), token);
+for (const token of ['const startCreate', 'onClick={() => startCreate()}', 'data-testid="create-article-button"', 'data-testid="create-article-manual"', 'requestAnimationFrame', 'Title &amp; hierarchy']) assert(articlesUi.includes(token), token);
 pass('Create Article explicitly opens and focuses an initialized form with a stable Title & Hierarchy section');
 
 assert(!editor.includes('dangerouslySetInnerHTML=') && !renderer.includes('dangerouslySetInnerHTML='));

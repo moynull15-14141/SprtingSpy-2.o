@@ -170,6 +170,9 @@ model SportEvent {
   name               String
   shortName          String
   description        String
+  // Rich event overview (same validated document format as article bodies, no images);
+  // `description` stays its plain-text projection for search, cards, meta descriptions and FAQ checks.
+  descriptionBody    Json?
   history            String?
   frequency          String?
   defaultVenue       String?
@@ -227,6 +230,9 @@ model EventEdition {
   participantsCount  Int?
   officialSourceUrl  String?
   description        String
+  // Rich edition description (same validated document format as article bodies, no images);
+  // `description` stays its plain-text projection for search, meta descriptions and FAQ checks.
+  descriptionBody    Json?
   featuredImage      String?
   seo                Json
   // PHASE R: Media Library relation for featuredImage; opt-in FAQPage markup.

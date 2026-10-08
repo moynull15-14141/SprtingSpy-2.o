@@ -6,6 +6,7 @@
  */
 
 import React, { useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Upload } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { Button } from '../../ui/Button';
@@ -54,6 +55,9 @@ export function MediaUploadForm({ onUploaded, onCancel }: { onUploaded: (item: M
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // The picker opens inside the Article/Edition editor form; React submit events bubble through
+    // the component tree, so without this an upload would also save the surrounding editor.
+    e.stopPropagation();
     if (!file || !title.trim() || !altText.trim()) return;
     setBusy(true);
     const item = await uploadMedia(file, { title, altText, caption, credit, source, license, creationType, aiTool: aiInvolved ? aiTool : '', humanEditing });
@@ -119,7 +123,9 @@ export function MediaPicker({ onSelect, onClose }: { onSelect: (item: MediaItem)
   const q = query.trim().toLowerCase();
   const items = mediaItems.filter((m) => !q || [m.title, m.altText, m.filename, m.credit].some((v) => v?.toLowerCase().includes(q)));
 
-  return (
+  // Rendered at <body>: the picker is opened from inside editor <form>s, and its upload <form>
+  // must not be nested in them (a nested form submit reloaded the whole CMS page).
+  const dialog = (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Choose an image">
       <div className="w-full max-w-4xl max-h-[85vh] overflow-y-auto rounded-2xl bg-white dark:bg-stone-900 p-5 space-y-4 shadow-2xl">
         <div className="flex items-center justify-between gap-3">
@@ -158,4 +164,5 @@ export function MediaPicker({ onSelect, onClose }: { onSelect: (item: MediaItem)
       </div>
     </div>
   );
+  return typeof document === 'undefined' ? dialog : createPortal(dialog, document.body);
 }

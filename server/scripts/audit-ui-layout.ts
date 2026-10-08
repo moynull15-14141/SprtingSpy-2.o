@@ -116,6 +116,7 @@ try {
             await page.evaluate('window.scrollTo(0, 0)');
             await page.getByRole('button', { name: 'Articles', exact: true }).first().click();
             await page.getByTestId('create-article-button').click();
+            await page.getByTestId('create-article-manual').click();
             await page.waitForTimeout(800);
             const cols = await page.evaluate(`(() => {
               const t = document.querySelector('input[placeholder^="Article title (H1)"]');

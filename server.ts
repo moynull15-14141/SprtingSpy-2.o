@@ -45,7 +45,7 @@ import { profileImageOrigins, validateProfileImageUrl } from './server/profileIm
 import { mediaUsageMap } from './server/media/service';
 import { redirectRouter, redirectMovedArticle, releasePath, RedirectConflict } from './server/redirects';
 import { settingsRouter } from './server/settings';
-import { prepareArticleContent, syncBodyMedia } from './server/articleContent';
+import { prepareArticleContent, prepareRichDescription, syncBodyMedia } from './server/articleContent';
 import { articlePath, siteOrigin } from './src/lib/paths';
 import { sitemapFiles } from './server/seo/sitemap';
 import { robotsTxt } from './server/seo/robots';
@@ -98,10 +98,11 @@ import { insightsRouter } from './server/insights';
 import { migrationRouter } from './server/migration';
 import { searchConsoleRouter, runScheduledSearchSync } from './server/searchConsole';
 import { totpRouter } from './server/totp';
+import { documentImportRouter } from './server/documentImport/routes';
 
 const SPORT_AUDIT_FIELDS = ['name', 'slug', 'tagline', 'description', 'order', 'isVisible', 'featuredEventIds', 'heroImage', 'heroMediaId', 'icon', 'seo', 'faqSchemaEnabled'] as const;
-const EVENT_AUDIT_FIELDS = ['name', 'slug', 'sportSlug', 'shortName', 'alternativeNames', 'description', 'history', 'frequency', 'defaultVenue', 'defaultLocation', 'currentEditionYear', 'featured', 'isVisible', 'featuredImage', 'featuredMediaId', 'officialSourceUrl', 'eventType', 'seo', 'sportSpecificValues', 'faqSchemaEnabled'] as const;
-const EDITION_AUDIT_FIELDS = ['title', 'startDate', 'endDate', 'venue', 'location', 'status', 'quickFacts', 'prizeMoneyTotal', 'defendingChampions', 'qualificationInfo', 'participantsCount', 'officialSourceUrl', 'description', 'featuredImage', 'featuredMediaId', 'seo', 'faqSchemaEnabled'] as const;
+const EVENT_AUDIT_FIELDS = ['name', 'slug', 'sportSlug', 'shortName', 'alternativeNames', 'description', 'descriptionBody', 'history', 'frequency', 'defaultVenue', 'defaultLocation', 'currentEditionYear', 'featured', 'isVisible', 'featuredImage', 'featuredMediaId', 'officialSourceUrl', 'eventType', 'seo', 'sportSpecificValues', 'faqSchemaEnabled'] as const;
+const EDITION_AUDIT_FIELDS = ['title', 'descriptionBody', 'startDate', 'endDate', 'venue', 'location', 'status', 'quickFacts', 'prizeMoneyTotal', 'defendingChampions', 'qualificationInfo', 'participantsCount', 'officialSourceUrl', 'description', 'featuredImage', 'featuredMediaId', 'seo', 'faqSchemaEnabled'] as const;
 // PHASE R.1: audit field lists. Secrets (passwordHash, totpSecret, tokens) are never listed.
 const USER_AUDIT_FIELDS = ['name', 'email', 'role', 'status', 'avatar'] as const;
 const AUTHOR_AUDIT_FIELDS = ['slug', 'name', 'roleTitle', 'bio', 'avatar', 'twitter', 'email', 'userId'] as const;
@@ -1201,6 +1202,10 @@ async function startServer() {
         return res.status(400).json({ error: validationError });
       }
       if (!(await imageIsManaged(body.featuredImage))) return res.status(400).json({ error: 'featuredImage must reference a Media Library item.' });
+      // Rich overview (optional): its plain-text projection replaces `description`.
+      const preparedEventDescription = body.descriptionBody === undefined ? null : await prepareRichDescription(body.descriptionBody, 'Event');
+      if (preparedEventDescription && 'error' in preparedEventDescription) return res.status(400).json({ error: preparedEventDescription.error });
+      const eventDescription = preparedEventDescription as Exclude<typeof preparedEventDescription, { error: string }>;
       if (body.allEditionYears?.length) return res.status(400).json({ error: 'Edition years are recorded by creating editions, not by pre-populating allEditionYears.' });
 
       const result = await prisma.$transaction(async (tx) => {
@@ -1222,7 +1227,8 @@ async function startServer() {
           slug: body.slug,
           name: body.name,
           shortName: optionalFact(body.shortName) || body.name.trim(),
-          description: optionalFact(body.description) || '',
+          description: eventDescription ? eventDescription.text : optionalFact(body.description) || '',
+          descriptionBody: eventDescription?.doc ? (eventDescription.doc as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
           history: optionalFact(body.history),
           frequency: optionalFact(body.frequency),
           defaultVenue: optionalFact(body.defaultVenue),
@@ -1300,6 +1306,9 @@ async function startServer() {
         const edition = await prisma.eventEdition.findFirst({ where: { sportSlug: existing.sportSlug, eventSlug: existing.slug, year: updates.currentEditionYear }, select: { id: true } });
         if (!edition) return res.status(400).json({ error: 'currentEditionYear must identify an existing edition of this event.' });
       }
+      const preparedEventDescription = 'descriptionBody' in updates ? await prepareRichDescription(updates.descriptionBody, 'Event') : null;
+      if (preparedEventDescription && 'error' in preparedEventDescription) return res.status(400).json({ error: preparedEventDescription.error });
+      const eventDescription = preparedEventDescription as Exclude<typeof preparedEventDescription, { error: string }>;
       const allowed = ['name', 'slug', 'sportSlug', 'shortName', 'description', 'history', 'frequency', 'defaultVenue', 'defaultLocation', 'currentEditionYear', 'featured', 'isVisible', 'featuredImage', 'officialSourceUrl', 'eventType', 'seo', 'sportSpecificValues', 'faqSchemaEnabled'] as const;
       const data: Record<string, unknown> = {};
       for (const key of allowed) if (key in updates) data[key] = updates[key];
@@ -1307,6 +1316,10 @@ async function startServer() {
         if (key in updates) data[key] = optionalFact(updates[key]);
       }
       if ('description' in updates) data.description = optionalFact(updates.description) || '';
+      if (eventDescription) {
+        data.description = eventDescription.text;
+        data.descriptionBody = eventDescription.doc ? (eventDescription.doc as unknown as Prisma.InputJsonValue) : Prisma.DbNull;
+      }
       if ('shortName' in updates) data.shortName = optionalFact(updates.shortName) || (updates.name ?? existing.name);
       if ('alternativeNames' in updates) data.alternativeNames = normalizeAlternativeNames(updates.alternativeNames);
       if ('featuredImage' in updates) data.featuredMediaId = await mediaIdForUrl(data.featuredImage as string | null);
@@ -1430,6 +1443,10 @@ async function startServer() {
         return res.status(400).json({ error: validationError });
       }
       if (!(await imageIsManaged(body.featuredImage))) return res.status(400).json({ error: 'featuredImage must reference a Media Library item.' });
+      // Rich description (optional): its plain-text projection replaces `description`.
+      const preparedDescription = body.descriptionBody === undefined ? null : await prepareRichDescription(body.descriptionBody, 'Edition');
+      if (preparedDescription && 'error' in preparedDescription) return res.status(400).json({ error: preparedDescription.error });
+      const richDescription = preparedDescription as Exclude<typeof preparedDescription, { error: string }>;
       if (!(await prisma.sportEvent.findFirst({ where: { sportSlug: body.sportSlug, slug: body.eventSlug }, select: { id: true } }))) {
         return res.status(400).json({ error: 'sportSlug and eventSlug must identify an existing event.' });
       }
@@ -1459,7 +1476,8 @@ async function startServer() {
           qualificationInfo: body.qualificationInfo?.trim() || null,
           participantsCount: body.participantsCount ?? null,
           officialSourceUrl: optionalFact(body.officialSourceUrl),
-          description: optionalFact(body.description) || '',
+          description: richDescription ? richDescription.text : optionalFact(body.description) || '',
+          descriptionBody: richDescription?.doc ? (richDescription.doc as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
           featuredImage: optionalFact(body.featuredImage),
           featuredMediaId: await mediaIdForUrl(optionalFact(body.featuredImage)),
           faqSchemaEnabled: body.faqSchemaEnabled === true,
@@ -1504,6 +1522,9 @@ async function startServer() {
         return res.status(400).json({ error: validationError });
       }
       if ('featuredImage' in updates && !(await imageIsManaged(updates.featuredImage))) return res.status(400).json({ error: 'featuredImage must reference a Media Library item.' });
+      const preparedDescription = 'descriptionBody' in updates ? await prepareRichDescription(updates.descriptionBody, 'Edition') : null;
+      if (preparedDescription && 'error' in preparedDescription) return res.status(400).json({ error: preparedDescription.error });
+      const richDescription = preparedDescription as Exclude<typeof preparedDescription, { error: string }>;
       const allowed = ['title', 'startDate', 'endDate', 'venue', 'location', 'status', 'quickFacts', 'prizeMoneyTotal', 'defendingChampions', 'qualificationInfo', 'participantsCount', 'officialSourceUrl', 'description', 'featuredImage', 'seo', 'faqSchemaEnabled'] as const;
       const editionData: Record<string, unknown> = {};
       for (const key of allowed) if (key in updates) editionData[key] = updates[key];
@@ -1511,6 +1532,10 @@ async function startServer() {
         if (key in updates) editionData[key] = optionalFact(updates[key]);
       }
       if ('description' in updates) editionData.description = optionalFact(updates.description) || '';
+      if (richDescription) {
+        editionData.description = richDescription.text;
+        editionData.descriptionBody = richDescription.doc ? (richDescription.doc as unknown as Prisma.InputJsonValue) : Prisma.DbNull;
+      }
       if ('title' in updates) editionData.title = updates.title.trim();
       if ('qualificationInfo' in updates) editionData.qualificationInfo = updates.qualificationInfo?.trim() || null;
       if ('defendingChampions' in updates) editionData.defendingChampions = updates.defendingChampions?.length ? updates.defendingChampions : Prisma.DbNull;
@@ -1696,6 +1721,8 @@ async function startServer() {
   app.use('/api/pages', pagesRouter(getAuthLookup));
   // PHASE AUTOSAVE: editor working copies (never public; exempt from cache invalidation).
   app.use('/api/drafts', draftsRouter(getAuthLookup));
+  // PHASE DOCUMENT-IMPORT-2: transient extraction only; this route never writes CMS or database records.
+  app.use('/api/document-import', documentImportRouter(getAuthLookup));
   app.use(contactRouter(getAuthLookup));
   app.use('/api/sports', sportEventConfigurationRouter(getAuthLookup));
   app.use(editorialWorkflowRouter(getAuthLookup));

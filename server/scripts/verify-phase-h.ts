@@ -343,7 +343,7 @@ try {
   await until(() => prisma.sportEvent.findUniqueOrThrow({ where: { id: eventId } }), (v) => (v.seo as any).metaTitle === manualSeo.metaTitle, 'event manual SEO');
   await row(page, `${prefix} Event`).getByRole('button', { name: 'Edit', exact: true }).click();
   assert.equal(await page.locator('#event-seo-title').inputValue(), manualSeo.metaTitle);
-  await page.getByPlaceholder('Permanent tournament identity and status...').fill('Updated event content with the same manual metadata.');
+  await page.locator('#event-editor-field-9').fill('Updated event content with the same manual metadata.');
   await page.getByRole('button', { name: 'Save Updates', exact: true }).click();
   await until(() => prisma.sportEvent.findUniqueOrThrow({ where: { id: eventId } }), (v) => v.description.startsWith('Updated event'), 'unrelated event change');
   assert.deepEqual((await prisma.sportEvent.findUniqueOrThrow({ where: { id: eventId } })).seo, manualSeo);

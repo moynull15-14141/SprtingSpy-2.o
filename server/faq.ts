@@ -179,6 +179,44 @@ export function faqRouter(getLookup: () => AuthLookup) {
     return res.status(201).json(created);
   }));
 
+  /** Source review handoff: atomically append ordinary draft entries to one saved Article. */
+  router.post('/import', staff, wrap(async (req, res) => {
+    const body = req.body as { articleId?: unknown; faqs?: unknown } | null;
+    if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some((key) => !['articleId', 'faqs'].includes(key)) ||
+        typeof body.articleId !== 'string' || !body.articleId || body.articleId.length > 200 || !Array.isArray(body.faqs) || !body.faqs.length || body.faqs.length > 50) {
+      return res.status(400).json({ error: 'Send articleId and 1–50 reviewed FAQ items.' });
+    }
+    const article = await prisma.article.findUnique({ where: { id: body.articleId }, select: { id: true } });
+    if (!article) return res.status(400).json({ error: 'The Article for these FAQ entries does not exist.' });
+    const parsedItems: { question: string; answer: string }[] = [];
+    for (const item of body.faqs) {
+      const parsed = parseFaqInput({ ...(item as object), articleId: body.articleId, status: 'draft', source: 'editor' }, false);
+      if (!parsed.ok) return res.status(400).json({ error: (parsed as { ok: false; error: string }).error });
+      parsedItems.push({ question: parsed.value.question!, answer: parsed.value.answer! });
+    }
+    const result = await prisma.$transaction(async (tx) => {
+      const existing = await tx.faqEntry.findMany({ where: { articleId: body.articleId as string }, select: { question: true, answer: true } });
+      const exact = new Set(existing.map((entry) => `${entry.question.toLocaleLowerCase()}\u0000${entry.answer}`));
+      const max = await tx.faqEntry.aggregate({ where: { articleId: body.articleId as string }, _max: { displayOrder: true } });
+      const created = [];
+      let skipped = 0;
+      for (const item of parsedItems) {
+        const duplicateKey = `${item.question.toLocaleLowerCase()}\u0000${item.answer}`;
+        if (exact.has(duplicateKey)) { skipped++; continue; }
+        exact.add(duplicateKey);
+        const entry = await tx.faqEntry.create({ data: {
+          id: `faq-${crypto.randomUUID()}`, question: item.question, answer: item.answer,
+          displayOrder: Math.min(10000, (max._max.displayOrder ?? -10) + (created.length + 1) * 10),
+          status: 'draft', source: 'editor', articleId: body.articleId as string, updatedBy: req.authContext!.userName,
+        } });
+        created.push(entry);
+        await recordAudit(tx, { ...actor(req), action: 'Created FAQ Entry', entityType: 'Faq', entityId: entry.id, details: `${req.authContext!.userName} created a FAQ entry (article, status: draft) from reviewed source content.`, before: null, after: entry as unknown as Record<string, unknown>, fields: AUDIT_FIELDS });
+      }
+      return { created, skipped };
+    }, { isolationLevel: 'Serializable' });
+    return res.status(201).json(result);
+  }));
+
   router.put('/:id', staff, wrap(async (req, res) => {
     const existing = await prisma.faqEntry.findUnique({ where: { id: req.params.id } });
     if (!existing) return res.status(404).json({ error: 'FAQ entry not found.' });

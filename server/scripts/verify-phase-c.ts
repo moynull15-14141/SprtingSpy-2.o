@@ -471,7 +471,8 @@ try {
 
       // Article editor with rich text, table, library image, then preview.
       await page.getByRole('button', { name: 'Articles', exact: true }).click();
-      await page.getByRole('button', { name: '+ Create New Article' }).click();
+      await page.getByTestId('create-article-button').click();
+      await page.getByTestId('create-article-manual').click();
       const uiTitle = `${fixture} Browser Article`;
       await page.getByLabel('Article Title (H1) *', { exact: true }).fill(uiTitle);
       const editorBox = page.getByRole('textbox', { name: 'Article body' });

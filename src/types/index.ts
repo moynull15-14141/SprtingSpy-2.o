@@ -5,6 +5,7 @@
  */
 
 import type { ArticleReviewFields } from '../lib/editorialWorkflow';
+import type { RichDoc } from '../lib/richText';
 export type Role = 'Admin' | 'Editor' | 'Author' | 'Reader';
 
 // PHASE R: the Article Type list is database-backed (ArticleType table,
@@ -137,6 +138,8 @@ export interface SportEvent {
   name: string; // e.g. "French Open"
   shortName: string; // e.g. "Roland-Garros"
   description: string;
+  /** Rich event overview (no images); `description` is its plain-text projection. */
+  descriptionBody?: RichDoc | null;
   history?: string;
   frequency: string | null; // null until confirmed by an editor
   defaultVenue: string | null;
@@ -182,6 +185,8 @@ export interface EventEdition {
   participantsCount?: number;
   officialSourceUrl?: string;
   description: string;
+  /** Rich edition description (no images); `description` is its plain-text projection. */
+  descriptionBody?: RichDoc | null;
   featuredImage: string | null;
   seo: SeoMetadata;
   featuredMediaId?: string | null;

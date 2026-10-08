@@ -265,6 +265,7 @@ try {
   // New article: typing a title autosaves a private draft (13: navigation recovery via Unsaved Work).
   await nav('Articles');
   await page.getByTestId('create-article-button').click();
+  await page.getByTestId('create-article-manual').click();
   const browserTitle = `Browser autosave ${fx}`;
   await page.locator('#article-title').fill(browserTitle);
   await page.locator('[data-autosave="saved"]').waitFor({ timeout: 15_000 });

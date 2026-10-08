@@ -15,7 +15,11 @@ const csrf = (): Record<string, string> => {
 async function getJson<T>(url: string): Promise<T | null> {
   try {
     const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
-    return res.ok ? ((await res.json()) as T) : null;
+    if (res.ok) return (await res.json()) as T;
+    // Always finish reading the response: an unread error body (e.g. 403 for a read-only
+    // article) keeps the request open and holds the browser's connection to the server.
+    await res.text().catch(() => '');
+    return null;
   } catch { return null; }
 }
 

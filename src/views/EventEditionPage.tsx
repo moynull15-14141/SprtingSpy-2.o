@@ -15,6 +15,7 @@ import { ArticleCard } from '../components/editorial/ArticleCard';
 import { AdSlot } from '../components/ui/AdSlot';
 import { JsonLd } from '../components/seo/JsonLd';
 import { ContextFaq } from '../components/editorial/ContextFaq';
+import { RichText } from '../components/editorial/RichText';
 import { RumPageType } from '../components/analytics/RumPageType';
 import { EventAnalytics } from '../components/editorial/EventAnalytics';
 import { absoluteUrl, editionPath, eventPath } from '../lib/paths';
@@ -219,7 +220,9 @@ export const EventEditionPage: React.FC<{ data: EditionPageData }> = ({ data }) 
       {(edition.description || edition.officialSourceUrl) && (
         <section aria-labelledby="edition-about-heading" className="rounded-2xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-[#121417] p-6 sm:p-8">
           <h2 id="edition-about-heading" className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">About {edition.title}</h2>
-          {edition.description && <p className="mt-3 text-base leading-relaxed text-stone-700 dark:text-stone-300">{edition.description}</p>}
+          {edition.descriptionBody
+            ? <div className="mt-3 text-base leading-relaxed text-stone-700 dark:text-stone-300"><RichText doc={{ ...edition.descriptionBody, attrs: { dropCap: false } }} media={{}} /></div>
+            : edition.description && <p className="mt-3 text-base leading-relaxed text-stone-700 dark:text-stone-300">{edition.description}</p>}
           {edition.officialSourceUrl && (
             <p className="mt-4 text-sm">
               <span className="font-semibold text-stone-900 dark:text-stone-100">Official source: </span>

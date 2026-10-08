@@ -381,7 +381,8 @@ try {
       assert.equal(await page.getByText('Pending Review', { exact: true }).count(), 0);
 
       await page.getByRole('button', { name: 'Articles', exact: true }).click();
-      await page.getByRole('button', { name: '+ Create New Article' }).click();
+      await page.getByTestId('create-article-button').click();
+      await page.getByTestId('create-article-manual').click();
       assert.equal(await page.locator('select option[value="How to Watch"]').count(), 1);
       assert.equal(await page.locator('select option[value="Sports Viewing Guide"]').count(), 1);
       await page.getByText('Social Metadata', { exact: true }).waitFor();

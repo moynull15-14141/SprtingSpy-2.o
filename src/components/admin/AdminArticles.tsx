@@ -21,9 +21,10 @@ interface ArticleDraftPayload {
   sportSlug: string; isAboutEvent: boolean; eventSlug: string; editionYear: number | null; articleType: string; faqSchemaEnabled: boolean;
   title: string; subtitle: string; slug: string; excerpt: string; body: RichDoc; featuredImage: string; featuredMediaId: string | null;
   authorId: string; metaTitle: string; metaDescription: string; ogTitle: string; ogDescription: string; ogImage: string;
-  otherSeo: SeoMetadata; status: string; scheduledLocal: string; references: Reference[];
+  otherSeo: SeoMetadata; status: string; scheduledLocal: string; references: Reference[]; pendingFaqs: PendingFaq[];
 }
 import { REVIEW_LABELS } from '../../lib/editorialWorkflow';
+import { leavesPublicState, previewPlan, savedStateLabel, slugFromTitle } from '../../lib/articleEditor';
 
 // The rich-text editor (TipTap) is loaded on demand, only inside the CMS.
 const RichTextEditor = dynamic(() => import('./editor/RichTextEditor'), {
@@ -35,6 +36,9 @@ import { useApp } from '../../context/AppContext';
 import { Article, ArticleType, SeoMetadata } from '../../types';
 import { Button } from '../ui/Button';
 import { useArticleSearch } from './useArticleSearch';
+import { FileInput, PenLine } from 'lucide-react';
+import { DocumentImportReview } from './DocumentImportReview';
+import type { CmsTransfer, PendingFaq } from '../../lib/documentImport';
 
 interface SeoCheckResult {
   checklist: { ruleKey: string; name: string; category: string; severity: string; passed: boolean; issues: { message: string; fix: string }[]; why: string }[];
@@ -77,6 +81,8 @@ export const AdminArticles: React.FC = () => {
   const isAuthor = currentUser.role === 'Author';
   const ownByline = authors.find(author => author.userId === currentUser.id);
   const [isCreating, setIsCreating] = useState(false);
+  // PHASE 5: the Create Article choice (manual or from source); Authors go straight to the manual editor.
+  const [createChoice, setCreateChoice] = useState<'choose' | 'source' | null>(null);
   // PHASE R UI/UX: tell the CMS layout an article is open (it folds the desk navigation).
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('sportingspy:cms-editor', { detail: { active: isCreating } }));
@@ -84,6 +90,7 @@ export const AdminArticles: React.FC = () => {
   }, [isCreating]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const editingArticleForPermissions = articles.find(article => article.id === editingId);
+  const editingArticle = editingArticleForPermissions;
   const authorLocked = isAuthor && !!editingArticleForPermissions && (editingArticleForPermissions.reviewStatus === 'in_review' || ['published','scheduled','archived'].includes(editingArticleForPermissions.status));
 
   // Workflow Form State
@@ -94,6 +101,7 @@ export const AdminArticles: React.FC = () => {
   const [articleType, setArticleType] = useState<ArticleType>('Schedule');
   // PHASE R: FAQPage structured data for this article's reader questions (opt-in).
   const [faqSchemaEnabled, setFaqSchemaEnabled] = useState(false);
+  const [pendingFaqs, setPendingFaqs] = useState<PendingFaq[]>([]);
   const [title, setTitle] = useState('');
   const [subtitle, setSubtitle] = useState('');
   const [slug, setSlug] = useState('');
@@ -133,11 +141,11 @@ export const AdminArticles: React.FC = () => {
   const [unsavedIds, setUnsavedIds] = useState<Set<string>>(new Set());
   const draftPayload: ArticleDraftPayload = {
     sportSlug, isAboutEvent, eventSlug, editionYear: editionYear ?? null, articleType, faqSchemaEnabled, title, subtitle, slug, excerpt, body: bodyDoc,
-    featuredImage, featuredMediaId, authorId, metaTitle, metaDescription, ogTitle, ogDescription, ogImage, otherSeo, status, scheduledLocal, references,
+    featuredImage, featuredMediaId, authorId, metaTitle, metaDescription, ogTitle, ogDescription, ogImage, otherSeo, status, scheduledLocal, references, pendingFaqs,
   };
   const autosave = useAutosave({
     kind: 'article', userId: currentUser.id, enabled: isCreating && !authorLocked && !recovery, title: title.trim() || 'Untitled article', payload: draftPayload,
-    meaningful: !!title.trim() || !!excerpt.trim() || docHasText(bodyDoc),
+    meaningful: !!title.trim() || !!excerpt.trim() || docHasText(bodyDoc) || !!pendingFaqs.length, open: isCreating,
   });
   const applyPayload = (p: Partial<ArticleDraftPayload>) => {
     if (p.sportSlug !== undefined) setSportSlug(p.sportSlug);
@@ -163,6 +171,7 @@ export const AdminArticles: React.FC = () => {
     // Autosave never changes the workflow state: the status stays what the saved article has.
     if (p.scheduledLocal !== undefined) setScheduledLocal(p.scheduledLocal);
     if (p.references !== undefined) setReferences(p.references);
+    if (p.pendingFaqs !== undefined) setPendingFaqs(p.pendingFaqs);
   };
   /** Restart autosave from the form as it is now (call in the same tick as the form setters). */
   const restartAutosave = (id: string | null) => {
@@ -174,16 +183,11 @@ export const AdminArticles: React.FC = () => {
   const availableEvents = events.filter((e) => e.sportSlug === sportSlug);
   const availableEditions = editions.filter((ed) => ed.eventSlug === eventSlug);
 
+  // PHASE 6: a new article's slug follows the whole title until the editor types their own slug
+  // (it used to lock after the first keystroke, e.g. "p" for "Preview of the final").
   const handleTitleChange = (val: string) => {
     setTitle(val);
-    if (!editingId && !slug) {
-      setSlug(
-        val
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, '-')
-          .replace(/^-|-$/g, '')
-      );
-    }
+    if (!editingId && (!slug || slug === slugFromTitle(title))) setSlug(slugFromTitle(val));
   };
 
   const resetForm = () => {
@@ -206,11 +210,13 @@ export const AdminArticles: React.FC = () => {
     setScheduledLocal('');
     setReferences([]);
     setFaqSchemaEnabled(false);
+    setPendingFaqs([]);
     setFormError(null);
     setSeoCheck(null);
     setAssistantResult(null);
     setIsCreating(false);
     setEditingId(null);
+    setCreateChoice(null);
   };
 
   useEffect(() => {
@@ -218,7 +224,9 @@ export const AdminArticles: React.FC = () => {
     void listDrafts().then((r) => setUnsavedIds(new Set((r?.drafts ?? []).filter((d) => d.kind === 'article' && d.entityId).map((d) => d.entityId!))));
   }, [isCreating, articles]);
 
-  const startCreate = () => {
+  /** `unsynced`: the form is being filled programmatically right now (source transfer), so autosave must keep it. */
+  const startCreate = (options: { unsynced?: boolean } = {}) => {
+    setCreateChoice(null);
     setFirstParagraphFocusRequest(0);
     // The CMS dataset may finish loading after this component's first render,
     // so initialise required relationships at the moment the editor opens.
@@ -230,7 +238,27 @@ export const AdminArticles: React.FC = () => {
     setIsCreating(true);
     setRecovery(null);
     setStaleSave(false);
-    autosave.start({ entityId: null, baseVersion: null });
+    autosave.start({ entityId: null, baseVersion: null, unsynced: options.unsynced });
+    requestAnimationFrame(() => document.getElementById('article-title')?.focus());
+  };
+
+  /** PHASE DOCUMENT-IMPORT-3: populate this existing editor only; saving and workflow remain unchanged. */
+  const applyDocumentImport = (transfer: CmsTransfer) => {
+    if (!isCreating) startCreate({ unsynced: true });
+    if (transfer.title !== undefined) handleTitleChange(transfer.title);
+    if (transfer.subtitle !== undefined) setSubtitle(transfer.subtitle);
+    if (transfer.excerpt !== undefined) setExcerpt(transfer.excerpt);
+    if (transfer.body !== undefined) { setBodyDoc(transfer.body); setEditorKey((key) => key + 1); }
+    if (transfer.sportSlug !== undefined) setSportSlug(transfer.sportSlug);
+    if (transfer.eventSlug !== undefined) { setIsAboutEvent(true); setEventSlug(transfer.eventSlug); }
+    if (transfer.editionYear !== undefined) setEditionYear(transfer.editionYear);
+    if (transfer.articleType !== undefined) setArticleType(transfer.articleType);
+    if (transfer.authorId !== undefined && !isAuthor) setAuthorId(transfer.authorId);
+    if (transfer.metaTitle !== undefined) setMetaTitle(transfer.metaTitle);
+    if (transfer.metaDescription !== undefined) setMetaDescription(transfer.metaDescription);
+    if (transfer.keywords !== undefined) setOtherSeo((existing) => ({ ...existing, keywords: transfer.keywords }));
+    if (transfer.faqs?.length) setPendingFaqs((existing) => [...existing, ...transfer.faqs!]);
+    setFeedback('Selected source values were transferred into this working copy. Review and save when ready.');
     requestAnimationFrame(() => document.getElementById('article-title')?.focus());
   };
 
@@ -321,8 +349,15 @@ export const AdminArticles: React.FC = () => {
     if (saving) return null;
     if (authorLocked) { setFormError('This article is read-only until an Admin/Editor returns it for changes.'); return null; }
     setFormError(null);
-    if (!title.trim() || !slug.trim()) {
-      setFormError('Add a title and URL slug before saving.');
+    if (!title.trim()) {
+      setFormError('Add a title before saving.');
+      requestAnimationFrame(() => document.getElementById('article-title')?.focus());
+      return null;
+    }
+    if (!slug.trim()) {
+      // A title written only in Bangla (or other non-Latin script) has no a–z/0–9 words to build a URL from.
+      setFormError('Add a URL slug before saving. The title has no a–z or 0–9 characters to build one from, so type a short English slug such as "bpl-final-2027".');
+      requestAnimationFrame(() => document.getElementById('article-slug')?.focus());
       return null;
     }
     const bodyCheck = validateRichDoc(bodyDoc);
@@ -374,16 +409,31 @@ export const AdminArticles: React.FC = () => {
 
     setSaving(true);
     try {
+      const savePendingFaqs = async (articleId: string) => {
+        if (!pendingFaqs.length) return true;
+        const result = await apiCall<{ created: unknown[]; skipped: number }>('/api/faq/import', { method: 'POST', body: { articleId, faqs: pendingFaqs } });
+        if (!result.data) {
+          setFormError(`The Article was saved, but its imported FAQ drafts were not added. ${result.error || 'Try saving again.'}`);
+          return false;
+        }
+        setPendingFaqs([]);
+        return true;
+      };
       if (editingId) {
         let stale = false;
         const updated = await updateArticle(editingId, articlePayload as never, { expectedVersion: autosave.baseVersion(), onStale: () => { stale = true; } });
         if (stale) { setStaleSave(true); return null; }
         if (!updated) setFormError('The article was not saved. Check the server message and try again; your changes are still in the editor.');
+        if (updated && !(await savePendingFaqs(editingId))) return null;
         if (updated) await autosave.applied(); // the working copy is now the article itself
         return updated ? editingId : null;
       }
       const created = await addArticle(articlePayload as never);
-      if (created) { await autosave.applied(); setEditingId(created.id); } // further saves/previews update the same article
+      if (created) {
+        setEditingId(created.id); // a retry updates this Article instead of creating another one
+        if (!(await savePendingFaqs(created.id))) return null;
+        await autosave.applied();
+      }
       else setFormError('The article was not saved. Check the server message and try again; your changes are still in the editor.');
       return created?.id ?? null;
     } finally {
@@ -400,8 +450,12 @@ export const AdminArticles: React.FC = () => {
     setTimeout(() => setFeedback(null), 5000);
   };
 
-  const saveAs = async (nextStatus: typeof status) => {
+  const saveAs = async (nextStatus: typeof status, options: { confirmed?: boolean } = {}) => {
     const wasScheduled = editingArticle?.status === 'scheduled';
+    if (!options.confirmed && leavesPublicState(editingArticle?.status, nextStatus) &&
+        !window.confirm(editingArticle.status === 'published'
+          ? 'This article is live. Saving it as a draft removes it from the public site. Continue?'
+          : 'This article is scheduled. Saving it as a draft cancels the scheduled publication. Continue?')) return;
     const id = await saveArticle(nextStatus);
     if (!id) return;
     setStatus(nextStatus);
@@ -413,25 +467,27 @@ export const AdminArticles: React.FC = () => {
 
   /**
    * Opens the staff-only preview in a new tab. Previewing never changes what
-   * is live: an unpublished article is saved first (keeping its unpublished
-   * status); a published article shows its last saved version without saving.
+   * is live or scheduled (PHASE 6): only a private draft that stays private is
+   * saved first; a live, scheduled or archived article, or a draft whose
+   * selected state is not private, shows its last saved version without saving.
    */
-  const willBeLive = status === 'published';
+  const plan = previewPlan({ savedStatus: editingArticle?.status, selectedStatus: status, hasId: !!editingId, readOnly: authorLocked });
   const handlePreview = async () => {
-    if (authorLocked && editingId) { window.open(`/admin/preview/${editingId}/`, '_blank', 'noopener,noreferrer'); return; }
-    const tab = window.open('', '_blank');
-    const id = willBeLive ? editingId : await saveArticle();
-    if (!id) {
-      tab?.close();
-      if (willBeLive) setFeedback('Save the article first, or set it to Draft to preview unpublished changes.');
+    if (plan === 'save-first') { setFeedback('Save the article first: Preview never schedules, publishes or archives it.'); return; }
+    if (plan === 'saved-version') {
+      window.open(`/admin/preview/${editingId}/`, '_blank', 'noopener,noreferrer');
+      if (!authorLocked) setFeedback('Preview shows the last saved version. Your unsaved changes stay in the editor and its working copy.');
       return;
     }
+    const tab = window.open('', '_blank');
+    const id = await saveArticle();
+    if (!id) { tab?.close(); return; }
     if (tab) tab.location.href = `/admin/preview/${id}/`;
-    if (!willBeLive) restartAutosave(id);
+    restartAutosave(id);
   };
 
   const featuredMedia = featuredMediaId ? mediaItems.find((m) => m.id === featuredMediaId) : undefined;
-  const editingArticle = editingId ? articles.find((article) => article.id === editingId) : undefined;
+  const savedState = savedStateLabel(editingArticle);
   const severityCounts = seoCheck?.checklist.reduce((counts, item) => {
     if (item.passed) counts.passed++;
     else if (item.severity === 'blocking') counts.blocking++;
@@ -513,10 +569,51 @@ export const AdminArticles: React.FC = () => {
             Publish guides, schedules, records, and tournament analysis.
           </p>
         </div>
-        <Button type="button" onClick={startCreate} size="sm" data-testid="create-article-button">
-          + Create New Article
+        <Button
+          type="button"
+          size="sm"
+          data-testid="create-article-button"
+          aria-expanded={isAuthor ? undefined : !!createChoice}
+          aria-controls={isAuthor ? undefined : 'create-article-choice'}
+          onClick={() => (isAuthor ? startCreate() : setCreateChoice((open) => (open ? null : 'choose')))}
+        >
+          + Create Article
         </Button>
       </div>
+      )}
+
+      {/* PHASE 5: the only two ways to create an Article; both end in the existing editor below. */}
+      {!isCreating && !isAuthor && createChoice === 'choose' && (
+        <section id="create-article-choice" data-testid="create-article-choice" aria-labelledby="create-article-choice-heading" className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-800 dark:bg-stone-950 sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 id="create-article-choice-heading" className="font-serif text-lg font-bold text-stone-900 dark:text-stone-100">Create article</h3>
+              <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">How do you want to create this article? Either way you finish in the same Article editor, and nothing is saved or published until you choose to.</p>
+            </div>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setCreateChoice(null)}>Cancel</Button>
+          </div>
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <button type="button" onClick={() => startCreate()} data-testid="create-article-manual" className="group rounded-lg border border-stone-200 p-4 text-left transition-colors hover:border-amber-500 hover:bg-amber-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:border-stone-800 dark:hover:border-amber-600 dark:hover:bg-amber-950/20">
+              <PenLine size={20} className="text-amber-700 dark:text-amber-400" aria-hidden="true" />
+              <strong className="mt-2 block text-sm text-stone-900 dark:text-stone-100">Create manually</strong>
+              <span className="mt-1 block text-xs text-stone-500 dark:text-stone-400">Open the Article editor with an empty working copy and write from scratch.</span>
+            </button>
+            <button type="button" onClick={() => setCreateChoice('source')} data-testid="create-article-source" className="group rounded-lg border border-stone-200 p-4 text-left transition-colors hover:border-amber-500 hover:bg-amber-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:border-stone-800 dark:hover:border-amber-600 dark:hover:bg-amber-950/20">
+              <FileInput size={20} className="text-amber-700 dark:text-amber-400" aria-hidden="true" />
+              <strong className="mt-2 block text-sm text-stone-900 dark:text-stone-100">Create from source</strong>
+              <span className="mt-1 block text-xs text-stone-500 dark:text-stone-400">Extract a proposal from a PDF/DOCX file or pasted source text, review it, then continue in the Article editor.</span>
+            </button>
+          </div>
+        </section>
+      )}
+      {!isCreating && !isAuthor && createChoice === 'source' && (
+        <DocumentImportReview
+          variant="create"
+          taxonomy={{ sports, events, editions, authors, articleTypes }}
+          current={{}}
+          onTransfer={applyDocumentImport}
+          onClose={() => setCreateChoice('choose')}
+        />
       )}
 
       {feedback && (
@@ -525,13 +622,26 @@ export const AdminArticles: React.FC = () => {
         </div>
       )}
 
+      {isCreating && !isAuthor && (
+        <DocumentImportReview
+          variant="editor"
+          taxonomy={{ sports, events, editions, authors, articleTypes }}
+          current={{ title, subtitle, excerpt, body: bodyDoc, sportSlug, eventSlug: eventSlug || undefined, editionYear, articleType, authorId, metaTitle, metaDescription, keywords: otherSeo.keywords }}
+          onTransfer={applyDocumentImport}
+        />
+      )}
+
       {/* ARTICLE WORKFLOW FORM */}
       {isCreating && (
         <form onSubmit={handleSave} className="cms-article-form rounded-xl border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-900/60">
           <div className="flex items-center justify-between gap-3 border-b border-stone-200 px-4 py-3 dark:border-stone-800 sm:px-5">
-            <h3 className="min-w-0 truncate font-serif text-lg font-bold text-stone-900 dark:text-stone-100">
-              {editingId ? 'Edit Article Dossier' : 'New Article Guided Workflow'}
-            </h3>
+            <div className="min-w-0">
+              <h3 className="truncate font-serif text-lg font-bold text-stone-900 dark:text-stone-100">
+                {editingId ? 'Edit Article Dossier' : 'New Article Guided Workflow'}
+              </h3>
+              {/* PHASE 6: what is saved now, independent of the "Publishing state" control. */}
+              <span data-testid="article-saved-state" data-tone={savedState.tone} className={`mt-0.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${SAVED_STATE_TONE[savedState.tone]}`}>{savedState.label}</span>
+            </div>
             <AutosaveStatus autosave={autosave} onLoadNewer={autosave.conflict ? () => { const c = autosave.conflict!; applyPayload(c.payload as Partial<ArticleDraftPayload>); autosave.start({ entityId: c.entityId, baseVersion: c.baseVersion, draft: c }); } : undefined} />
             <button
               type="button"
@@ -914,6 +1024,7 @@ export const AdminArticles: React.FC = () => {
           <section className="rounded-xl border border-stone-200 bg-white p-4 text-xs dark:border-stone-800 dark:bg-stone-950" aria-labelledby="article-faq-heading">
             <h4 id="article-faq-heading" className="font-bold uppercase tracking-[0.16em] text-stone-700 dark:text-stone-200">Reader questions (FAQ)</h4>
             <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400">Questions and answers for this article are written, reviewed and published in <strong>FAQ</strong> (choose this article as the context). Only published entries appear on the page.</p>
+            {!!pendingFaqs.length && <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 font-semibold text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{pendingFaqs.length} reviewed source {pendingFaqs.length === 1 ? 'question is' : 'questions are'} pending. Saving the Article adds them to the existing FAQ workspace as drafts.</p>}
             <label className="mt-3 flex items-start gap-2">
               <input type="checkbox" checked={faqSchemaEnabled} onChange={(e) => setFaqSchemaEnabled(e.target.checked)} disabled={isAuthor} className="mt-0.5" />
               <span><span className="font-semibold">Add FAQPage structured data</span> — only when the published questions pass validation and describe this page. Off by default.</span>
@@ -1025,7 +1136,7 @@ export const AdminArticles: React.FC = () => {
             {!isAuthor && editingArticle?.status === 'scheduled' && editingArticle.scheduledFor && (
               <div className="rounded-lg border border-stone-200 p-3 text-[11px] text-stone-600 dark:border-stone-800 dark:text-stone-300">
                 <p>Currently scheduled for <strong>{formatWhen(new Date(editingArticle.scheduledFor))}</strong>.</p>
-                <Button type="button" size="sm" variant="outline" className="mt-2 w-full" disabled={saving} onClick={() => saveAs('draft')}>Cancel schedule (keep as draft)</Button>
+                <Button type="button" size="sm" variant="outline" className="mt-2 w-full" disabled={saving} onClick={() => saveAs('draft', { confirmed: true })}>Cancel schedule (keep as draft)</Button>
               </div>
             )}
 
@@ -1033,7 +1144,7 @@ export const AdminArticles: React.FC = () => {
               <Button type="button" variant="ghost" size="sm" onClick={() => void discardAndClose()}>
                 Discard
               </Button>
-              <Button type="button" variant="outline" size="sm" onClick={handlePreview} disabled={saving || (willBeLive && !editingId)} title={willBeLive ? 'Shows the last saved version; does not save or publish.' : 'Saves as ' + status + ' and opens the preview.'}>
+              <Button type="button" variant="outline" size="sm" onClick={handlePreview} disabled={saving || plan === 'save-first'} title={plan === 'save' ? `Saves as ${status} (still private) and opens the preview.` : plan === 'saved-version' ? 'Shows the last saved version; does not save, publish or schedule.' : 'Save the article first.'}>
                 Preview
               </Button>
               <Button type="button" variant="outline" size="sm" onClick={() => saveAs('draft')} disabled={saving || authorLocked}>
@@ -1067,6 +1178,13 @@ export const AdminArticles: React.FC = () => {
   );
 };
 
+const SAVED_STATE_TONE: Record<ReturnType<typeof savedStateLabel>['tone'], string> = {
+  new: 'bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-300',
+  private: 'bg-stone-200 text-stone-700 dark:bg-stone-800 dark:text-stone-300',
+  live: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
+  scheduled: 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300',
+  archived: 'bg-stone-300 text-stone-800 dark:bg-stone-700 dark:text-stone-200',
+};
 const STATUS_BADGE: Record<string, string> = {
   published: 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300',
   draft: 'bg-stone-200 dark:bg-stone-800 text-stone-700 dark:text-stone-300',

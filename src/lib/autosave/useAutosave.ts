@@ -25,6 +25,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AUTOSAVE_TIMING, stableJson, type DraftKind, type DraftWithPayload } from '../drafts';
 import { bufferKey, removeBuffer, writeBuffer } from './buffer';
+import { forgetOpenEditor, rememberOpenEditor } from '../admin/workspace';
 
 export type AutosaveState = 'idle' | 'pending' | 'saving' | 'saved' | 'retrying' | 'error' | 'conflict';
 
@@ -47,6 +48,11 @@ interface Options<P> {
   payload: P;
   /** New content only: whether the form holds meaningful input yet. */
   meaningful: boolean;
+  /**
+   * Whether the editor is on screen (including while a recovery decision is pending). When given,
+   * the open editor is remembered for this browser tab so a page refresh can reopen it.
+   */
+  open?: boolean;
 }
 
 const KEEPALIVE_LIMIT = 60_000; // browsers cap keepalive bodies at 64 KB
@@ -76,7 +82,7 @@ interface Session {
 const SETTLE_MS = 1500;
 const idleSession = (): Session => ({ active: false, entityId: null, draftId: newDraftId(), revision: 0, baseVersion: null, synced: '', adoptNext: false, inFlight: null, again: false, firstDirty: 0, attempts: 0, halted: false, settleUntil: 0, userInput: false });
 
-export function useAutosave<P extends object>({ kind, userId, enabled, title, payload, meaningful }: Options<P>) {
+export function useAutosave<P extends object>({ kind, userId, enabled, title, payload, meaningful, open }: Options<P>) {
   const serialized = useMemo(() => JSON.stringify({ title, payload }), [title, payload]);
   const latest = useRef({ title, payload, serialized, enabled, meaningful });
   latest.current = { title, payload, serialized, enabled, meaningful };
@@ -86,6 +92,7 @@ export function useAutosave<P extends object>({ kind, userId, enabled, title, pa
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [conflict, setConflict] = useState<DraftWithPayload | null>(null);
+  const [starts, setStarts] = useState(0); // a new session (entity/draft) was started
   const flushRef = useRef<(o?: { keepalive?: boolean }) => Promise<boolean>>(async () => true);
 
   const keyOf = (s: Session) => bufferKey(userId, kind, s.entityId, s.draftId);
@@ -234,7 +241,19 @@ export function useAutosave<P extends object>({ kind, userId, enabled, title, pa
     setMessage(null);
     setState(opts.draft ? 'saved' : 'idle');
     setLastSavedAt(opts.draft?.updatedAt ? Date.parse(opts.draft.updatedAt) : null);
+    setStarts((n) => n + 1);
   }, []);
+
+  // Workspace restore: remember which item this open editor works on (see lib/admin/workspace).
+  useEffect(() => {
+    if (open === undefined) return;
+    const s = session.current;
+    // A new item is worth reopening only once it holds something (then it is in the local buffer).
+    if (open && s.active && (s.entityId || meaningful)) rememberOpenEditor({ userId, kind, entityId: s.entityId, draftId: s.draftId });
+    else forgetOpenEditor(kind, userId);
+  }, [open, starts, serialized, meaningful]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Leaving the desk (unmount) closes the editor; a page refresh does not unmount, so it is kept.
+  useEffect(() => () => { if (open !== undefined) forgetOpenEditor(kind, userId); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Editor closed without saving: send pending changes, keep the working copy for recovery. */
   const stop = useCallback(async () => {

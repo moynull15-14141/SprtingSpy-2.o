@@ -21,6 +21,7 @@ import TextAlign from '@tiptap/extension-text-align';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import { headingWarnings, isSafeHref, validateRichDoc, type RichDoc } from '../../../lib/richText';
+import { stripNonLibraryImages } from '../../../lib/articleEditor';
 import type { MediaItem } from '../../../types';
 import { MediaPicker } from '../media/MediaShared';
 import { useApp } from '../../../context/AppContext';
@@ -97,7 +98,11 @@ function ToolButton({ label, description, active = false, disabled = false, onCl
 const Divider = () => <span aria-hidden="true" className="mx-1 hidden h-6 w-px bg-stone-300 dark:bg-stone-700 sm:block" />;
 const dialogBtn = (primary = false) => `rounded-md border px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ${primary ? 'border-amber-600 bg-amber-700 text-white' : 'border-stone-300 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-800'}`;
 
-export default function RichTextEditor({ initialDoc, onChange, firstParagraphFocusRequest = 0, editable = true }: { initialDoc: RichDoc; onChange: (doc: RichDoc) => void; firstParagraphFocusRequest?: number; editable?: boolean }) {
+/**
+ * `inputId`/`ariaLabel` name the editable area (default: the article body). `allowMedia={false}`
+ * (edition descriptions) hides the image and gallery tools and leaves out every pasted image.
+ */
+export default function RichTextEditor({ initialDoc, onChange, firstParagraphFocusRequest = 0, editable = true, inputId = 'article-body', ariaLabel = 'Article body', allowMedia = true }: { initialDoc: RichDoc; onChange: (doc: RichDoc) => void; firstParagraphFocusRequest?: number; editable?: boolean; inputId?: string; ariaLabel?: string; allowMedia?: boolean }) {
   const [doc, setDoc] = useState<RichDoc>(initialDoc);
   const [linkOpen, setLinkOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -105,6 +110,7 @@ export default function RichTextEditor({ initialDoc, onChange, firstParagraphFoc
   const [dialog, setDialog] = useState<'news' | 'embed' | 'related' | 'mediaGroup' | 'image' | null>(null);
   const [replaceImage, setReplaceImage] = useState(false);
   const [slashPending, setSlashPending] = useState(false);
+  const [pasteNotice, setPasteNotice] = useState('');
   const { mediaItems } = useApp();
   const styleSelection = useRef<{ from: number; to: number } | null>(null);
 
@@ -118,10 +124,15 @@ export default function RichTextEditor({ initialDoc, onChange, firstParagraphFoc
     editorProps: {
       attributes: {
         class: 'prose-editor min-h-[420px] max-w-none p-4 focus:outline-none text-sm leading-relaxed',
-        id: 'article-body',
-        'aria-label': 'Article body',
+        id: inputId,
+        'aria-label': ariaLabel,
         role: 'textbox',
         'aria-multiline': 'true',
+      },
+      transformPastedHTML: (html) => {
+        const cleaned = stripNonLibraryImages(html, allowMedia);
+        setPasteNotice(cleaned.removed ? `${cleaned.removed} pasted image${cleaned.removed === 1 ? ' was' : 's were'} left out: ${allowMedia ? 'article images must come from the Media Library (use the image button).' : 'this text cannot contain images.'}` : '');
+        return cleaned.html;
       },
     },
     onUpdate: ({ editor: e }) => {
@@ -251,7 +262,7 @@ export default function RichTextEditor({ initialDoc, onChange, firstParagraphFoc
         <ToolButton label="Block Quote" description="Format selected text as a quotation" active={editor.isActive('blockquote')} onClick={() => editor.chain().focus().toggleBlockquote().run()}><Quote size={18} /></ToolButton>
         <ToolButton label="Divider" description="Insert a horizontal section divider" onClick={() => editor.chain().focus().setHorizontalRule().run()}><Minus size={18} /></ToolButton>
         <Divider />
-        <ToolButton label="Insert Image" description="Add an image from Media Library" onClick={() => setPickerOpen(true)}><ImageIcon size={18} /></ToolButton>
+        {allowMedia && <ToolButton label="Insert Image" description="Add an image from Media Library" onClick={() => setPickerOpen(true)}><ImageIcon size={18} /></ToolButton>}
         {!inTable ? (
           <ToolButton label="Insert Table" description="Add a three-column data table" onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}><TableIcon size={18} /></ToolButton>
         ) : (
@@ -273,7 +284,7 @@ export default function RichTextEditor({ initialDoc, onChange, firstParagraphFoc
         <button type="button" className={`${dialogBtn(true)} ml-auto inline-flex items-center gap-1.5`} aria-expanded={blockMenu} onClick={() => setBlockMenu((v) => !v)}><Blocks size={16}/> Add block</button>
       </div>
 
-      {blockMenu && <BlockMenu onChoose={(choice) => {
+      {blockMenu && <BlockMenu allowMedia={allowMedia} onChoose={(choice) => {
         if (choice === 'paragraph') { beforeInsert(); editor.chain().focus().setParagraph().run(); }
         else if (choice === 'heading') { beforeInsert(); editor.chain().focus().toggleHeading({ level: 2 }).run(); }
         else if (choice === 'quote') { beforeInsert(); editor.chain().focus().toggleBlockquote().run(); }
@@ -296,8 +307,9 @@ export default function RichTextEditor({ initialDoc, onChange, firstParagraphFoc
 
       <EditorContent editor={editor} />
 
-      {(warnings.length > 0 || !validity.ok) && (
+      {(warnings.length > 0 || !validity.ok || pasteNotice) && (
         <div className="p-2 border-t border-stone-200 dark:border-stone-800 space-y-0.5 text-[11px]" role="status">
+          {pasteNotice && <p className="text-amber-700 dark:text-amber-400" data-testid="paste-notice">⚠ {pasteNotice} <button type="button" className="ml-1 font-semibold underline" onClick={() => setPasteNotice('')}>Dismiss</button></p>}
           {!validity.ok && <p className="text-rose-600 dark:text-rose-400">⚠ {(validity as { error: string }).error}</p>}
           {warnings.map((w, i) => <p key={i} className="text-amber-700 dark:text-amber-400">⚠ Heading structure: {w}</p>)}
         </div>
@@ -367,7 +379,7 @@ function LinkDialog({ editor, onClose }: { editor: Editor; onClose: () => void }
 }
 
 type BlockChoice = 'paragraph' | 'heading' | 'quote' | 'image' | 'mediaGroup' | 'embed' | 'related' | 'news' | 'table' | 'code';
-function BlockMenu({ onChoose, onClose }: { onChoose: (choice: BlockChoice) => void; onClose: () => void }) {
+function BlockMenu({ onChoose, onClose, allowMedia }: { onChoose: (choice: BlockChoice) => void; onClose: () => void; allowMedia: boolean }) {
   const [query, setQuery] = useState('');
   const groups: [string, { id: BlockChoice; label: string; hint: string }[]][] = [
     ['Text', [{ id: 'paragraph', label: 'Paragraph', hint: 'Body copy' }, { id: 'heading', label: 'Heading', hint: 'Section heading' }, { id: 'quote', label: 'Quote', hint: 'Quoted text' }, { id: 'code', label: 'Code block', hint: 'Preformatted data/code' }]],
@@ -376,6 +388,7 @@ function BlockMenu({ onChoose, onClose }: { onChoose: (choice: BlockChoice) => v
     ['Data', [{ id: 'table', label: 'Responsive table', hint: 'Structured rows and columns' }]],
   ];
   const q = query.trim().toLowerCase();
+  if (!allowMedia) groups[1][1] = groups[1][1].filter((choice) => choice.id !== 'image' && choice.id !== 'mediaGroup');
   return <div className="border-b border-stone-200 bg-stone-50 p-3 dark:border-stone-800 dark:bg-stone-900" role="dialog" aria-label="Add article block">
     <div className="mb-2 flex gap-2"><input autoFocus className="min-w-0 flex-1 rounded border border-stone-300 bg-white p-2 text-xs dark:border-stone-700 dark:bg-stone-950" placeholder="Search blocks… (or type / in the editor)" value={query} onChange={(e) => setQuery(e.target.value)}/><button type="button" className={dialogBtn()} onClick={onClose}>Close</button></div>
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{groups.map(([group, choices]) => {

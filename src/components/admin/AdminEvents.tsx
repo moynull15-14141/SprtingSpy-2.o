@@ -12,12 +12,53 @@ import { findRecoverable, forgetLocal, loadNewDraft, type Recoverable } from '..
 import { AutosaveStatus, DraftRecoveryBanner, StaleSaveWarning } from './autosave/AutosaveUI';
 import { useApp } from '../../context/AppContext';
 import { Button } from '../ui/Button';
-import { EDITION_STATUSES, EditionStatus, EventEdition, SportEvent, type SeoMetadata, type SportEventFieldDefinition, type SportEventFieldValues } from '../../types';
+import { EDITION_STATUSES, EditionStatus, EventEdition, SportEvent, type MediaItem, type SeoMetadata, type SportEventFieldDefinition, type SportEventFieldValues } from '../../types';
 import { EMPTY_SEO_DRAFT, RecordList, SeoFields, cleanRecords, draftToSeo, seoToDraft, type RecordField, type SeoDraft } from './EntityFields';
 import { DynamicEventFields } from './DynamicEventFields';
 import { parseSportEventValues } from '../../../server/sportEventConfiguration';
+import dynamic from 'next/dynamic';
+import { ImagePlus, X } from 'lucide-react';
+import { MediaPicker, thumbnailUrl } from './media/MediaShared';
+import { docToPlainText, type RichDoc } from '../../lib/richText';
+import { readTabState, writeTabState } from '../../lib/admin/workspace';
+
+// The same rich-text editor as the Article body (loaded on demand, CMS only).
+const RichTextEditor = dynamic(() => import('./editor/RichTextEditor'), {
+  ssr: false,
+  loading: () => <div className="min-h-[160px] rounded-lg border border-stone-300 dark:border-stone-700 p-4 text-xs text-stone-500 dark:text-stone-400">Loading editor…</div>,
+});
+/** A plain-text description as a document: blank lines separate paragraphs, single newlines stay line breaks. */
+const plainToDoc = (text: string): RichDoc => {
+  const blocks = text.replace(/\r\n?/g, '\n').split(/\n\s*\n/).map((block) => block.trim()).filter(Boolean);
+  return { type: 'doc', content: blocks.length ? blocks.map((block) => ({ type: 'paragraph', content: block.split('\n').flatMap((line, i) => [...(i ? [{ type: 'hardBreak' }] : []), ...(line ? [{ type: 'text', text: line }] : [])]) })) : [{ type: 'paragraph' }] };
+};
 
 // PHASE H: the automatic defaults the public pages use when an SEO field is blank.
+/**
+ * Media Library image for an Event or Edition: the existing dropdown plus the picker used by
+ * Articles (browse, or upload a new image from the computer), a preview and Remove.
+ */
+function MediaImageField({ id, label, value, onChange, items }: { id: string; label: string; value: string; onChange: (url: string) => void; items: MediaItem[] }) {
+  const [picking, setPicking] = useState(false);
+  const selected = items.find((item) => item.url === value);
+  return (
+    <div className="text-xs">
+      <label htmlFor={id} className="block font-semibold mb-1">{label}</label>
+      <div className="flex flex-wrap items-center gap-2">
+        <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className="w-full sm:max-w-lg p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950">
+          <option value="">No image</option>
+          {value && !selected && <option value={value}>Existing image (not in library; preserved until changed)</option>}
+          {items.map((item) => <option key={item.id} value={item.url}>{item.title}</option>)}
+        </select>
+        <Button type="button" variant="outline" size="sm" onClick={() => setPicking(true)} data-testid={`${id}-pick`}><ImagePlus size={14} aria-hidden="true" /> Choose or upload image</Button>
+        {value && <Button type="button" variant="ghost" size="sm" onClick={() => onChange('')}><X size={14} aria-hidden="true" /> Remove</Button>}
+      </div>
+      {selected && <img src={thumbnailUrl(selected)} alt={selected.altText} className="mt-2 h-20 w-36 rounded border border-stone-200 object-cover dark:border-stone-800" />}
+      {picking && <MediaPicker onSelect={(item) => { onChange(item.url); setPicking(false); }} onClose={() => setPicking(false)} />}
+    </div>
+  );
+}
+
 const eventSeoDefaults = (name: string, description: string) => ({ title: `${name || 'Event name'} – History, Editions & Guides | SportingSpy`, description });
 const editionSeoDefaults = (title: string, description: string) => ({ title: `${title || 'Edition title'} – Official Dates, Venue & Guides | SportingSpy`, description });
 const QUICK_FACT_FIELDS: RecordField[] = [{ key: 'label', label: 'Label', placeholder: 'e.g. Surface', maxLength: 80 }, { key: 'value', label: 'Value', placeholder: 'e.g. Red clay', maxLength: 300 }];
@@ -27,11 +68,15 @@ interface EventDraftPayload {
   name: string; slug: string; shortName: string; altNames: string; faqSchema: boolean; sportSlug: string; description: string; history: string;
   venue: string; location: string; frequency: string; currentEditionYear: string; eventType: string; officialSourceUrl: string; image: string;
   seo: SeoDraft; values: SportEventFieldValues; valuesDirty: boolean;
+  /** Rich overview; working copies saved before it existed carry only `description`. */
+  descriptionBody?: RichDoc;
 }
 interface EditionDraftPayload {
   eventSlug: string; year: number; title: string; startDate: string; endDate: string; venue: string; location: string; purse: string; status: EditionStatus;
   description: string; officialSourceUrl: string; image: string; qualification: string; participants: string;
   facts: Record<string, string>[]; champions: Record<string, string>[]; faqSchema: boolean; seo: SeoDraft;
+  /** Rich description; working copies saved before it existed carry only `description`. */
+  descriptionBody?: RichDoc;
 }
 
 const wordCount = (s: string) => (s.trim() ? s.trim().split(/\s+/).length : 0);
@@ -52,7 +97,9 @@ export const AdminEvents: React.FC = () => {
     apiCall,
   } = useApp();
 
-  const [activeSubTab, setActiveSubTab] = useState<'events' | 'editions'>('events');
+  // Remembered for this browser tab, so a refresh keeps Permanent Events / Staged Editions.
+  const [activeSubTab, setActiveSubTabState] = useState<'events' | 'editions'>(() => readTabState('events-subtab', ['events', 'editions'] as const, 'events'));
+  const setActiveSubTab = (tab: 'events' | 'editions') => { setActiveSubTabState(tab); writeTabState('events-subtab', tab); };
 
   // Event form state
   const [isCreatingEvent, setIsCreatingEvent] = useState(false);
@@ -65,7 +112,9 @@ export const AdminEvents: React.FC = () => {
   const [eventFaqSchema, setEventFaqSchema] = useState(false);
   const [editionFaqSchema, setEditionFaqSchema] = useState(false);
   const [eventSportSlug, setEventSportSlug] = useState(sports[0]?.slug || 'tennis');
-  const [eventDesc, setEventDesc] = useState('');
+  const [eventDesc, setEventDesc] = useState(''); // plain-text projection of eventDescDoc (SEO default, autosave title check)
+  const [eventDescDoc, setEventDescDoc] = useState<RichDoc>(() => plainToDoc(''));
+  const [eventDescKey, setEventDescKey] = useState(0); // remounts the editor when the document is replaced
   const [eventHistory, setEventHistory] = useState('');
   const [eventVenue, setEventVenue] = useState('');
   const [eventLocation, setEventLocation] = useState('');
@@ -99,7 +148,9 @@ export const AdminEvents: React.FC = () => {
   const [editionPurse, setEditionPurse] = useState('');
   const [editionStatus, setEditionStatus] = useState<EditionStatus>('upcoming');
   const [editionStatusFilter, setEditionStatusFilter] = useState<EditionStatus | ''>('');
-  const [editionDesc, setEditionDesc] = useState('');
+  const [editionDesc, setEditionDesc] = useState(''); // plain-text projection of editionDescDoc (word count, SEO default)
+  const [editionDescDoc, setEditionDescDoc] = useState<RichDoc>(() => plainToDoc(''));
+  const [editionDescKey, setEditionDescKey] = useState(0); // remounts the editor when the document is replaced
   const [editionSourceUrl, setEditionSourceUrl] = useState('');
   const [editionImage, setEditionImage] = useState('');
   const [editionQualification, setEditionQualification] = useState('');
@@ -125,19 +176,21 @@ export const AdminEvents: React.FC = () => {
     name: eventName, slug: eventSlug, shortName: eventShortName, altNames: eventAltNames, faqSchema: eventFaqSchema, sportSlug: eventSportSlug,
     description: eventDesc, history: eventHistory, venue: eventVenue, location: eventLocation, frequency: eventFreq, currentEditionYear: eventCurrentEditionYear,
     eventType, officialSourceUrl: eventOfficialSourceUrl, image: eventImage, seo: eventSeo, values: eventValues, valuesDirty: eventValuesDirty,
+    descriptionBody: eventDescDoc,
   };
   const editionPayload: EditionDraftPayload = {
     eventSlug: editionEventSlug, year: editionYear, title: editionTitle, startDate: editionStart, endDate: editionEnd, venue: editionVenue, location: editionLocation,
     purse: editionPurse, status: editionStatus, description: editionDesc, officialSourceUrl: editionSourceUrl, image: editionImage, qualification: editionQualification,
     participants: editionParticipants, facts: editionFacts, champions: editionChampions, faqSchema: editionFaqSchema, seo: editionSeo,
+    descriptionBody: editionDescDoc,
   };
   const eventAutosave = useAutosave({
     kind: 'event', userId: currentUser.id, enabled: isCreatingEvent && !eventRecovery, title: eventName.trim() || 'Untitled event', payload: eventPayload,
-    meaningful: !!eventName.trim() || !!eventDesc.trim(),
+    meaningful: !!eventName.trim() || !!eventDesc.trim(), open: isCreatingEvent,
   });
   const editionAutosave = useAutosave({
     kind: 'edition', userId: currentUser.id, enabled: isCreatingEdition && !editionRecovery, title: editionTitle.trim() || `Untitled edition${editionYear ? ` ${editionYear}` : ''}`, payload: editionPayload,
-    meaningful: !!editionTitle.trim() || !!editionDesc.trim(),
+    meaningful: !!editionTitle.trim() || !!editionDesc.trim(), open: isCreatingEdition,
   });
   const applyEventPayload = (p: Partial<EventDraftPayload>) => {
     if (p.name !== undefined) setEventName(p.name);
@@ -146,7 +199,10 @@ export const AdminEvents: React.FC = () => {
     if (p.altNames !== undefined) setEventAltNames(p.altNames);
     if (p.faqSchema !== undefined) setEventFaqSchema(p.faqSchema);
     if (p.sportSlug !== undefined) setEventSportSlug(p.sportSlug);
-    if (p.description !== undefined) setEventDesc(p.description);
+    if (p.description !== undefined || p.descriptionBody !== undefined) {
+      const doc = p.descriptionBody ?? plainToDoc(p.description ?? '');
+      setEventDescDoc(doc); setEventDesc(docToPlainText(doc)); setEventDescKey((k) => k + 1);
+    }
     if (p.history !== undefined) setEventHistory(p.history);
     if (p.venue !== undefined) setEventVenue(p.venue);
     if (p.location !== undefined) setEventLocation(p.location);
@@ -169,7 +225,10 @@ export const AdminEvents: React.FC = () => {
     if (p.location !== undefined) setEditionLocation(p.location);
     if (p.purse !== undefined) setEditionPurse(p.purse);
     if (p.status !== undefined) setEditionStatus(p.status);
-    if (p.description !== undefined) setEditionDesc(p.description);
+    if (p.description !== undefined || p.descriptionBody !== undefined) {
+      const doc = p.descriptionBody ?? plainToDoc(p.description ?? '');
+      setEditionDescDoc(doc); setEditionDesc(docToPlainText(doc)); setEditionDescKey((k) => k + 1);
+    }
     if (p.officialSourceUrl !== undefined) setEditionSourceUrl(p.officialSourceUrl);
     if (p.image !== undefined) setEditionImage(p.image);
     if (p.qualification !== undefined) setEditionQualification(p.qualification);
@@ -195,6 +254,8 @@ export const AdminEvents: React.FC = () => {
     setEventFaqSchema(false);
     setEventSportSlug(sports[0]?.slug || 'tennis');
     setEventDesc('');
+    setEventDescDoc(plainToDoc(''));
+    setEventDescKey((k) => k + 1);
     setEventHistory('');
     setEventVenue('');
     setEventLocation('');
@@ -222,7 +283,10 @@ export const AdminEvents: React.FC = () => {
     setEventAltNames(evt.alternativeNames || '');
     setEventFaqSchema(!!evt.faqSchemaEnabled);
     setEventSportSlug(evt.sportSlug);
-    setEventDesc(evt.description);
+    const overviewDoc = evt.descriptionBody ?? plainToDoc(evt.description);
+    setEventDescDoc(overviewDoc);
+    setEventDesc(docToPlainText(overviewDoc));
+    setEventDescKey((k) => k + 1);
     setEventHistory(evt.history || '');
     setEventVenue(evt.defaultVenue || '');
     setEventLocation(evt.defaultLocation || '');
@@ -331,6 +395,8 @@ export const AdminEvents: React.FC = () => {
           shortName: eventShortName || eventName,
           sportSlug: eventSportSlug,
           description: eventDesc,
+          // The server re-validates the document and derives `description` from it.
+          descriptionBody: eventDesc.trim() ? eventDescDoc : null,
           history: eventHistory,
           defaultVenue: eventVenue.trim() || null,
           defaultLocation: eventLocation.trim() || null,
@@ -348,6 +414,8 @@ export const AdminEvents: React.FC = () => {
           shortName: eventShortName || eventName,
           sportSlug: eventSportSlug,
           description: eventDesc,
+          // The server re-validates the document and derives `description` from it.
+          descriptionBody: eventDesc.trim() ? eventDescDoc : null,
           history: eventHistory,
           defaultVenue: eventVenue.trim() || null,
           defaultLocation: eventLocation.trim() || null,
@@ -386,6 +454,8 @@ export const AdminEvents: React.FC = () => {
     setEditionPurse('');
     setEditionStatus('upcoming');
     setEditionDesc('');
+    setEditionDescDoc(plainToDoc(''));
+    setEditionDescKey((k) => k + 1);
     setEditionSourceUrl('');
     setEditionImage('');
     setEditionQualification('');
@@ -435,15 +505,28 @@ export const AdminEvents: React.FC = () => {
     forgetLocal(editionRecovery.localKey);
     setEditionRecovery(null);
   };
-  /** "Continue editing" from Unsaved Work (another CMS screen). */
+  /**
+   * "Continue editing" from Unsaved Work, or the editor that was open before a page refresh.
+   * After a refresh the CMS data may still be loading, so an existing Event/Edition is opened
+   * as soon as it appears in the loaded lists.
+   */
+  const pendingOpen = useRef<{ kind: 'event' | 'edition'; entityId: string } | null>(null);
+  useEffect(() => {
+    const pending = pendingOpen.current;
+    if (!pending) return;
+    const target = pending.kind === 'event' ? events.find((x) => x.id === pending.entityId) : editions.find((x) => x.id === pending.entityId);
+    if (!target) return;
+    pendingOpen.current = null;
+    void (pending.kind === 'event' ? openEvent(target as SportEvent) : openEdition(target as EventEdition));
+  }, [events, editions]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const req = takeOpenDraft(['event', 'edition']);
     if (!req) return;
     setActiveSubTab(req.kind === 'event' ? 'events' : 'editions');
     void (async () => {
       if (req.entityId) {
-        if (req.kind === 'event') { const evt = events.find((x) => x.id === req.entityId); if (evt) await openEvent(evt); }
-        else { const ed = editions.find((x) => x.id === req.entityId); if (ed) await openEdition(ed); }
+        if (req.kind === 'event') { const evt = events.find((x) => x.id === req.entityId); if (evt) await openEvent(evt); else pendingOpen.current = { kind: 'event', entityId: req.entityId }; }
+        else { const ed = editions.find((x) => x.id === req.entityId); if (ed) await openEdition(ed); else pendingOpen.current = { kind: 'edition', entityId: req.entityId }; }
         return;
       }
       if (!req.draftId) return;
@@ -481,7 +564,10 @@ export const AdminEvents: React.FC = () => {
     setEditionLocation(ed.location || '');
     setEditionPurse(ed.prizeMoneyTotal || '');
     setEditionStatus(ed.status);
-    setEditionDesc(ed.description);
+    const descriptionDoc = ed.descriptionBody ?? plainToDoc(ed.description);
+    setEditionDescDoc(descriptionDoc);
+    setEditionDesc(docToPlainText(descriptionDoc));
+    setEditionDescKey((k) => k + 1);
     setEditionFaqSchema(!!ed.faqSchemaEnabled);
   };
 
@@ -511,6 +597,8 @@ export const AdminEvents: React.FC = () => {
       status: editionStatus,
       prizeMoneyTotal: editionPurse.trim() || undefined,
       description: editionDesc,
+      // The server re-validates the document and derives `description` from it.
+      descriptionBody: editionDesc.trim() ? editionDescDoc : null,
       officialSourceUrl: editionSourceUrl.trim() || undefined,
       qualificationInfo: editionQualification.trim() || undefined,
       participantsCount: participants ?? undefined,
@@ -730,24 +818,15 @@ export const AdminEvents: React.FC = () => {
                 </div>
               </div>
 
-              <div className="text-xs">
-                <label htmlFor="event-image" className="block font-semibold mb-1">Event image (Media Library)</label>
-                <select id="event-image" value={eventImage} onChange={(e) => setEventImage(e.target.value)} className="w-full sm:max-w-lg p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950">
-                  <option value="">No image</option>
-                  {eventImage && !mediaItems.some((item) => item.url === eventImage) && <option value={eventImage}>Existing image (not in library; preserved until changed)</option>}
-                  {mediaItems.map((item) => <option key={item.id} value={item.url}>{item.title}</option>)}
-                </select>
-              </div>
+              <MediaImageField id="event-image" label="Event image (Media Library)" value={eventImage} onChange={setEventImage} items={mediaItems} />
 
               <div className="text-xs">
-                <label htmlFor="event-editor-field-9" className="block font-semibold mb-1">Event Overview / Scope (optional)</label>
-                <textarea id="event-editor-field-9"
-                  rows={2}
-                  value={eventDesc}
-                  onChange={(e) => setEventDesc(e.target.value)}
-                  placeholder="Permanent tournament identity and status..."
-                  className="w-full p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"
-                />
+                <span id="event-overview-label" className="block font-semibold mb-1">Event Overview / Scope (optional)</span>
+                <p className="mb-2 text-[11px] text-stone-500 dark:text-stone-400">Permanent tournament identity and status. Formatting, links, lists and tables are kept; images belong in the Event image above.</p>
+                <div className="rounded-lg border border-stone-300 bg-white dark:border-stone-700 dark:bg-stone-950" aria-labelledby="event-overview-label">
+                  <RichTextEditor key={eventDescKey} initialDoc={eventDescDoc} inputId="event-editor-field-9" ariaLabel="Event Overview / Scope" allowMedia={false} onChange={(doc) => { setEventDescDoc(doc); setEventDesc(docToPlainText(doc)); }} />
+                </div>
+                {eventDesc.length > 5000 && <p className="mt-1 font-semibold text-rose-700 dark:text-rose-400">The overview is limited to 5,000 characters of text ({eventDesc.length.toLocaleString()} now).</p>}
               </div>
 
               {dynamicLoading && <p role="status" className="text-xs">Loading Sport-specific fields…</p>}
@@ -947,21 +1026,18 @@ export const AdminEvents: React.FC = () => {
                 </div>
               </div>
 
-              <div className="text-xs">
-                <label htmlFor="edition-image" className="block font-semibold mb-1">Edition image (Media Library)</label>
-                <select id="edition-image" value={editionImage} onChange={(e) => setEditionImage(e.target.value)} className="w-full sm:max-w-lg p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950">
-                  <option value="">No image</option>
-                  {editionImage && !mediaItems.some((item) => item.url === editionImage) && <option value={editionImage}>Existing image (not in library; preserved until changed)</option>}
-                  {mediaItems.map((item) => <option key={item.id} value={item.url}>{item.title}</option>)}
-                </select>
-              </div>
+              <MediaImageField id="edition-image" label="Edition image (Media Library)" value={editionImage} onChange={setEditionImage} items={mediaItems} />
 
               <div className="text-xs">
                 <div className="mb-1 flex flex-wrap justify-between gap-2">
-                  <label htmlFor="edition-description" className="font-semibold">Short edition description</label>
+                  <span id="edition-description-label" className="font-semibold">Short edition description</span>
                   <span className={`tabular-nums ${wordCount(editionDesc) && (wordCount(editionDesc) < 80 || wordCount(editionDesc) > 150) ? 'text-amber-700 dark:text-amber-400' : 'text-stone-500 dark:text-stone-400'}`}>{wordCount(editionDesc)} words · recommended 80–150 (about 100–120)</span>
                 </div>
-                <textarea id="edition-description" rows={4} maxLength={5000} value={editionDesc} onChange={(e) => setEditionDesc(e.target.value)} placeholder="Describe this specific edition, give useful context and explain what SportingSpy covers. Do not keyword-stuff." className="w-full p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950" />
+                <p className="mb-2 text-[11px] text-stone-500 dark:text-stone-400">Describe this specific edition, give useful context and explain what SportingSpy covers. Do not keyword-stuff. Formatting, links, lists and tables are kept; images belong in the Edition image above.</p>
+                <div className="rounded-lg border border-stone-300 bg-white dark:border-stone-700 dark:bg-stone-950" aria-labelledby="edition-description-label">
+                  <RichTextEditor key={editionDescKey} initialDoc={editionDescDoc} inputId="edition-description" ariaLabel="Short edition description" allowMedia={false} onChange={(doc) => { setEditionDescDoc(doc); setEditionDesc(docToPlainText(doc)); }} />
+                </div>
+                {editionDesc.length > 5000 && <p className="mt-1 font-semibold text-rose-700 dark:text-rose-400">The description is limited to 5,000 characters of text ({editionDesc.length.toLocaleString()} now).</p>}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_12rem] gap-3 text-xs">

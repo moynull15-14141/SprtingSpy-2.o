@@ -112,3 +112,20 @@ export async function syncBodyMedia(db: Db, articleId: string, mediaIds: string[
   await db.articleMedia.deleteMany({ where: { articleId } });
   if (mediaIds.length) await db.articleMedia.createMany({ data: mediaIds.map((mediaId) => ({ articleId, mediaId })) });
 }
+
+/**
+ * Rich Event/Edition description: the same validated document format as article bodies, without
+ * images (description media is not usage-tracked; Events and Editions have their own image field).
+ * Returns the stored document (null when empty) and its plain-text projection, which stays in
+ * `description` for search, cards, meta descriptions and FAQ checks.
+ */
+export async function prepareRichDescription(input: unknown, imageField: 'Event' | 'Edition', maxText = 5000): Promise<{ error: string } | { doc: RichDoc | null; text: string }> {
+  if (input === null) return { doc: null, text: '' };
+  const prepared = await prepareRichBody(input, '', true);
+  if ('error' in prepared) return { error: `description: ${prepared.error}` };
+  if (prepared.mediaIds.length || prepared.doc.content.some(function hasMedia(n: RichNode): boolean { return n.type === 'mediaGroup' || n.type === 'image' || !!n.content?.some(hasMedia); })) {
+    return { error: `The ${imageField.toLowerCase()} description cannot contain images. Use the ${imageField} image field instead.` };
+  }
+  if (prepared.text.length > maxText) return { error: `The ${imageField.toLowerCase()} description is limited to ${maxText.toLocaleString('en-US')} characters of text.` };
+  return prepared.text.trim() ? { doc: prepared.doc, text: prepared.text } : { doc: null, text: '' };
+}

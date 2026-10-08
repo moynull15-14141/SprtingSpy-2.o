@@ -3,12 +3,14 @@
  * Clean, efficient editorial CMS for publishers, editors, and authors.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   PanelLeftClose, PanelLeftOpen, LayoutDashboard, FileText, Trophy, CalendarDays, UserSquare2, ShieldCheck,
   MessageSquare, Image, Megaphone, SearchCheck, ArrowLeftRight, ScrollText, Settings, PanelsTopLeft, HelpCircle, Files, Inbox, Tags, ChartNoAxesCombined, Route, type LucideIcon,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { requestOpenDraft } from '../../lib/autosave/api';
+import { DESK_FOR_KIND, deskFromHash, readOpenEditor } from '../../lib/admin/workspace';
 
 export type AdminTab =
   | 'dashboard'
@@ -32,13 +34,38 @@ export type AdminTab =
   | 'migration'
   | 'settings';
 
+const ALL_TABS: readonly AdminTab[] = ['dashboard', 'articles', 'sports', 'events', 'authors', 'users', 'comments', 'media', 'ads', 'seo', 'redirects', 'audit', 'site', 'faq', 'pages', 'inbox', 'types', 'insights', 'migration', 'settings'];
+const tabFromUrl = (): AdminTab => (typeof window === 'undefined' ? null : deskFromHash(window.location.hash, ALL_TABS) as AdminTab | null) ?? 'dashboard';
+
 interface AdminLayoutProps {
   children: (activeTab: AdminTab, setActiveTab: (tab: AdminTab) => void) => React.ReactNode;
 }
 
 export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
   const { currentUser, navigate, comments, redirectRules, features } = useApp();
-  const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
+  // The desk is part of the URL (/admin/#articles), so a refresh, Back and Forward keep the
+  // user where they were. On the first render after a refresh the editor that was open in
+  // this browser tab is reopened through the same handoff as "Continue editing" (Unsaved Work).
+  const [activeTab, setActiveTabState] = useState<AdminTab>(() => {
+    const tab = tabFromUrl();
+    const open = readOpenEditor(currentUser.id);
+    if (open && DESK_FOR_KIND[open.kind] === tab) requestOpenDraft({ kind: open.kind, entityId: open.entityId, draftId: open.draftId });
+    return tab;
+  });
+  const setActiveTab = useCallback((tab: AdminTab) => {
+    setActiveTabState(tab);
+    try { if (window.location.hash !== `#${tab}`) window.history.pushState(null, '', `#${tab}`); } catch { /* history unavailable */ }
+  }, []);
+  // Choosing the desk you are already on returns to its list: the desk remounts, so an open
+  // editor closes exactly as when leaving the desk (its working copy is kept).
+  const [deskKey, setDeskKey] = useState(0);
+  const chooseDesk = (tab: AdminTab) => { if (tab === activeTab) setDeskKey((k) => k + 1); else setActiveTab(tab); };
+  useEffect(() => {
+    const onNavigate = () => setActiveTabState(tabFromUrl());
+    window.addEventListener('popstate', onNavigate);
+    window.addEventListener('hashchange', onNavigate);
+    return () => { window.removeEventListener('popstate', onNavigate); window.removeEventListener('hashchange', onNavigate); };
+  }, []);
   // Collapsing the desk navigation gives the article editor more width. The
   // preference is a per-browser convenience, so storage failures are ignored.
   const [savedCollapsed, setSavedCollapsed] = useState(false);
@@ -91,6 +118,10 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
     { id: 'audit', label: 'Audit Logs', icon: ScrollText },
     ...(currentUser.role === 'Admin' ? [{ id: 'settings' as AdminTab, label: 'Settings', icon: Settings }] : []),
   ];
+  // A desk from the URL that this role does not have falls back to the Dashboard.
+  // (Comments depends on a feature flag that loads later, so it is left to its own screen.)
+  const deskAllowed = activeTab === 'comments' || NAV_ITEMS.some((item) => item.id === activeTab);
+  useEffect(() => { if (!deskAllowed) setActiveTab('dashboard'); }, [deskAllowed, setActiveTab]);
 
   return (
     <div className="cms-shell space-y-4">
@@ -145,7 +176,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
             <button
               key={item.id}
               data-cms-navigation
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => chooseDesk(item.id)}
               aria-current={activeTab === item.id ? 'page' : undefined}
               aria-label={navCollapsed ? item.label : undefined}
               title={navCollapsed ? item.label : undefined}
@@ -175,7 +206,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
 
         {/* Main Content Workspace */}
         <div className="cms-main min-w-0 rounded-2xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-[#121417] p-4 sm:p-5 shadow-sm">
-          {children(activeTab, setActiveTab)}
+          <React.Fragment key={deskKey}>{children(deskAllowed ? activeTab : 'dashboard', setActiveTab)}</React.Fragment>
         </div>
       </div>
     </div>

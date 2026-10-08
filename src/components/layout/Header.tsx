@@ -18,6 +18,9 @@ import { SportIcon } from '../ui/SportIcon';
 import { SiteLink } from '../site/SiteLink';
 import type { NavItem } from '../../lib/siteExperience/types';
 
+/** Roles that can open the CMS (the /admin access gate enforces the same list). */
+const STAFF_ROLES = ['Admin', 'Editor', 'Author'];
+
 interface HeaderProps {
   /** Visible sports for the navigation menus, loaded on the server. */
   sports: { id: string; slug: string; name: string; icon?: string | null }[];
@@ -255,12 +258,15 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
                           Role: {currentUser.role}
                         </div>
                       </div>
-                      {/* PHASE 3: no "Open Editorial CMS" link here — the public
-                          site must not advertise a navigation path to /admin.
-                          Staff who need the CMS console navigate to it directly
-                          (bookmark/URL); logging in here only establishes the
-                          session that /admin's own access gate will then honor. */}
+                      {/* PHASE 3 kept the public site from advertising /admin. The
+                          Admin panel entry below is therefore shown only inside the
+                          signed-in menu of staff (Admin, Editor, Author): anonymous
+                          visitors and Readers never see it, and /admin's own access
+                          gate still decides who may use the CMS. */}
                       <div className="pt-1">
+                        {STAFF_ROLES.includes(currentUser.role) && (
+                          <button data-testid="admin-panel-link" onClick={() => { navigate('/admin/'); setIsUserMenuOpen(false); }} className="w-full text-left px-3 py-2 text-sm font-semibold text-amber-800 hover:bg-stone-100 dark:text-amber-400 dark:hover:bg-stone-800 rounded-md">Admin panel</button>
+                        )}
                         <button onClick={() => { navigate('/account'); setIsUserMenuOpen(false); }} className="w-full text-left px-3 py-2 text-sm hover:bg-stone-100 dark:hover:bg-stone-800 rounded-md">My account & settings</button>
                         <button
                           onClick={async () => {

@@ -37,6 +37,7 @@ try {
   const create = page.getByTestId('create-article-button');
   await create.waitFor();
   await create.click();
+  await page.getByTestId('create-article-manual').click(); // PHASE 5: Create Article → Create manually
   await page.getByRole('heading', { name: 'New Article Guided Workflow' }).waitFor();
   assert.equal(await page.getByRole('columnheader', { name: 'Title & Hierarchy' }).count(), 0, 'article repository must not compete with the editor workspace');
   const title = page.getByLabel('Article Title (H1) *');

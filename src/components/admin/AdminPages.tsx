@@ -77,7 +77,7 @@ export function AdminPages() {
   const [draftIds, setDraftIds] = useState<Set<string>>(new Set());
   const autosave = useAutosave({
     kind: 'page', userId: currentUser.id, enabled: open && !recovery, title: form.title.trim() || 'Untitled page', payload: form,
-    meaningful: !!form.title.trim() || docHasText(form.body),
+    meaningful: !!form.title.trim() || docHasText(form.body), open,
   });
 
   const load = async () => {

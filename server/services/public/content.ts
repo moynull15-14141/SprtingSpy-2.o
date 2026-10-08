@@ -55,6 +55,7 @@ function toEvent(row: Prisma.SportEventGetPayload<object>): SportEvent {
   return {
     ...common,
     history: row.history ?? undefined,
+    descriptionBody: (row.descriptionBody ?? null) as unknown as RichDoc | null,
     featuredImage: row.featuredImage ?? undefined,
     officialSourceUrl: row.officialSourceUrl ?? undefined,
     eventType: row.eventType ?? undefined,
@@ -71,6 +72,7 @@ function toEdition(row: Prisma.EventEditionGetPayload<object>): EventEdition {
     qualificationInfo: row.qualificationInfo ?? undefined,
     participantsCount: row.participantsCount ?? undefined,
     officialSourceUrl: row.officialSourceUrl ?? undefined,
+    descriptionBody: (row.descriptionBody ?? null) as unknown as RichDoc | null,
     seo: row.seo as EventEdition['seo'],
   };
 }

@@ -168,7 +168,7 @@ try {
     await page.getByRole('button', { name: '+ New Permanent Event' }).click();
     assert.equal(await page.locator('#event-editor-field-5').inputValue(), '');
     assert.equal(await page.locator('#event-editor-field-6').inputValue(), '');
-    assert.equal(await page.locator('#event-editor-field-9').inputValue(), '');
+    assert.equal((await page.locator('#event-editor-field-9').innerText()).trim(), ''); // rich overview editor
     assert.equal(await page.locator('#event-image').inputValue(), '');
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.getByRole('row').filter({ hasText: 'E1 Updated Event' }).getByRole('button', { name: 'Edit', exact: true }).click();

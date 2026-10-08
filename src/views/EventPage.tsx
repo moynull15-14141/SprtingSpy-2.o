@@ -13,6 +13,7 @@ import { editionDates } from '../lib/eventDates';
 import { ContextFaq } from '../components/editorial/ContextFaq';
 import { RumPageType } from '../components/analytics/RumPageType';
 import { EventAnalytics } from '../components/editorial/EventAnalytics';
+import { RichText } from '../components/editorial/RichText';
 import type { EventEdition } from '../types';
 import type { getEventPage } from '../../server/services/public/content';
 
@@ -70,7 +71,9 @@ export const EventPage: React.FC<{ data: EventPageData }> = ({ data }) => {
         {event.description && <section aria-labelledby="about-event-heading" className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm dark:border-stone-800 dark:bg-[#121417] sm:p-7">
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-500">Overview</p>
           <h2 id="about-event-heading" className="mt-1 font-serif text-2xl font-bold">About this {terminology.event}</h2>
-          <p className="mt-4 whitespace-pre-line text-base leading-8 text-stone-700 dark:text-stone-300">{event.description}</p>
+          {event.descriptionBody
+            ? <div className="mt-4 text-base leading-8 text-stone-700 dark:text-stone-300"><RichText doc={{ ...event.descriptionBody, attrs: { dropCap: false } }} media={{}} /></div>
+            : <p className="mt-4 whitespace-pre-line text-base leading-8 text-stone-700 dark:text-stone-300">{event.description}</p>}
         </section>}
         <DynamicPublicEventFields fields={sportConfiguration.fields} values={sportSpecificValues} />
         {event.history && <section aria-labelledby="history-heading" className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm dark:border-stone-800 dark:bg-[#121417] sm:p-7">
