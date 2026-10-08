@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { extractPdf } from '../documentImport/extractPdf';
 import { extractDocx, inspectDocx } from '../documentImport/extractDocx';
-import { extractDocxInWorker } from '../documentImport/extractDocxWorker';
+import { extractDocxInWorker, extractPdfInWorker } from '../documentImport/extractDocxWorker';
 import { buildProposal, normalizeText } from '../documentImport/normalize';
 import { documentImportRouter, validateUploadedDocument } from '../documentImport/routes';
 import { DocumentImportError, type RawExtraction } from '../documentImport/types';
@@ -95,7 +95,10 @@ await rejectsCode(() => extractDocx(docx('<w:tbl></w:tbl>')), 'document_empty');
 const tooManyRows = '<w:tbl>' + (`<w:tr><w:tc>${p('x')}</w:tc></w:tr>`).repeat(501) + '</w:tbl>';
 await rejectsCode(() => extractDocx(docx(tooManyRows)), 'document_limit'); pass('DOCX table row limits remain enforced');
 const workerResult = await extractDocxInWorker(validDocx); assert.equal(workerResult.sourceType, 'docx'); pass('DOCX extraction worker preserves extraction output');
-await rejectsCode(() => extractDocxInWorker(validDocx, 1), 'document_timeout'); pass('DOCX worker is terminated at a hard deadline');
+// The worker is reused (already started), so the deadline covers parsing only: use a document that takes real work.
+const slowDocx = docx(p('Long paragraph of extraction work. '.repeat(40)).repeat(9000));
+await rejectsCode(() => extractDocxInWorker(slowDocx, 5), 'document_timeout'); pass('DOCX worker is terminated at a hard deadline');
+assert.equal((await extractDocxInWorker(validDocx)).sourceType, 'docx'); pass('a new worker replaces the terminated one for the next document');
 await rejectsCode(() => extractDocx(docx(p(''))), 'document_empty'); pass('empty DOCX rejected clearly');
 await rejectsCode(() => extractDocx(Buffer.from('PK\x03\x04broken')), 'type_mismatch'); pass('malformed DOCX rejected safely');
 
@@ -107,6 +110,23 @@ const multiplePdf = await extractPdf(pdf('layout', 'BT /F1 24 Tf 72 730 Td (Prim
 const labeledOverride = buildProposal(await extractPdf(pdf('layout', 'BT /F1 24 Tf 72 730 Td (Visual Heading) Tj /F1 12 Tf 0 -50 Td (TITLE: Explicit Title) Tj ET'))); assert.equal(labeledOverride.fields.title.value, 'Explicit Title'); assert.equal(labeledOverride.fields.title.confidence, 'HIGH'); pass('explicit PDF TITLE overrides a visual heading candidate');
 await rejectsCode(() => extractPdf(pdf()), 'ocr_required'); pass('image-only/blank PDF reports OCR required');
 await rejectsCode(() => extractPdf(Buffer.from('%PDF-broken')), 'document_unreadable'); pass('malformed PDF rejected safely');
+
+// The HTTP thread stays responsive while PDFs are parsed (a blocked event loop showed up on Render as 502s).
+const busyPdf = pdf('layout', `BT /F1 10 Tf 72 780 Td ${Array.from({ length: 1500 }, (_, i) => `(Line ${i} of a long extraction test document with plenty of words) Tj 0 -0.5 Td`).join(' ')} ET`);
+let maxGap = 0, last = Date.now();
+const ticker = setInterval(() => { const now = Date.now(); maxGap = Math.max(maxGap, now - last); last = now; }, 5);
+const busyResult = await extractPdfInWorker(busyPdf);
+clearInterval(ticker);
+assert.equal(busyResult.sourceType, 'pdf'); assert(busyResult.sections.some((section) => section.text.includes('Line 1499')));
+assert(maxGap < 250, `event loop was blocked for ${maxGap} ms during PDF extraction`);
+pass(`PDF extraction runs in the worker; the HTTP thread stayed responsive (longest pause ${maxGap} ms)`);
+const parallel = await Promise.all([extractPdfInWorker(pdf('TITLE: One')), extractDocxInWorker(validDocx), extractPdfInWorker(pdf('TITLE: Two'))]);
+assert.deepEqual(parallel.map((r) => r.sourceType), ['pdf', 'docx', 'pdf']);
+pass('concurrent PDF and DOCX uploads are queued through one worker and all succeed');
+const flood = await Promise.allSettled(Array.from({ length: 8 }, () => extractPdfInWorker(pdf('TITLE: Flood'))));
+assert(flood.some((r) => r.status === 'fulfilled'));
+assert(flood.filter((r) => r.status === 'rejected').every((r) => (r as PromiseRejectedResult).reason?.code === 'extractor_busy'));
+pass('beyond a short queue, extra uploads get a clear "busy" answer instead of piling up');
 
 const fake = (buffer: Buffer, name: string, mimetype: string) => ({ buffer, originalname: name, mimetype } as Express.Multer.File);
 assert.equal(validateUploadedDocument(fake(pdf('x'), 'article.pdf', 'application/pdf')), 'pdf');

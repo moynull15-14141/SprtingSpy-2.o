@@ -3,9 +3,8 @@ import multer from 'multer';
 import path from 'node:path';
 import { requireRole, type AuthLookup } from '../auth';
 import { createRateLimiter } from '../rateLimit';
-import { extractPdf } from './extractPdf';
 import { inspectDocx } from './extractDocx';
-import { extractDocxInWorker } from './extractDocxWorker';
+import { extractDocxInWorker, extractPdfInWorker } from './extractDocxWorker';
 import { buildProposal } from './normalize';
 import { extractManualText } from './extractText';
 import { DocumentImportError, type DocumentSourceType } from './types';
@@ -15,18 +14,6 @@ const PDF_MIMES = new Set(['application/pdf']);
 const DOCX_MIMES = new Set(['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/octet-stream']);
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_DOCUMENT_BYTES, files: 1, fields: 0, parts: 2 } });
 const limiter = createRateLimiter(60_000, 20);
-
-async function withExtractionTimeout<T>(work: Promise<T>): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      work,
-      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new DocumentImportError('Document extraction timed out.', 422, 'document_timeout')), 15_000); }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
 
 export function validateUploadedDocument(file: Express.Multer.File): DocumentSourceType {
   const ext = path.extname(path.basename(file.originalname)).toLowerCase();
@@ -56,7 +43,7 @@ export function documentImportRouter(getLookup: () => AuthLookup) {
         if (!req.file.buffer.length) throw new DocumentImportError('The document is empty.', 422, 'document_empty');
         const type = validateUploadedDocument(req.file);
         const extraction = type === 'pdf'
-          ? await withExtractionTimeout(extractPdf(req.file.buffer))
+          ? await extractPdfInWorker(req.file.buffer)
           : await extractDocxInWorker(req.file.buffer);
         return res.json(buildProposal(extraction));
       })().catch((error) => error instanceof DocumentImportError ? res.status(error.status).json({ error: error.message, code: error.code }) : next(error));
