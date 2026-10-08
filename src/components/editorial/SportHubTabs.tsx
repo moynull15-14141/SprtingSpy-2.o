@@ -11,6 +11,8 @@ type Tab = 'all' | 'articles' | 'events' | 'guides';
  */
 export function SportHubTabs(props: {
   hero: React.ReactNode;
+  /** Optional decorative image on the right of the header card (fades into the card from the left). */
+  backdrop?: React.ReactNode;
   ad: React.ReactNode;
   featuredSection: React.ReactNode;
   upcomingSection: React.ReactNode;
@@ -32,7 +34,16 @@ export function SportHubTabs(props: {
 
   return (
     <>
-      <div className="rounded-2xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-[#121417] p-6 sm:p-8 lg:p-10 shadow-sm">
+      <div className="relative isolate overflow-hidden rounded-2xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-[#121417] p-6 sm:p-8 lg:p-10 shadow-sm">
+        {props.backdrop && (
+          // The image fills the right part of the card; a gradient from the card colour (left) to
+          // transparent (right) keeps the text readable and leaves the far right of the image clear.
+          // On phones the fade stays strong across the whole width so the text remains legible.
+          <div aria-hidden="true" data-testid="sport-hero-backdrop" className="pointer-events-none absolute inset-y-0 right-0 -z-10 w-full sm:w-[70%] lg:w-[58%] [&_img]:h-full [&_img]:w-full [&_img]:object-cover [&_picture]:block [&_picture]:h-full">
+            {props.backdrop}
+            <div className="absolute inset-0 bg-gradient-to-r from-white via-white/75 to-white/0 max-sm:via-white/90 max-sm:to-white/55 dark:from-[#121417] dark:via-[#121417]/75 dark:to-[#121417]/0 max-sm:dark:via-[#121417]/90 max-sm:dark:to-[#121417]/55" />
+          </div>
+        )}
         {props.hero}
 
         <div className="mt-8 pt-6 border-t border-stone-100 dark:border-stone-800/80 flex flex-wrap gap-2" role="group" aria-label="Filter this hub">

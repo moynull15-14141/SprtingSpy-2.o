@@ -352,8 +352,13 @@ export async function getSportHub(slug: string) {
   const chosen = sport.featuredEventIds.map((id) => featuredRows.find((e) => e.id === id)).filter((e): e is NonNullable<typeof e> => !!e);
   const featuredEvents = await summarizeEvents(chosen.length ? chosen.slice(0, HUB_LIMITS.featuredEvents) : flaggedRows);
   const editionCard = (ed: Prisma.EventEditionGetPayload<object>) => ({ ...toEdition(ed), sportName: sport.name, url: editionPath(ed.sportSlug, ed.eventSlug, ed.year) });
+  // Hub header image: the sport's Media Library image (responsive sources), else its stored URL.
+  const heroImage: MediaAsset | null = sport.heroMediaId
+    ? (await mediaAssets([sport.heroMediaId]))[sport.heroMediaId] ?? null
+    : sport.heroImage ? { id: `sport-${sport.id}`, url: sport.heroImage, width: null, height: null, alt: '', sources: [] } : null;
   return {
     sport,
+    heroImage,
     faqSchemaEnabled: !!sport.faqSchemaEnabled,
     featuredEvents,
     upcomingEditions: upcomingRows.map(editionCard),

@@ -77,6 +77,7 @@
     "test:article-editor-browser": "tsx server/scripts/verify-article-editor-browser.ts",
     "test:event-edition-editor-browser": "tsx server/scripts/verify-event-edition-editor-browser.ts",
     "test:workspace-restore-browser": "tsx server/scripts/verify-workspace-restore-browser.ts",
+    "test:sport-hero-browser": "tsx server/scripts/verify-sport-hero-browser.ts",
     "media:copy-to-r2": "tsx server/scripts/media-local-to-r2.ts",
     "perf:seed": "tsx server/scripts/perf-seed.ts",
     "perf:scale": "tsx server/scripts/perf-scale.ts",

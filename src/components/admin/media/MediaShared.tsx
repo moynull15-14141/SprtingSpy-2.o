@@ -7,7 +7,7 @@
 
 import React, { useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Upload } from 'lucide-react';
+import { ImagePlus, Upload, X } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { Button } from '../../ui/Button';
 import type { CopyrightReview, MediaCreationType, MediaItem } from '../../../types';
@@ -165,4 +165,30 @@ export function MediaPicker({ onSelect, onClose }: { onSelect: (item: MediaItem)
     </div>
   );
   return typeof document === 'undefined' ? dialog : createPortal(dialog, document.body);
+}
+
+/**
+ * Media Library image field (Sports, Events, Editions): the dropdown plus the picker used by
+ * Articles (browse, or upload a new image from the computer), a preview and Remove.
+ */
+export function MediaImageField({ id, label, value, onChange, items, hint }: { id: string; label: string; value: string; onChange: (url: string) => void; items: MediaItem[]; hint?: string }) {
+  const [picking, setPicking] = useState(false);
+  const selected = items.find((item) => item.url === value);
+  return (
+    <div className="text-xs">
+      <label htmlFor={id} className="block font-semibold mb-1">{label}</label>
+      <div className="flex flex-wrap items-center gap-2">
+        <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className="w-full sm:max-w-lg p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950">
+          <option value="">No image</option>
+          {value && !selected && <option value={value}>Existing image (not in library; preserved until changed)</option>}
+          {items.map((item) => <option key={item.id} value={item.url}>{item.title}{item.copyrightReview === 'restricted' ? ' (restricted)' : ''}</option>)}
+        </select>
+        <Button type="button" variant="outline" size="sm" onClick={() => setPicking(true)} data-testid={`${id}-pick`}><ImagePlus size={14} aria-hidden="true" /> Choose or upload image</Button>
+        {value && <Button type="button" variant="ghost" size="sm" onClick={() => onChange('')}><X size={14} aria-hidden="true" /> Remove</Button>}
+      </div>
+      {hint && <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400">{hint}</p>}
+      {selected && <img src={thumbnailUrl(selected)} alt={selected.altText} className="mt-2 h-20 w-36 rounded border border-stone-200 object-cover dark:border-stone-800" />}
+      {picking && <MediaPicker onSelect={(item) => { onChange(item.url); setPicking(false); }} onClose={() => setPicking(false)} />}
+    </div>
+  );
 }

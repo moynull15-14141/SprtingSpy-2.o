@@ -20,6 +20,7 @@ import { JsonLd } from '../components/seo/JsonLd';
 import { absoluteUrl, sportPath } from '../lib/paths';
 import type { getSportHub } from '../../server/services/public/content';
 import { PlacedBlocks } from '../components/site/GlobalBlocks';
+import { ResponsiveImage } from '../components/editorial/ResponsiveImage';
 
 type SportHubData = NonNullable<Awaited<ReturnType<typeof getSportHub>>>;
 
@@ -40,7 +41,7 @@ const EditionLink: React.FC<{ ed: SportHubData['upcomingEditions'][number] }> = 
 );
 
 export const SportPage: React.FC<{ data: SportHubData }> = ({ data }) => {
-  const { sport, featuredEvents, upcomingEditions, latestArticles, articleTotal, events, eventTotal, guides, guideTotal, recentEditions, faqs, faqSchemaEnabled } = data;
+  const { sport, featuredEvents, upcomingEditions, latestArticles, articleTotal, events, eventTotal, guides, guideTotal, recentEditions, faqs, faqSchemaEnabled, heroImage } = data;
 
   // A sport hub is a collection of pages about one sport.
   const structuredData = {
@@ -62,6 +63,7 @@ export const SportPage: React.FC<{ data: SportHubData }> = ({ data }) => {
 
       <SportHubTabs
         counts={{ all: articleTotal + eventTotal, events: eventTotal, articles: articleTotal - guideTotal, guides: guideTotal }}
+        backdrop={heroImage ? <ResponsiveImage asset={heroImage} alt="" sizes="(min-width: 1024px) 58vw, (min-width: 640px) 70vw, 100vw" priority /> : undefined}
         hero={
           <div className="max-w-3xl">
             <div className="text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-500 mb-2">Sport hub</div>

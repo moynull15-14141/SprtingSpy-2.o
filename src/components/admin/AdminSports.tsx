@@ -20,6 +20,7 @@ import { useApp } from '../../context/AppContext';
 import { Sport } from '../../types';
 import { Button } from '../ui/Button';
 import { EventConfigurationEditor } from './EventConfigurationEditor';
+import { MediaImageField } from './media/MediaShared';
 import { SeoFields, seoToDraft, draftToSeo, EMPTY_SEO_DRAFT, type SeoDraft } from './EntityFields';
 
 export const AdminSports: React.FC = () => {
@@ -246,13 +247,7 @@ export const AdminSports: React.FC = () => {
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label htmlFor="sport-hero-image" className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">Sport image / logo (Media Library)</label>
-              <select id="sport-hero-image" value={heroImage} onChange={(e) => setHeroImage(e.target.value)} className="w-full text-xs p-2 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950">
-                <option value="">No image</option>
-                {heroImage && !mediaItems.some((m) => m.url === heroImage) && <option value={heroImage}>Existing image (not in library; preserved until changed)</option>}
-                {mediaItems.map((m) => <option key={m.id} value={m.url}>{m.title}{m.copyrightReview === 'restricted' ? ' (restricted)' : ''}</option>)}
-              </select>
-              <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400">Images come from the Media Library so their rights, alt text and responsive sizes are tracked.</p>
+              <MediaImageField id="sport-hero-image" label="Sport image / logo (Media Library)" value={heroImage} onChange={setHeroImage} items={mediaItems} hint="Shown on the right side of the sport hub header. Images come from the Media Library so their rights, alt text and responsive sizes are tracked." />
             </div>
             <label className="flex items-start gap-2 pt-6 text-xs">
               <input type="checkbox" checked={faqSchemaEnabled} onChange={(e) => setFaqSchemaEnabled(e.target.checked)} className="mt-0.5" />

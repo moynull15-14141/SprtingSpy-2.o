@@ -12,13 +12,12 @@ import { findRecoverable, forgetLocal, loadNewDraft, type Recoverable } from '..
 import { AutosaveStatus, DraftRecoveryBanner, StaleSaveWarning } from './autosave/AutosaveUI';
 import { useApp } from '../../context/AppContext';
 import { Button } from '../ui/Button';
-import { EDITION_STATUSES, EditionStatus, EventEdition, SportEvent, type MediaItem, type SeoMetadata, type SportEventFieldDefinition, type SportEventFieldValues } from '../../types';
+import { EDITION_STATUSES, EditionStatus, EventEdition, SportEvent, type SeoMetadata, type SportEventFieldDefinition, type SportEventFieldValues } from '../../types';
 import { EMPTY_SEO_DRAFT, RecordList, SeoFields, cleanRecords, draftToSeo, seoToDraft, type RecordField, type SeoDraft } from './EntityFields';
 import { DynamicEventFields } from './DynamicEventFields';
 import { parseSportEventValues } from '../../../server/sportEventConfiguration';
 import dynamic from 'next/dynamic';
-import { ImagePlus, X } from 'lucide-react';
-import { MediaPicker, thumbnailUrl } from './media/MediaShared';
+import { MediaImageField } from './media/MediaShared';
 import { docToPlainText, type RichDoc } from '../../lib/richText';
 import { readTabState, writeTabState } from '../../lib/admin/workspace';
 
@@ -34,31 +33,6 @@ const plainToDoc = (text: string): RichDoc => {
 };
 
 // PHASE H: the automatic defaults the public pages use when an SEO field is blank.
-/**
- * Media Library image for an Event or Edition: the existing dropdown plus the picker used by
- * Articles (browse, or upload a new image from the computer), a preview and Remove.
- */
-function MediaImageField({ id, label, value, onChange, items }: { id: string; label: string; value: string; onChange: (url: string) => void; items: MediaItem[] }) {
-  const [picking, setPicking] = useState(false);
-  const selected = items.find((item) => item.url === value);
-  return (
-    <div className="text-xs">
-      <label htmlFor={id} className="block font-semibold mb-1">{label}</label>
-      <div className="flex flex-wrap items-center gap-2">
-        <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className="w-full sm:max-w-lg p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950">
-          <option value="">No image</option>
-          {value && !selected && <option value={value}>Existing image (not in library; preserved until changed)</option>}
-          {items.map((item) => <option key={item.id} value={item.url}>{item.title}</option>)}
-        </select>
-        <Button type="button" variant="outline" size="sm" onClick={() => setPicking(true)} data-testid={`${id}-pick`}><ImagePlus size={14} aria-hidden="true" /> Choose or upload image</Button>
-        {value && <Button type="button" variant="ghost" size="sm" onClick={() => onChange('')}><X size={14} aria-hidden="true" /> Remove</Button>}
-      </div>
-      {selected && <img src={thumbnailUrl(selected)} alt={selected.altText} className="mt-2 h-20 w-36 rounded border border-stone-200 object-cover dark:border-stone-800" />}
-      {picking && <MediaPicker onSelect={(item) => { onChange(item.url); setPicking(false); }} onClose={() => setPicking(false)} />}
-    </div>
-  );
-}
-
 const eventSeoDefaults = (name: string, description: string) => ({ title: `${name || 'Event name'} – History, Editions & Guides | SportingSpy`, description });
 const editionSeoDefaults = (title: string, description: string) => ({ title: `${title || 'Edition title'} – Official Dates, Venue & Guides | SportingSpy`, description });
 const QUICK_FACT_FIELDS: RecordField[] = [{ key: 'label', label: 'Label', placeholder: 'e.g. Surface', maxLength: 80 }, { key: 'value', label: 'Value', placeholder: 'e.g. Red clay', maxLength: 300 }];
