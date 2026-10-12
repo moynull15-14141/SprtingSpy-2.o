@@ -31,6 +31,8 @@ export interface CmsArticleHit {
   authorName: string;
   featuredImage: string;
   url: string;
+  /** Set when the article was imported from the old WordPress site. */
+  importRecord?: { source: string; sourceId: string; sourceTitle: string; sourceUrl: string } | null;
 }
 
 export interface CmsArticleSearchParams {
@@ -47,6 +49,7 @@ export interface CmsArticleSearchParams {
   publicOnly?: boolean;
   reviewStatus?: string;
   myDrafts?: boolean;
+  origin?: string;
 }
 
 interface Response { items: CmsArticleHit[]; total: number; page: number; pageSize: number; totalPages: number; mode: string }

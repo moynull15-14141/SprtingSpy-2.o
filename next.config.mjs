@@ -17,6 +17,10 @@ const nextConfig = {
   // Database drivers stay as regular Node modules instead of being bundled.
   serverExternalPackages: ['pg', '@prisma/adapter-pg', '@prisma/client'],
   images: { unoptimized: true },
+  // Development only: Next serves its dev scripts and live-reload socket to
+  // "localhost" alone by default, so the app opened as http://127.0.0.1:PORT
+  // never becomes interactive (the CMS stays on "Checking session"). No effect in production.
+  allowedDevOrigins: ['127.0.0.1'],
   // PHASE G: media URLs are built in server AND client components (the CMS
   // Media Library), so the public media base is inlined at build time.
   // It is a public URL (it appears in every page). Rebuild after changing it.

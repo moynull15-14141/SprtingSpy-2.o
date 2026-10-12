@@ -36,6 +36,7 @@ import { useApp } from '../../context/AppContext';
 import { Article, ArticleType, SeoMetadata } from '../../types';
 import { Button } from '../ui/Button';
 import { useArticleSearch } from './useArticleSearch';
+import { ImportSourceBadge, ImportSourceNote } from './ImportSource';
 import { FileInput, PenLine } from 'lucide-react';
 import { DocumentImportReview } from './DocumentImportReview';
 import type { CmsTransfer, PendingFaq } from '../../lib/documentImport';
@@ -664,6 +665,7 @@ export const AdminArticles: React.FC = () => {
               <h4 id="title-hierarchy-heading" className="text-[11px] font-bold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-400">Title &amp; hierarchy</h4>
               <code className="max-w-full truncate rounded bg-stone-100 px-2 py-0.5 text-[10px] text-stone-600 dark:bg-stone-900 dark:text-stone-300" title="Public URL">/{sportSlug}/{eventSlug ? `${eventSlug}/${editionYear || 'edition'}/` : ''}{slug || 'article-slug'}/</code>
             </div>
+            <ImportSourceNote articleId={editingId} />
             <div>
               <label className="sr-only" htmlFor="article-title">Article Title (H1) *</label>
               <input type="text" required value={title} onChange={(e) => handleTitleChange(e.target.value)} placeholder="Article title (H1) — e.g. 2027 French Open Schedule & Daily Order of Play" id="article-title" className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-serif text-lg font-semibold dark:border-stone-700 dark:bg-stone-950" />
@@ -1214,11 +1216,12 @@ function ArticleRepository({ reloadKey, sports, authors, onView, onEdit, onRevie
   const [type, setType] = useState('');
   const [author, setAuthor] = useState('');
   const [date, setDate] = useState('');
+  const [origin, setOrigin] = useState('');
   const [sort, setSort] = useState('relevance');
   const [page, setPage] = useState(1);
-  const { data, loading, error } = useArticleSearch({ q, status, sport, type, author, date, sort, page, limit: 25, reviewStatus: ['in_review','changes_requested','approved'].includes(queue) ? queue : undefined, myDrafts: queue === 'my_drafts' ? true : undefined }, { reloadKey });
+  const { data, loading, error } = useArticleSearch({ q, status, sport, type, author, date, origin, sort, page, limit: 25, reviewStatus: ['in_review','changes_requested','approved'].includes(queue) ? queue : undefined, myDrafts: queue === 'my_drafts' ? true : undefined }, { reloadKey });
   const set = (setter: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => { setter(e.target.value); setPage(1); };
-  const filtered = !!(q || status || sport || type || author || date);
+  const filtered = !!(q || status || sport || type || author || date || origin);
 
   return (
     <div className="space-y-3">
@@ -1258,6 +1261,13 @@ function ArticleRepository({ reloadKey, sports, authors, onView, onEdit, onRevie
             <option value="">Any time</option><option value="today">Today</option><option value="week">Last 7 days</option><option value="month">Last 30 days</option><option value="year">This year</option>
           </select>
         </label>
+        <label className="text-[11px] font-semibold text-stone-500 dark:text-stone-400">Source
+          <select value={origin} onChange={set(setOrigin)} className={`mt-1 block ${filterClass}`} data-testid="origin-filter">
+            <option value="">All sources</option>
+            <option value="wordpress">WordPress imports</option>
+            <option value="original">Written in the CMS</option>
+          </select>
+        </label>
         <label className="text-[11px] font-semibold text-stone-500 dark:text-stone-400">Sort
           <select value={sort} onChange={set(setSort)} className={`mt-1 block ${filterClass}`}>
             <option value="relevance">{q ? 'Relevance' : 'Newest'}</option>
@@ -1265,7 +1275,7 @@ function ArticleRepository({ reloadKey, sports, authors, onView, onEdit, onRevie
             <option value="oldest">Oldest</option>
           </select>
         </label>
-        {filtered && <button type="button" onClick={() => { setQ(''); setStatus(''); setSport(''); setType(''); setAuthor(''); setDate(''); setSort('relevance'); setPage(1); }} className="pb-2 text-xs font-semibold text-amber-700 hover:underline dark:text-amber-500">Clear</button>}
+        {filtered && <button type="button" onClick={() => { setQ(''); setStatus(''); setSport(''); setType(''); setAuthor(''); setDate(''); setOrigin(''); setSort('relevance'); setPage(1); }} className="pb-2 text-xs font-semibold text-amber-700 hover:underline dark:text-amber-500">Clear</button>}
       </div>
 
       <p className="text-[11px] text-stone-500 dark:text-stone-400" aria-live="polite">
@@ -1294,6 +1304,7 @@ function ArticleRepository({ reloadKey, sports, authors, onView, onEdit, onRevie
                 <td className="p-3 max-w-xs">
                   <p className="font-semibold text-stone-900 dark:text-stone-100 truncate">{art.title}</p>
                   {unsavedIds?.has(art.id) && <span className="mt-0.5 inline-block rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-900 dark:bg-sky-950 dark:text-sky-300" data-testid="unsaved-badge">Unsaved changes</span>}
+                  <ImportSourceBadge record={art.importRecord} currentTitle={art.title} />
                   <p className="text-[11px] text-stone-500 truncate font-mono dark:text-stone-400">
                     {art.eventSlug ? `${art.eventSlug}${art.editionYear ? ` (${art.editionYear})` : ''} / ` : ''}{art.slug}
                   </p>

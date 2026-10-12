@@ -109,6 +109,7 @@ export function searchRouter(getAuthLookup: () => AuthLookup) {
       authorId: p.author ? author?.id ?? '__none__' : undefined, from: p.from, to: p.to, sort: p.sort,
       ownerUserId: ctx.role === 'Author' && !p.publicOnly ? ctx.userId : undefined,
       reviewStatus: p.publicOnly ? undefined : p.reviewStatus,
+      origin: p.publicOnly ? undefined : p.origin,
       draftsOnly: p.myDrafts,
       myDraftsUserId: p.myDrafts && ctx.role === 'Author' ? ctx.userId : undefined,
       page: p.page, limit: p.limit, excludeId: idParam(req.query.exclude),
@@ -119,7 +120,7 @@ export function searchRouter(getAuthLookup: () => AuthLookup) {
           select: {
             id: true, title: true, slug: true, status: true, sportSlug: true, eventSlug: true, editionYear: true, articleType: true,
             excerpt: true, publishedAt: true, reviewedAt: true, scheduledFor: true, authorId: true, featuredImage: true,
-            ...(!p.publicOnly ? {reviewStatus:true,reviewerId:true} as const : {}),
+            ...(!p.publicOnly ? {reviewStatus:true,reviewerId:true,importRecord:{select:{source:true,sourceId:true,sourceTitle:true,sourceUrl:true}}} as const : {}),
             sport: { select: { name: true } }, author: { select: { name: true } },
           },
         })

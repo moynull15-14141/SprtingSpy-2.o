@@ -44,6 +44,8 @@ export interface ArticleSearchParams {
   authorId?: string;
   ownerUserId?: string;
   reviewStatus?: string;
+  /** Staff scope only: 'wordpress' = imported from the old site, 'original' = written in the CMS. */
+  origin?: 'wordpress' | 'original';
   draftsOnly?: boolean;
   myDraftsUserId?: string;
   /** Staff scope only; ignored for public scope. */
@@ -124,6 +126,8 @@ function filters(p: ArticleSearchParams): Prisma.Sql[] {
     where.push(Prisma.sql`EXISTS (SELECT 1 FROM "Author" own WHERE own."id" = a."authorId" AND own."userId" = ${p.myDraftsUserId})`);
   }
   if (p.reviewStatus) where.push(Prisma.sql`a."reviewStatus"::text = ${p.reviewStatus}`);
+  if (p.scope === 'staff' && p.origin === 'wordpress') where.push(Prisma.sql`EXISTS (SELECT 1 FROM "ArticleImport" im WHERE im."articleId" = a."id" AND im."source" = 'wordpress')`);
+  if (p.scope === 'staff' && p.origin === 'original') where.push(Prisma.sql`NOT EXISTS (SELECT 1 FROM "ArticleImport" im WHERE im."articleId" = a."id")`);
   if (p.from) where.push(Prisma.sql`a."publishedAt" >= ${p.from}`);
   if (p.to) where.push(Prisma.sql`a."publishedAt" < ${p.to}`);
   if (p.excludeId) where.push(Prisma.sql`a."id" <> ${p.excludeId}`);

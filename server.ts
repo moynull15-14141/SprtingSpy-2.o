@@ -29,6 +29,8 @@ import { rejectNestedCmsWrites } from './server/cmsFields';
 import { deploymentConfig, DeploymentConfigError, enforceProductionTransport } from './server/deployment';
 import { prisma } from './server/db';
 import { articleReadWhere, authorWriteGuard, editorialWorkflowRouter, WorkflowError } from './server/editorialWorkflow';
+import { initialReviewStatus, parseImportSource } from './src/lib/editorialWorkflow';
+import { checkPilotIsolation } from './server/wordpressImport/isolation';
 import { Prisma } from './server/generated/prisma/client';
 import { Role, ARTICLE_TYPES, EDITION_STATUSES, AD_PROVIDERS, UNPLACED_AD_SLOTS } from './src/types';
 import { isSportIcon } from './src/config/sportIcons';
@@ -248,7 +250,23 @@ async function publishScheduledArticles(): Promise<number> {
   return published;
 }
 
+/**
+ * WordPress migration pilot: with this flag the process refuses to run unless
+ * its whole environment is the isolated pilot (local pilot database, local
+ * media, no outbound keys). Checked before the first query and again after
+ * Next.js has loaded, when every environment source has been read.
+ */
+function enforcePilotIsolation(stage: string) {
+  if (process.env.SPORTINGSPY_REQUIRE_PILOT_ISOLATION !== '1') return;
+  const check = checkPilotIsolation(process.env);
+  if (!check.safe) {
+    console.error(`[FATAL] Pilot isolation check failed (${stage}): ${check.problems.join(' ')}`);
+    process.exit(1);
+  }
+}
+
 async function startServer() {
+  enforcePilotIsolation('startup');
   const deployment = deploymentConfig();
   // Keep image URL validation and the CSP in sync before accepting traffic.
   profileImageOrigins();
@@ -699,6 +717,16 @@ async function startServer() {
       const body: Record<string, any> = req.body;
 
       const authorizedByline = await authorWriteGuard(req.authContext!, body);
+      const review = initialReviewStatus(role, body);
+      if ('error' in review) return res.status(400).json({ error: review.error });
+      // Where an imported article came from: a label for editors, staff only, and only on a review-required draft.
+      const imported = parseImportSource(body);
+      if ('error' in imported) return res.status(400).json({ error: imported.error });
+      if (imported.importSource && role === 'Author') return res.status(403).json({ error: 'Only an Admin or Editor can import articles.' });
+      if (imported.importSource) {
+        const already = await prisma.articleImport.findUnique({ where: { source_sourceId: { source: imported.importSource.source, sourceId: imported.importSource.sourceId } }, select: { articleId: true } });
+        if (already) return res.status(409).json({ error: `This source post was already imported as article ${already.articleId}.` });
+      }
 
       if (!body.title || !body.sportSlug || (!body.content && !body.body)) {
         return res.status(400).json({ error: 'Missing required article fields: title, sportSlug, body.' });
@@ -795,7 +823,7 @@ async function startServer() {
           updatedAt: now,
           scheduledFor,
           status: body.status || 'draft',
-          reviewStatus: role === 'Author' ? 'draft' : 'not_required',
+          reviewStatus: review.reviewStatus,
           readingTimeMinutes: body.readingTimeMinutes || Math.max(1, Math.ceil((body.content || '').split(' ').length / 200)),
           featured: body.featured || false,
           tables: body.tables ?? undefined,
@@ -806,6 +834,7 @@ async function startServer() {
         },
         });
         await syncBodyMedia(tx, created.id, prepared.bodyMediaIds || []);
+        if (imported.importSource) await tx.articleImport.create({ data: { articleId: created.id, ...imported.importSource } });
         // A published article must not be shadowed by an old redirect at its URL.
         if (created.status === 'published') {
           await releasePath(tx, articlePath(created), `Deactivated ${now.toISOString()}: article ${created.id} is published here.`);
@@ -1739,6 +1768,16 @@ async function startServer() {
       return res.json(article);
     })
   );
+  // Where an imported article came from (null for an article written in the CMS). Read-only.
+  app.get(
+    '/api/articles/:id/import-source',
+    requireRole(getAuthLookup, ['Admin', 'Editor', 'Author']),
+    asyncHandler(async (req: Request, res: Response) => {
+      const article = await prisma.article.findFirst({ where: { AND: [{ id: req.params.id }, articleReadWhere(req.authContext!)] }, select: { importRecord: { select: { source: true, sourceId: true, sourceTitle: true, sourceUrl: true, importedAt: true } } } });
+      if (!article) return res.status(404).json({ error: 'Article not found.' });
+      return res.json({ importSource: article.importRecord });
+    })
+  );
   app.use('/api/media', mediaRouter(getAuthLookup));
   app.use('/api/ad-creatives', adCreativesRouter(getAuthLookup));
   app.use('/api/settings', settingsRouter(getAuthLookup));
@@ -2219,6 +2258,7 @@ async function startServer() {
     res.status(status).json({ error: genericMessage, requestId });
   });
 
+  enforcePilotIsolation('before listening');
   const listener = app.listen(deployment.port, deployment.host, () => {
     console.log(`[SportingSpy] Server running at http://${deployment.host}:${deployment.port} (environment: ${deployment.appEnv}, media storage: ${storage.name})`);
   });

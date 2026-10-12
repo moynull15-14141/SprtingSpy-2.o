@@ -38,6 +38,8 @@ export interface SearchQuery {
   publicOnly?: boolean;
   reviewStatus?: string;
   myDrafts?: boolean;
+  /** CMS search only: imported from the old WordPress site, or written in the CMS. */
+  origin?: 'wordpress' | 'original';
 }
 
 type Raw = Record<string, unknown>;
@@ -71,6 +73,10 @@ export function parseSearchQuery(raw: Raw, options: { strict: boolean; defaultLi
       case 'reviewStatus':
         if (options.allowStatus && (REVIEW_STATUSES as readonly string[]).includes(input)) value.reviewStatus = input;
         else error = 'reviewStatus must be an editorial review state and is available only in CMS search.';
+        break;
+      case 'origin':
+        if (options.allowStatus && (input === 'wordpress' || input === 'original')) value.origin = input;
+        else error = 'origin must be wordpress or original and is available only in CMS search.';
         break;
       case 'myDrafts':
         if (options.allowStatus && ['true','false'].includes(input)) value.myDrafts = input === 'true';

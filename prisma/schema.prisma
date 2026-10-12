@@ -309,6 +309,7 @@ model Article {
   bodyMedia     ArticleMedia[]
   comments      Comment[]
   faqs          FaqEntry[]
+  importRecord  ArticleImport?
 
   // NOTE: true slug-collision scoping (sportSlug+eventSlug+editionYear+slug,
   // with JS `undefined === undefined` semantics for general articles) is
@@ -330,6 +331,23 @@ model Article {
   @@index([searchVector], type: Gin)
   @@index([title(ops: raw("gin_trgm_ops"))], map: "Article_title_trgm_idx", type: Gin)
   @@index([excerpt(ops: raw("gin_trgm_ops"))], map: "Article_excerpt_trgm_idx", type: Gin)
+}
+
+// Where an imported article came from (the old WordPress site). One row per
+// imported article; removed with it. A source post can be imported only once
+// (unique source + sourceId). Editors see it as the "WordPress Import" label
+// and filter; it never affects publishing or the public site.
+model ArticleImport {
+  articleId   String   @id
+  source      String
+  sourceId    String
+  sourceTitle String   @default("")
+  sourceUrl   String   @default("")
+  importedAt  DateTime @default(now())
+
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@unique([source, sourceId])
 }
 
 // PHASE C: images referenced inside an article body (usage tracking).

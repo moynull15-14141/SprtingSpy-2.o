@@ -9,11 +9,12 @@ export class WorkflowError extends Error { constructor(public status: number, me
 const fail = (status: number, message: string): never => { throw new WorkflowError(status, message); };
 const writeFields = new Set(['title','subtitle','slug','sportSlug','eventSlug','editionYear','articleType','excerpt','content','body','featuredImage','featuredMediaId','authorId','publishedAt','readingTimeMinutes','featured','tables','references','seo','status','scheduledFor','faqSchemaEnabled']);
 const protectedFields = new Set(['reviewStatus','reviewerId','reviewComment','reviewSubmittedAt','reviewDecidedAt','reviewVersion']);
-export function checkArticlePayload(body: unknown) {
+export function checkArticlePayload(body: unknown, creating = false) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, 'Article payload must be an object.');
   for (const key of Object.keys(body)) {
     if (protectedFields.has(key)) fail(403, 'Review state can only be changed through the authorized review actions.');
-    if (!writeFields.has(key)) fail(400, `Unsupported article field: ${key}.`);
+    // requireReview and importSource exist on creation only, so an update can never switch review off or relabel an article.
+    if (!writeFields.has(key) && !(creating && (key === 'requireReview' || key === 'importSource'))) fail(400, `Unsupported article field: ${key}.`);
   }
   const values = body as Record<string,unknown>;
   if ('authorId' in values && (typeof values.authorId !== 'string' || values.authorId.length > 120)) fail(400, 'authorId must be an Author profile ID.');
@@ -22,7 +23,7 @@ export const articleReadWhere = (ctx: Pick<AuthContext,'role'|'userId'>): Prisma
 
 /** Author identity and private-state checks are independent of the UI. */
 export async function authorWriteGuard(ctx: AuthContext, body: Record<string, any>, existing?: Article) {
-  checkArticlePayload(body);
+  checkArticlePayload(body, !existing);
   if (ctx.role !== 'Author') {
     const nextStatus = body.status ?? existing?.status ?? 'draft';
     if (existing && ['published','scheduled'].includes(nextStatus) && existing.reviewStatus !== 'not_required' && existing.reviewStatus !== 'approved') fail(409, 'This Author submission must be approved before publishing or scheduling.');
