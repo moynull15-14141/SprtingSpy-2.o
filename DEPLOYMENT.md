@@ -23,7 +23,7 @@ Inject secrets through the host's secret manager or protected environment, never
 | `APP_ENV` | `staging` or `production`; `.env.example` is development |
 | `AUTH_MODE` | `production` |
 | `DATABASE_URL` | Explicit PostgreSQL database, with provider-required TLS; no development/test database for public production |
-| `ALLOWED_ORIGIN` | `https://www.sportingspy.com` in production, no trailing slash/path/credentials |
+| `ALLOWED_ORIGIN` | `https://sportingspy.com` in production, no trailing slash/path/credentials |
 | `HOST`, `PORT` | Bind address and service port; restrict direct external access |
 | `TRUST_PROXY` | Exact proxy IP/CIDR list, or `false` when no proxy terminates TLS; never blanket trust |
 | `DEV_LOGIN_BYPASS` | `false` |
@@ -67,9 +67,10 @@ SportingSpy runs on Render as **one Web Service**: Express and Next.js in one No
 | Variable | Value |
 | --- | --- |
 | `NODE_ENV` | `production` (the start command also sets it) |
-| `APP_ENV` | `staging` on the Render URL. Switch to `production` only when the service serves `https://www.sportingspy.com`; startup rejects `APP_ENV=production` with any other origin. |
+| `APP_ENV` | `staging` on the Render URL. Switch to `production` only when the service serves `https://sportingspy.com`; startup rejects `APP_ENV=production` with any other origin. |
 | `AUTH_MODE` | `production` |
 | `ALLOWED_ORIGIN` | The service's HTTPS URL, e.g. `https://<service>.onrender.com` (no trailing slash) |
+| `ADDITIONAL_ALLOWED_ORIGINS` | Optional. Comma-separated exact HTTPS origins of other hosts attached to this service, e.g. `https://sprtingspy-2-o.onrender.com` when `ALLOWED_ORIGIN` is the custom domain. A browser origin in neither variable gets `403 Origin not allowed.` on sign-in and every other API call that sends `Origin`. No wildcard, path or trailing slash. |
 | `TRUST_PROXY` | `127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16`. Render's in-container proxy connects from `127.0.0.1` (that entry makes HTTPS, Secure cookies and HSTS work); the private ranges let `X-Forwarded-For` skip Render's internal hops so rate limits see the real visitor. Only `127.0.0.1` is trusted on loopback, not `127.0.0.0/8`. Never use `true`, a hop count or `0.0.0.0/0` (startup rejects them). If HTTPS pages answer 426, the log names the exact address to add. After deploy the log prints one `Proxy chain:` line; it must end `client address resolves public`. |
 | `HOST` | `0.0.0.0` (`PORT` is set by Render) |
 | `DATABASE_POOL_MAX` | Optional; default `5` connections per process. During a deploy the old and new instance both connect, and a local `npm run dev` pointed at Aiven adds its own pool; keep the total under the Aiven plan limit (20, 3 reserved), or startup fails with `P2037`. |
@@ -159,7 +160,7 @@ The old site's backups (WordPress SQL dumps, WXR export, hosting backup archives
 
 Never run these steps against production first (v2.2 §20, §25). Keep the old WordPress site live until launch.
 
-1. **Use the canonical host.** Set `ALLOWED_ORIGIN=https://www.sportingspy.com`; the production startup guard enforces it. Configure apex and HTTP host redirects at the proxy, then verify their final URL and hop count before launch.
+1. **Use the canonical host.** Set `ALLOWED_ORIGIN=https://sportingspy.com`; the production startup guard enforces it. Configure `www` and HTTP host redirects at the proxy, then verify their final URL and hop count before launch.
 2. **Draft the sheet from the real exports:** `npm run migration:inventory -- --wxr <export.xml> --rankmath-sql <dump.sql> --access-log <log.gz>`. The command is read-only and writes `migration-inventory/` (git-ignored). Editors fill in Decision / New URL. Nothing is guessed.
 3. **On staging:** migrate or rewrite the content in the CMS, import the sheet, and fix every row with problems.
 4. **Back up first:** take a database backup (provider snapshot, or `pg_dump`), then download URL Redirects → *Export all (CSV backup)*.
@@ -187,7 +188,7 @@ Hosting, managed PostgreSQL, bucket/CDN, DNS/TLS, off-site backups/PITR, monitor
 
 ## Phase T.1: portable VPS operating plan (owner actions, not executed here)
 
-The same source release runs on a test VPS and a later production VPS. Keep Node/Next/Express behind an HTTPS reverse proxy; point `DATABASE_URL` at local, remote, or managed PostgreSQL; keep media binaries in R2 and relational metadata in PostgreSQL. Use `HOST=127.0.0.1` when the proxy shares the VPS, or a private bind address when it does not. Set `TRUST_PROXY` to the proxy's exact IP/CIDR so `X-Forwarded-Proto` controls Secure cookies and HSTS. Set `ALLOWED_ORIGIN` to the browser-facing HTTPS origin, never derive canonical URLs from an arbitrary request Host. The production origin is `https://www.sportingspy.com`; redirect apex and both HTTP hosts to that URL at the edge, preserving paths and queries. Confirm the redirect chain and TLS certificate there.
+The same source release runs on a test VPS and a later production VPS. Keep Node/Next/Express behind an HTTPS reverse proxy; point `DATABASE_URL` at local, remote, or managed PostgreSQL; keep media binaries in R2 and relational metadata in PostgreSQL. Use `HOST=127.0.0.1` when the proxy shares the VPS, or a private bind address when it does not. Set `TRUST_PROXY` to the proxy's exact IP/CIDR so `X-Forwarded-Proto` controls Secure cookies and HSTS. Set `ALLOWED_ORIGIN` to the browser-facing HTTPS origin, never derive canonical URLs from an arbitrary request Host. The production origin is `https://sportingspy.com`; redirect `www` and both HTTP hosts to that URL at the edge, preserving paths and queries. Confirm the redirect chain and TLS certificate there.
 
 Use systemd as the generic process supervisor. Run the reviewed release as an unprivileged service account in a versioned release directory, with a protected environment file outside the release tree. A unit should set `WorkingDirectory` to the active release, `EnvironmentFile` to the protected environment file, `ExecStart` to the Node command behind `npm run start:production`, `Restart=on-failure`, `KillSignal=SIGTERM`, and `TimeoutStopSec` above the app's 10-second drain deadline. Bind the proxy upstream to `HOST:PORT`, block direct public access to that port, and proxy the original Host and scheme. Use `systemctl start|stop|restart|status <service>` and `journalctl -u <service>` for operations. Roll back by switching the active release symlink to the last schema-compatible artifact and restarting; verify readiness and public smoke routes. A database rollback is a separate isolated restore/cutover, never an in-place overwrite.
 

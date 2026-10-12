@@ -14,13 +14,13 @@ import { profileImageOrigins, validateProfileImageUrl } from '../profileImage';
 
 let checks = 0;
 const pass = (name: string) => { checks++; console.log(`PASS ${name}`); };
-const production: NodeJS.ProcessEnv = { NODE_ENV: 'production', APP_ENV: 'production', DATABASE_URL: 'postgresql://fixture:fixture@db.example.invalid/sportingspy', ALLOWED_ORIGIN: 'https://www.sportingspy.com', HOST: '127.0.0.1', TRUST_PROXY: '127.0.0.1/32' };
+const production: NodeJS.ProcessEnv = { NODE_ENV: 'production', APP_ENV: 'production', DATABASE_URL: 'postgresql://fixture:fixture@db.example.invalid/sportingspy', ALLOWED_ORIGIN: 'https://sportingspy.com', HOST: '127.0.0.1', TRUST_PROXY: '127.0.0.1/32' };
 assert.equal(deploymentConfig(production, true).production, true);
 for (const patch of [
   { DATABASE_URL: '' }, { DATABASE_URL: 'postgresql://USER:PASSWORD@localhost/db' },
   { DATABASE_URL: 'postgresql://fixture:fixture@db.example.invalid/sportingspy_dev' },
   { DATABASE_URL: 'file:dev.db' }, { ALLOWED_ORIGIN: '' },
-  { ALLOWED_ORIGIN: 'http://public.example' }, { ALLOWED_ORIGIN: 'https://public.example/path' }, { ALLOWED_ORIGIN: 'https://sportingspy.com' },
+  { ALLOWED_ORIGIN: 'http://public.example' }, { ALLOWED_ORIGIN: 'https://public.example/path' }, { ALLOWED_ORIGIN: 'https://www.sportingspy.com' },
   { DEV_LOGIN_BYPASS: 'true' }, { ALLOW_DESTRUCTIVE_DB_OPS: 'true' },
   { SHADOW_DATABASE_URL: 'postgresql://fixture:fixture@db.example.invalid/shadow' },
   { PORT: '0' }, { HOST: 'public.example' }, { TRUST_PROXY: 'true' },

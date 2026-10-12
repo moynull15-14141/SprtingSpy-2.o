@@ -25,6 +25,10 @@ export function appEnv(env: NodeJS.ProcessEnv = process.env): AppEnv {
   return env.NODE_ENV === 'production' ? 'production' : 'development';
 }
 
+export function additionalAllowedOrigins(env: NodeJS.ProcessEnv = process.env): string[] {
+  return (env.ADDITIONAL_ALLOWED_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean);
+}
+
 export function deploymentConfig(env: NodeJS.ProcessEnv = process.env, buildExists = fs.existsSync(path.resolve('.next/BUILD_ID'))) {
   const production = env.NODE_ENV === 'production';
   const fail = (message: string): never => { throw new DeploymentConfigError(message); };
@@ -44,6 +48,15 @@ export function deploymentConfig(env: NodeJS.ProcessEnv = process.env, buildExis
     if (!['http:', 'https:'].includes(parsed!.protocol) || parsed!.origin !== env.ALLOWED_ORIGIN) fail('ALLOWED_ORIGIN must be a single canonical HTTP(S) origin without a path, credentials or wildcard.');
     if (production && parsed!.protocol !== 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(parsed!.hostname)) fail('Production ALLOWED_ORIGIN requires HTTPS (HTTP loopback is only for local smoke tests).');
     origin = parsed!.origin;
+  }
+  // Extra browser origins that reach this same service (a custom domain next
+  // to the platform URL). Same rules as ALLOWED_ORIGIN; canonical URLs still
+  // come from ALLOWED_ORIGIN alone.
+  for (const extra of additionalAllowedOrigins(env)) {
+    let parsed: URL;
+    try { parsed = new URL(extra); } catch { fail('ADDITIONAL_ALLOWED_ORIGINS must be comma-separated canonical HTTP(S) origins.'); }
+    if (!['http:', 'https:'].includes(parsed!.protocol) || parsed!.origin !== extra || extra.includes('*')) fail('ADDITIONAL_ALLOWED_ORIGINS must be comma-separated canonical HTTP(S) origins without a path, credentials or wildcard.');
+    if (production && parsed!.protocol !== 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(parsed!.hostname)) fail('Production ADDITIONAL_ALLOWED_ORIGINS requires HTTPS (HTTP loopback is only for local smoke tests).');
   }
   let trustProxy: false | string[] = false;
   if (env.TRUST_PROXY && env.TRUST_PROXY !== 'false') {
@@ -68,7 +81,7 @@ export function deploymentConfig(env: NodeJS.ProcessEnv = process.env, buildExis
     } catch (error) { if (error instanceof DeploymentConfigError) throw error; fail('DATABASE_URL must identify a PostgreSQL database.'); }
     if (env.SHADOW_DATABASE_URL?.trim()) fail('SHADOW_DATABASE_URL must be unset for production-mode startup; deployment uses existing migrations without a shadow database.');
     if (!origin) fail('ALLOWED_ORIGIN is required in production to identify the browser-facing service origin.');
-    if (environment === 'production' && !['localhost', '127.0.0.1', '[::1]'].includes(new URL(origin).hostname) && origin !== 'https://www.sportingspy.com') fail('APP_ENV=production requires ALLOWED_ORIGIN=https://www.sportingspy.com (local loopback smoke tests are exempt).');
+    if (environment === 'production' && !['localhost', '127.0.0.1', '[::1]'].includes(new URL(origin).hostname) && origin !== 'https://sportingspy.com') fail('APP_ENV=production requires ALLOWED_ORIGIN=https://sportingspy.com (local loopback smoke tests are exempt).');
     if (env.DEV_LOGIN_BYPASS === 'true') fail('DEV_LOGIN_BYPASS is forbidden when NODE_ENV=production.');
     if (!buildExists) fail('Production build missing: run npm run build before starting the server.');
     if (env.ALLOW_DESTRUCTIVE_DB_OPS === 'true') fail('ALLOW_DESTRUCTIVE_DB_OPS is a local-development switch and is forbidden when NODE_ENV=production.');

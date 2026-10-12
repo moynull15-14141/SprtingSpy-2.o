@@ -25,10 +25,15 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
+import { additionalAllowedOrigins } from './deployment';
 
+// `ADDITIONAL_ALLOWED_ORIGINS` (optional, comma-separated): other exact
+// origins that serve this same process, e.g. a custom domain alongside the
+// platform URL. Startup validates each one (server/deployment.ts); matching
+// stays an exact string comparison.
 function getAllowedOrigins(): string[] {
   const configured = process.env.ALLOWED_ORIGIN;
-  return configured ? [configured] : [];
+  return [...(configured ? [configured] : []), ...additionalAllowedOrigins()];
 }
 
 export function corsPolicy(req: Request, res: Response, next: NextFunction) {

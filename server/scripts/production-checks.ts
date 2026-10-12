@@ -28,7 +28,7 @@ export async function verifyProductionBoot() {
       { env: { ALLOWED_ORIGIN: '*' }, message: 'ALLOWED_ORIGIN' },
       { env: { ALLOWED_ORIGIN: 'http://public.example' }, message: 'HTTPS' },
       { env: { ALLOWED_ORIGIN: 'https://example.com/path' }, message: 'ALLOWED_ORIGIN' },
-      { env: { APP_ENV: 'production' }, message: 'ALLOWED_ORIGIN=https://www.sportingspy.com' },
+      { env: { APP_ENV: 'production' }, message: 'ALLOWED_ORIGIN=https://sportingspy.com' },
       { env: { DEV_LOGIN_BYPASS: 'true' }, message: 'DEV_LOGIN_BYPASS' },
       { env: { TRUST_PROXY: 'true' }, message: 'TRUST_PROXY' },
       { env: { TRUST_PROXY: '1' }, message: 'TRUST_PROXY' },
