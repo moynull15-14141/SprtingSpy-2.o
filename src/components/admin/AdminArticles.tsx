@@ -22,6 +22,8 @@ interface ArticleDraftPayload {
   title: string; subtitle: string; slug: string; excerpt: string; body: RichDoc; featuredImage: string; featuredMediaId: string | null;
   authorId: string; metaTitle: string; metaDescription: string; ogTitle: string; ogDescription: string; ogImage: string;
   otherSeo: SeoMetadata; status: string; scheduledLocal: string; references: Reference[]; pendingFaqs: PendingFaq[];
+  /** Optional discipline of the article's sport ('' = none); absent in older working copies. */
+  disciplineSlug?: string;
 }
 import { REVIEW_LABELS } from '../../lib/editorialWorkflow';
 import { leavesPublicState, previewPlan, savedStateLabel, slugFromTitle } from '../../lib/articleEditor';
@@ -33,6 +35,7 @@ const RichTextEditor = dynamic(() => import('./editor/RichTextEditor'), {
 });
 const EMPTY_DOC: RichDoc = { type: 'doc', content: [{ type: 'paragraph' }] };
 import { useApp } from '../../context/AppContext';
+import { selectableDisciplines } from './DisciplineManager';
 import { Article, ArticleType, SeoMetadata } from '../../types';
 import { Button } from '../ui/Button';
 import { useArticleSearch } from './useArticleSearch';
@@ -76,7 +79,7 @@ const SuggestionList: React.FC<{ title: string; empty: string; items: React.Reac
 );
 
 export const AdminArticles: React.FC = () => {
-  const { articles, sports, events, editions, authors, addArticle, updateArticle, deleteArticle, navigate, mediaItems, apiCall, refreshData, articleTypes } =
+  const { articles, sports, events, editions, authors, addArticle, updateArticle, deleteArticle, navigate, mediaItems, apiCall, refreshData, articleTypes, disciplines } =
     useApp();
   const { currentUser } = useApp();
   const isAuthor = currentUser.role === 'Author';
@@ -98,6 +101,7 @@ export const AdminArticles: React.FC = () => {
   const [sportSlug, setSportSlug] = useState<string>(sports[0]?.slug || 'tennis');
   const [isAboutEvent, setIsAboutEvent] = useState<boolean>(true);
   const [eventSlug, setEventSlug] = useState<string>('');
+  const [disciplineSlug, setDisciplineSlug] = useState<string>('');
   const [editionYear, setEditionYear] = useState<number | undefined>(undefined);
   const [articleType, setArticleType] = useState<ArticleType>('Schedule');
   // PHASE R: FAQPage structured data for this article's reader questions (opt-in).
@@ -143,6 +147,7 @@ export const AdminArticles: React.FC = () => {
   const draftPayload: ArticleDraftPayload = {
     sportSlug, isAboutEvent, eventSlug, editionYear: editionYear ?? null, articleType, faqSchemaEnabled, title, subtitle, slug, excerpt, body: bodyDoc,
     featuredImage, featuredMediaId, authorId, metaTitle, metaDescription, ogTitle, ogDescription, ogImage, otherSeo, status, scheduledLocal, references, pendingFaqs,
+    disciplineSlug,
   };
   const autosave = useAutosave({
     kind: 'article', userId: currentUser.id, enabled: isCreating && !authorLocked && !recovery, title: title.trim() || 'Untitled article', payload: draftPayload,
@@ -152,6 +157,7 @@ export const AdminArticles: React.FC = () => {
     if (p.sportSlug !== undefined) setSportSlug(p.sportSlug);
     if (p.isAboutEvent !== undefined) setIsAboutEvent(p.isAboutEvent);
     if (p.eventSlug !== undefined) setEventSlug(p.eventSlug);
+    if (p.disciplineSlug !== undefined) setDisciplineSlug(p.disciplineSlug);
     if (p.editionYear !== undefined) setEditionYear(p.editionYear ?? undefined);
     if (p.articleType !== undefined) setArticleType(p.articleType as ArticleType);
     if (p.faqSchemaEnabled !== undefined) setFaqSchemaEnabled(p.faqSchemaEnabled);
@@ -182,6 +188,11 @@ export const AdminArticles: React.FC = () => {
 
   // Filter events and editions by selected sport
   const availableEvents = events.filter((e) => e.sportSlug === sportSlug);
+  // Inside an event that has a discipline the article follows it; otherwise it may name its own.
+  const inheritedDiscipline = (isAboutEvent && eventSlug ? availableEvents.find((e) => e.slug === eventSlug)?.disciplineSlug : '') || '';
+  const disciplineOptions = selectableDisciplines(disciplines, sportSlug, inheritedDiscipline || disciplineSlug);
+  /** What is stored on the article itself: nothing that contradicts its event. */
+  const ownDiscipline = inheritedDiscipline && disciplineSlug !== inheritedDiscipline ? '' : disciplineSlug;
   const availableEditions = editions.filter((ed) => ed.eventSlug === eventSlug);
 
   // PHASE 6: a new article's slug follows the whole title until the editor types their own slug
@@ -211,6 +222,7 @@ export const AdminArticles: React.FC = () => {
     setScheduledLocal('');
     setReferences([]);
     setFaqSchemaEnabled(false);
+    setDisciplineSlug('');
     setPendingFaqs([]);
     setFormError(null);
     setSeoCheck(null);
@@ -384,6 +396,10 @@ export const AdminArticles: React.FC = () => {
       subtitle: subtitle.trim() || undefined,
       slug,
       sportSlug,
+      // Sent only when it changed (or the sport did): an ordinary save never touches the stored discipline.
+      ...(editingArticle
+        ? (ownDiscipline !== (editingArticle.disciplineSlug || '') || sportSlug !== editingArticle.sportSlug ? { disciplineSlug: ownDiscipline || null } : {})
+        : (ownDiscipline ? { disciplineSlug: ownDiscipline } : {})),
       eventSlug: isAboutEvent && eventSlug ? eventSlug : undefined,
       editionYear: isAboutEvent && eventSlug && editionYear ? editionYear : undefined,
       articleType,
@@ -531,6 +547,7 @@ export const AdminArticles: React.FC = () => {
     setEditingId(art.id);
     setIsCreating(true);
     setSportSlug(art.sportSlug);
+    setDisciplineSlug(art.disciplineSlug || '');
     setIsAboutEvent(!!art.eventSlug);
     setEventSlug(art.eventSlug || '');
     setEditionYear(art.editionYear);
@@ -678,12 +695,14 @@ export const AdminArticles: React.FC = () => {
           <div className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2">
             <div>
               <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-                1. Select Sport Discipline *
+                1. Select Sport *
               </label>
               <select
                 value={sportSlug}
                 onChange={(e) => {
                   setSportSlug(e.target.value);
+                  // A discipline belongs to one sport: the choice is cleared, never carried to another sport.
+                  setDisciplineSlug('');
                   setEventSlug('');
                   setEditionYear(undefined);
                 }}
@@ -728,6 +747,34 @@ export const AdminArticles: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {/* DISCIPLINE (only for sports that have disciplines) */}
+          {disciplineOptions.length > 0 && (
+            <div className="min-w-0 md:w-1/2 md:pr-2">
+              <label htmlFor="article-discipline" className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
+                Group (optional)
+              </label>
+              <select
+                id="article-discipline"
+                value={inheritedDiscipline || disciplineSlug}
+                disabled={!!inheritedDiscipline}
+                onChange={(e) => setDisciplineSlug(e.target.value)}
+                className="w-full text-xs p-2 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 disabled:opacity-70"
+              >
+                <option value="">None</option>
+                {disciplineOptions.map((d) => (
+                  <option key={d.id} value={d.slug}>{d.name}{d.isActive ? '' : ' (retired)'}</option>
+                ))}
+              </select>
+              {inheritedDiscipline ? (
+                <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400" data-testid="article-discipline-inherited">
+                  Follows the selected event.{disciplineSlug && disciplineSlug !== inheritedDiscipline ? ' The group this article had on its own will be cleared when you save.' : ''}
+                </p>
+              ) : (
+                <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400">Leave empty if the article covers the whole sport.</p>
+              )}
+            </div>
+          )}
 
           {/* WORKFLOW STEP 3 & 4: EVENT & EDITION (IF APPLICABLE) */}
           {isAboutEvent && (
@@ -1288,7 +1335,7 @@ function ArticleRepository({ reloadKey, sports, authors, onView, onEdit, onRevie
           <thead className="bg-stone-50 dark:bg-stone-900/60 uppercase tracking-wider text-stone-500 border-b border-stone-200 dark:border-stone-800 dark:text-stone-400">
             <tr>
               <th className="p-3">Title & Hierarchy</th>
-              <th className="p-3">Discipline</th>
+              <th className="p-3">Sport</th>
               <th className="p-3">Format</th>
               <th className="p-3">Status</th>
               <th className="p-3">Date</th>

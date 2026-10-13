@@ -6,7 +6,7 @@
  */
 
 import { prisma } from '../db';
-import { articlePath, authorPath, editionPath, eventPath, sportPath } from '../../src/lib/paths';
+import { articlePath, authorPath, disciplinePath, editionPath, eventPath, sportPath } from '../../src/lib/paths';
 import { pagePath } from '../../src/lib/pages';
 import { canonicalPagePath, stripTrailingSlash } from '../../src/config/urls';
 import {
@@ -15,6 +15,7 @@ import {
   FAQ_PATH,
   articleIndexability,
   authorIndexability,
+  disciplineIndexability,
   editionIndexability,
   eventIndexability,
   sportIndexability,
@@ -23,7 +24,7 @@ import {
 } from '../../src/lib/indexability';
 import type { SeoMetadata } from '../../src/types';
 
-export type PageKind = 'static' | 'page' | 'sport' | 'event' | 'edition' | 'article' | 'author';
+export type PageKind = 'static' | 'page' | 'sport' | 'discipline' | 'event' | 'edition' | 'article' | 'author';
 
 export interface IndexedPage {
   path: string;
@@ -36,17 +37,18 @@ export interface IndexedPage {
 }
 
 export async function loadSiteIndex(origin: string) {
-  const [sports, events, editions, articles, authors, redirects, publishedFaqs, faqPageSetting, cmsPages] = await Promise.all([
+  const [sports, events, editions, articles, authors, redirects, publishedFaqs, faqPageSetting, cmsPages, disciplines] = await Promise.all([
     prisma.sport.findMany(),
     prisma.sportEvent.findMany(),
     prisma.eventEdition.findMany(),
-    prisma.article.findMany({ where: { status: 'published' }, select: { id: true, slug: true, title: true, sportSlug: true, eventSlug: true, editionYear: true, status: true, seo: true, authorId: true, publishedAt: true, updatedAt: true } }),
+    prisma.article.findMany({ where: { status: 'published' }, select: { id: true, slug: true, title: true, sportSlug: true, eventSlug: true, editionYear: true, status: true, seo: true, authorId: true, publishedAt: true, updatedAt: true, disciplineSlug: true } }),
     prisma.author.findMany({ select: { id: true, slug: true, name: true } }),
     prisma.redirectRule.findMany({ where: { isActive: true } }),
     prisma.faqEntry.count({ where: { status: 'published', eventId: null, articleId: null, editionId: null, sportId: null } }),
     prisma.siteSetting.findUnique({ where: { key: 'globalFaqPage' } }),
     // PHASE PAGES: only published pages exist publicly (drafts are 404s, not index candidates).
     prisma.page.findMany({ where: { status: 'published' }, select: { id: true, slug: true, title: true, status: true, noIndex: true, updatedAt: true } }),
+    prisma.discipline.findMany(),
   ]);
 
   const sportBySlug = new Map(sports.map((s) => [s.slug, s]));
@@ -77,6 +79,19 @@ export async function loadSiteIndex(origin: string) {
       visibleEventCount: events.filter((e) => e.sportSlug === s.slug && e.isVisible).length,
     }, sportPath(s.slug), origin);
     if (s.isVisible) pages.push({ path: sportPath(s.slug), kind: 'sport', id: s.id, title: s.name, status });
+  }
+  // A discipline page exists while its sport and the discipline are visible (a hidden one is a 404, so it is not listed at all).
+  for (const d of disciplines) {
+    const sportVisible = !!sportBySlug.get(d.sportSlug)?.isVisible;
+    if (!sportVisible || !d.isVisible) continue;
+    // Same scope as the page: articles that name the discipline, plus articles of its events that name none.
+    const ownEvents = new Set(events.filter((e) => e.sportSlug === d.sportSlug && e.disciplineSlug === d.slug).map((e) => e.slug));
+    const status = disciplineIndexability({
+      sportVisible, isVisible: d.isVisible, isActive: d.isActive, seo: d.seo as SeoMetadata,
+      publishedArticleCount: visibleArticles.filter((a) => a.sportSlug === d.sportSlug && (a.disciplineSlug === d.slug || (!a.disciplineSlug && !!a.eventSlug && ownEvents.has(a.eventSlug)))).length,
+      visibleEventCount: events.filter((e) => e.sportSlug === d.sportSlug && e.disciplineSlug === d.slug && e.isVisible).length,
+    }, disciplinePath(d.sportSlug, d.slug), origin);
+    pages.push({ path: disciplinePath(d.sportSlug, d.slug), kind: 'discipline', id: d.id, title: d.name, status });
   }
   const eventStatus = new Map<string, Indexability>();
   for (const e of events) {

@@ -11,6 +11,7 @@ import { discardDraft, listDrafts, markRecovered, takeOpenDraft } from '../../li
 import { findRecoverable, forgetLocal, loadNewDraft, type Recoverable } from '../../lib/autosave/recovery';
 import { AutosaveStatus, DraftRecoveryBanner, StaleSaveWarning } from './autosave/AutosaveUI';
 import { useApp } from '../../context/AppContext';
+import { selectableDisciplines } from './DisciplineManager';
 import { Button } from '../ui/Button';
 import { EDITION_STATUSES, EditionStatus, EventEdition, SportEvent, type SeoMetadata, type SportEventFieldDefinition, type SportEventFieldValues } from '../../types';
 import { EMPTY_SEO_DRAFT, RecordList, SeoFields, cleanRecords, draftToSeo, seoToDraft, type RecordField, type SeoDraft } from './EntityFields';
@@ -42,6 +43,8 @@ interface EventDraftPayload {
   name: string; slug: string; shortName: string; altNames: string; faqSchema: boolean; sportSlug: string; description: string; history: string;
   venue: string; location: string; frequency: string; currentEditionYear: string; eventType: string; officialSourceUrl: string; image: string;
   seo: SeoDraft; values: SportEventFieldValues; valuesDirty: boolean;
+  /** Optional discipline of the event's sport ('' = none); absent in older working copies. */
+  disciplineSlug?: string;
   /** Rich overview; working copies saved before it existed carry only `description`. */
   descriptionBody?: RichDoc;
 }
@@ -69,6 +72,7 @@ export const AdminEvents: React.FC = () => {
     deleteEdition,
     navigate,
     apiCall,
+    disciplines,
   } = useApp();
 
   // Remembered for this browser tab, so a refresh keeps Permanent Events / Staged Editions.
@@ -86,6 +90,9 @@ export const AdminEvents: React.FC = () => {
   const [eventFaqSchema, setEventFaqSchema] = useState(false);
   const [editionFaqSchema, setEditionFaqSchema] = useState(false);
   const [eventSportSlug, setEventSportSlug] = useState(sports[0]?.slug || 'tennis');
+  const [eventDiscipline, setEventDiscipline] = useState('');
+  // Active disciplines of the chosen sport, plus this event's own one if it has been retired since.
+  const eventDisciplineOptions = selectableDisciplines(disciplines, eventSportSlug, eventDiscipline);
   const [eventDesc, setEventDesc] = useState(''); // plain-text projection of eventDescDoc (SEO default, autosave title check)
   const [eventDescDoc, setEventDescDoc] = useState<RichDoc>(() => plainToDoc(''));
   const [eventDescKey, setEventDescKey] = useState(0); // remounts the editor when the document is replaced
@@ -150,7 +157,7 @@ export const AdminEvents: React.FC = () => {
     name: eventName, slug: eventSlug, shortName: eventShortName, altNames: eventAltNames, faqSchema: eventFaqSchema, sportSlug: eventSportSlug,
     description: eventDesc, history: eventHistory, venue: eventVenue, location: eventLocation, frequency: eventFreq, currentEditionYear: eventCurrentEditionYear,
     eventType, officialSourceUrl: eventOfficialSourceUrl, image: eventImage, seo: eventSeo, values: eventValues, valuesDirty: eventValuesDirty,
-    descriptionBody: eventDescDoc,
+    descriptionBody: eventDescDoc, disciplineSlug: eventDiscipline,
   };
   const editionPayload: EditionDraftPayload = {
     eventSlug: editionEventSlug, year: editionYear, title: editionTitle, startDate: editionStart, endDate: editionEnd, venue: editionVenue, location: editionLocation,
@@ -173,6 +180,7 @@ export const AdminEvents: React.FC = () => {
     if (p.altNames !== undefined) setEventAltNames(p.altNames);
     if (p.faqSchema !== undefined) setEventFaqSchema(p.faqSchema);
     if (p.sportSlug !== undefined) setEventSportSlug(p.sportSlug);
+    if (p.disciplineSlug !== undefined) setEventDiscipline(p.disciplineSlug);
     if (p.description !== undefined || p.descriptionBody !== undefined) {
       const doc = p.descriptionBody ?? plainToDoc(p.description ?? '');
       setEventDescDoc(doc); setEventDesc(docToPlainText(doc)); setEventDescKey((k) => k + 1);
@@ -227,6 +235,7 @@ export const AdminEvents: React.FC = () => {
     setEventAltNames('');
     setEventFaqSchema(false);
     setEventSportSlug(sports[0]?.slug || 'tennis');
+    setEventDiscipline('');
     setEventDesc('');
     setEventDescDoc(plainToDoc(''));
     setEventDescKey((k) => k + 1);
@@ -257,6 +266,7 @@ export const AdminEvents: React.FC = () => {
     setEventAltNames(evt.alternativeNames || '');
     setEventFaqSchema(!!evt.faqSchemaEnabled);
     setEventSportSlug(evt.sportSlug);
+    setEventDiscipline(evt.disciplineSlug || '');
     const overviewDoc = evt.descriptionBody ?? plainToDoc(evt.description);
     setEventDescDoc(overviewDoc);
     setEventDesc(docToPlainText(overviewDoc));
@@ -332,6 +342,8 @@ export const AdminEvents: React.FC = () => {
     if (slug === eventSportSlug) return;
     if (Object.keys(eventValues).length && !window.confirm('Changing Sport clears this Event’s sport-specific values. Continue?')) return;
     setEventSportSlug(slug);
+    // A discipline belongs to one sport: the choice is cleared, never carried to another sport.
+    setEventDiscipline('');
     setEventValues({});
     setEventValuesDirty(true);
   };
@@ -379,6 +391,8 @@ export const AdminEvents: React.FC = () => {
           eventType: eventType.trim(),
           officialSourceUrl: eventOfficialSourceUrl.trim(),
           ...(originalEvent && eventImage !== (originalEvent.featuredImage || '') ? { featuredImage: eventImage || null } : {}),
+          // Sent only when it changed, or when the sport changed (the server never carries a discipline to another sport).
+          ...(originalEvent && (eventDiscipline !== (originalEvent.disciplineSlug || '') || eventSportSlug !== originalEvent.sportSlug) ? { disciplineSlug: eventDiscipline || null } : {}),
           seo,
           ...customPayload,
         }, { expectedVersion: eventAutosave.baseVersion(), onStale: () => { staleEventSave = true; } })
@@ -403,6 +417,7 @@ export const AdminEvents: React.FC = () => {
           isVisible: true,
           alternativeNames: eventAltNames,
           faqSchemaEnabled: eventFaqSchema,
+          ...(eventDiscipline ? { disciplineSlug: eventDiscipline } : {}),
           seo,
           ...customPayload,
         });
@@ -697,7 +712,7 @@ export const AdminEvents: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label htmlFor="event-editor-field-3" className="block font-semibold mb-1">Sport Discipline *</label>
+                  <label htmlFor="event-editor-field-3" className="block font-semibold mb-1">Sport *</label>
                   <select id="event-editor-field-3"
                     value={eventSportSlug}
                     onChange={(e) => changeEventSport(e.target.value)}
@@ -710,6 +725,22 @@ export const AdminEvents: React.FC = () => {
                     ))}
                   </select>
                 </div>
+                {eventDisciplineOptions.length > 0 && (
+                  <div>
+                    <label htmlFor="event-discipline" className="block font-semibold mb-1">Group (optional)</label>
+                    <select id="event-discipline"
+                      value={eventDiscipline}
+                      onChange={(e) => setEventDiscipline(e.target.value)}
+                      className="w-full p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"
+                    >
+                      <option value="">None (whole sport, or several groups)</option>
+                      {eventDisciplineOptions.map((d) => (
+                        <option key={d.id} value={d.slug}>{d.name}{d.isActive ? '' : ' (retired)'}</option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400">The event&apos;s articles follow this choice.</p>
+                  </div>
+                )}
               </div>
 
               {editingEventId && (

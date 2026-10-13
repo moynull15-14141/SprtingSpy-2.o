@@ -17,6 +17,7 @@ import {
   AdSlotId,
   Article,
   ArticleTypeDefinition,
+  Discipline,
   AuditLog,
   Author,
   Comment,
@@ -58,6 +59,8 @@ interface AdminDataContextType {
   mediaUsage: Record<string, MediaUsage[]>;
   /** PHASE R: database-backed Article Types (active and inactive, display order). */
   articleTypes: ArticleTypeDefinition[];
+  /** Disciplines of every sport (visible, hidden and retired). */
+  disciplines: Discipline[];
 
   // Actions for Editorial CMS
   addSport: (sport: Omit<Sport, 'id'>) => Promise<boolean>;
@@ -138,6 +141,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [mediaUsage, setMediaUsage] = useState<Record<string, MediaUsage[]>>({});
   const [articleTypes, setArticleTypes] = useState<ArticleTypeDefinition[]>([]);
+  const [disciplines, setDisciplines] = useState<Discipline[]>([]);
 
   // Discard everything private whenever the session ends or changes.
   useEffect(() => {
@@ -170,6 +174,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       features: FeatureFlags;
       mediaUsage: Record<string, MediaUsage[]>;
       articleTypes: ArticleTypeDefinition[];
+      disciplines?: Discipline[];
     }>('/api/cms/data');
 
     if (res.data && generation === authGeneration.current && request === dataGeneration.current) {
@@ -186,6 +191,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setRedirectRules(res.data.redirectRules);
       setMediaUsage(res.data.mediaUsage || {});
       setArticleTypes(res.data.articleTypes || []);
+      setDisciplines(res.data.disciplines || []);
       setCmsDataLoaded(true);
     }
   };
@@ -656,6 +662,7 @@ Upload a separate copy anyway?`)) return uploadMedia(file, { ...metadata, allowD
         redirectRules,
         mediaUsage,
         articleTypes,
+        disciplines,
         uploadMedia,
         addSport,
         updateSport,

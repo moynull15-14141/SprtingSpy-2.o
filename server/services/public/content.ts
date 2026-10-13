@@ -240,9 +240,18 @@ async function summarizeEvents(rows: Prisma.SportEventGetPayload<object>[]): Pro
 
 // ── Page-level queries ──
 
+/**
+ * Visible sports in display order, each with the groups a visitor can browse
+ * (visible and active, in their display order; "discipline" is the internal
+ * name of a group). A sport without groups has an empty list.
+ */
 export async function getNavSports() {
   const prisma = await db();
-  return prisma.sport.findMany({ where: { isVisible: true }, orderBy: { order: 'asc' }, select: { id: true, slug: true, name: true, icon: true } });
+  const [sports, groups] = await Promise.all([
+    prisma.sport.findMany({ where: { isVisible: true }, orderBy: { order: 'asc' }, select: { id: true, slug: true, name: true, icon: true } }),
+    prisma.discipline.findMany({ where: { isVisible: true, isActive: true, sport: { isVisible: true } }, orderBy: [{ order: 'asc' }, { name: 'asc' }], select: { sportSlug: true, slug: true, name: true, icon: true } }),
+  ]);
+  return sports.map((sport) => ({ ...sport, groups: groups.filter((g) => g.sportSlug === sport.slug).map(({ slug, name, icon }) => ({ slug, name, icon })) }));
 }
 
 export async function getAdSlots(): Promise<AdSlotConfig[]> {
@@ -329,37 +338,88 @@ function mergeUnique(lists: ArticleSummary[][], exclude: Set<string>, limit: num
   return out;
 }
 
+/** What a discipline page needs to know about its discipline (no internal fields). */
+export interface PublicDiscipline { id: string; slug: string; name: string; tagline: string; description: string; isActive: boolean; icon: string | null; heroImage: string | null; heroMediaId: string | null; featuredEventIds: string[]; seo: Sport['seo'] }
+
+/** The disciplines a visitor can browse: visible and active, of a visible sport, in display order. */
+export async function getPublicDisciplines(sportSlug: string): Promise<{ slug: string; name: string; icon: string | null }[]> {
+  const prisma = await db();
+  return prisma.discipline.findMany({ where: { sportSlug, isVisible: true, isActive: true, sport: { isVisible: true } }, orderBy: [{ order: 'asc' }, { name: 'asc' }], select: { slug: true, name: true, icon: true } });
+}
+
+/**
+ * Published articles of one discipline: those that name it, plus the
+ * articles of its events that name none (an article inside an event follows
+ * the event; the API refuses any other combination).
+ */
+async function disciplineArticleScope(sportSlug: string, disciplineSlug: string): Promise<Prisma.ArticleWhereInput> {
+  const prisma = await db();
+  const eventSlugs = (await prisma.sportEvent.findMany({ where: { sportSlug, disciplineSlug }, select: { slug: true } })).map((e) => e.slug);
+  return { sportSlug, OR: [{ disciplineSlug }, ...(eventSlugs.length ? [{ disciplineSlug: null, eventSlug: { in: eventSlugs } }] : [])] };
+}
+
 export async function getSportHub(slug: string) {
   const sport = await getSport(slug);
+  return sport ? buildHub(sport, null) : null;
+}
+
+/**
+ * The landing page of one discipline: the sport hub's sections, scoped to
+ * that discipline. Null (a 404) when the sport or the discipline is hidden
+ * or does not exist. A retired discipline still has its page.
+ */
+export async function getDisciplineHub(sportSlug: string, disciplineSlug: string) {
+  const sport = await getSport(sportSlug);
   if (!sport) return null;
   const prisma = await db();
+  const row = await prisma.discipline.findUnique({ where: { sportSlug_slug: { sportSlug, slug: disciplineSlug } } });
+  if (!row || !row.isVisible) return null;
+  // Only the group's own settings: nothing here is taken from the sport.
+  return buildHub(sport, { id: row.id, slug: row.slug, name: row.name, tagline: row.tagline, description: row.description, isActive: row.isActive, icon: row.icon, heroImage: row.heroImage, heroMediaId: row.heroMediaId, featuredEventIds: row.featuredEventIds, seo: row.seo as Sport['seo'] });
+}
+
+async function buildHub(sport: Sport, discipline: PublicDiscipline | null) {
+  const slug = sport.slug;
+  const prisma = await db();
   const today = utcToday();
-  const sportEvents = visibleEventWhere({ sportSlug: slug });
+  // One filter per kind of content; without a discipline they are the sport's own (everything, assigned or not).
+  const sportEvents = visibleEventWhere(discipline ? { sportSlug: slug, disciplineSlug: discipline.slug } : { sportSlug: slug });
+  const editionEvents = visibleEventWhere(discipline ? { disciplineSlug: discipline.slug } : {});
+  const articleScope: Prisma.ArticleWhereInput = discipline ? await disciplineArticleScope(slug, discipline.slug) : { sportSlug: slug };
+  const guideScope: Prisma.ArticleWhereInput = discipline ? { sportSlug: slug, eventSlug: null, disciplineSlug: discipline.slug } : { sportSlug: slug, eventSlug: null };
+  // Each page has its own featured list and header image: a group's are the group's, never the sport's.
+  const featuredIds = discipline ? discipline.featuredEventIds : sport.featuredEventIds;
+  const hero = discipline ? { key: `group-${discipline.id}`, mediaId: discipline.heroMediaId, url: discipline.heroImage } : { key: `sport-${sport.id}`, mediaId: sport.heroMediaId ?? null, url: sport.heroImage ?? null };
   const [featuredRows, flaggedRows, eventRows, eventTotal, latestArticles, articleTotal, guides, guideTotal, upcomingRows, recentPastRows, faqs] = await Promise.all([
-    sport.featuredEventIds.length ? prisma.sportEvent.findMany({ where: { ...sportEvents, id: { in: sport.featuredEventIds } } }) : Promise.resolve([]),
+    featuredIds.length ? prisma.sportEvent.findMany({ where: { ...sportEvents, id: { in: featuredIds } } }) : Promise.resolve([]),
     prisma.sportEvent.findMany({ where: { ...sportEvents, featured: true }, orderBy: [{ name: 'asc' }], take: HUB_LIMITS.featuredEvents }),
     prisma.sportEvent.findMany({ where: sportEvents, orderBy: [{ featured: 'desc' }, { name: 'asc' }, { id: 'asc' }], take: HUB_LIMITS.events }),
     prisma.sportEvent.count({ where: sportEvents }),
-    listArticles({ sportSlug: slug }, { take: HUB_LIMITS.latest }),
-    countArticles({ sportSlug: slug }),
-    listArticles({ sportSlug: slug, eventSlug: null }, { take: HUB_LIMITS.guides }),
-    countArticles({ sportSlug: slug, eventSlug: null }),
-    prisma.eventEdition.findMany({ where: { AND: [{ sportSlug: slug, event: visibleEventWhere() }, { OR: [editionTimingWhere('ongoing', today), editionTimingWhere('upcoming', today)] }] }, orderBy: editionTimingOrder('upcoming'), take: HUB_LIMITS.upcoming }),
-    prisma.eventEdition.findMany({ where: { AND: [{ sportSlug: slug, event: visibleEventWhere() }, editionTimingWhere('past', today)] }, orderBy: editionTimingOrder('past'), take: HUB_LIMITS.explore }),
-    prisma.faqEntry.findMany({ where: { sportId: sport.id, status: 'published' }, orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }], select: { id: true, question: true, answer: true } }),
+    listArticles(articleScope, { take: HUB_LIMITS.latest }),
+    countArticles(articleScope),
+    listArticles(guideScope, { take: HUB_LIMITS.guides }),
+    countArticles(guideScope),
+    prisma.eventEdition.findMany({ where: { AND: [{ sportSlug: slug, event: editionEvents }, { OR: [editionTimingWhere('ongoing', today), editionTimingWhere('upcoming', today)] }] }, orderBy: editionTimingOrder('upcoming'), take: HUB_LIMITS.upcoming }),
+    prisma.eventEdition.findMany({ where: { AND: [{ sportSlug: slug, event: editionEvents }, editionTimingWhere('past', today)] }, orderBy: editionTimingOrder('past'), take: HUB_LIMITS.explore }),
+    // The FAQ belongs to the sport page; FAQ entries have no discipline context.
+    discipline ? Promise.resolve([]) : prisma.faqEntry.findMany({ where: { sportId: sport.id, status: 'published' }, orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }], select: { id: true, question: true, answer: true } }),
   ]);
   // Featured: the editor's explicit choice (in their order), else events flagged "featured".
-  const chosen = sport.featuredEventIds.map((id) => featuredRows.find((e) => e.id === id)).filter((e): e is NonNullable<typeof e> => !!e);
+  const chosen = featuredIds.map((id) => featuredRows.find((e) => e.id === id)).filter((e): e is NonNullable<typeof e> => !!e);
   const featuredEvents = await summarizeEvents(chosen.length ? chosen.slice(0, HUB_LIMITS.featuredEvents) : flaggedRows);
   const editionCard = (ed: Prisma.EventEditionGetPayload<object>) => ({ ...toEdition(ed), sportName: sport.name, url: editionPath(ed.sportSlug, ed.eventSlug, ed.year) });
   // Hub header image: the sport's Media Library image (responsive sources), else its stored URL.
-  const heroImage: MediaAsset | null = sport.heroMediaId
-    ? (await mediaAssets([sport.heroMediaId]))[sport.heroMediaId] ?? null
-    : sport.heroImage ? { id: `sport-${sport.id}`, url: sport.heroImage, width: null, height: null, alt: '', sources: [] } : null;
+  const heroImage: MediaAsset | null = hero.mediaId
+    ? (await mediaAssets([hero.mediaId]))[hero.mediaId] ?? null
+    : hero.url ? { id: hero.key, url: hero.url, width: null, height: null, alt: '', sources: [] } : null;
   return {
     sport,
+    /** Set on a discipline's landing page; null on the sport hub itself. */
+    discipline,
+    /** The sport's browsable disciplines (for the links between the sport page and its discipline pages). */
+    disciplines: await getPublicDisciplines(slug),
     heroImage,
-    faqSchemaEnabled: !!sport.faqSchemaEnabled,
+    faqSchemaEnabled: !discipline && !!sport.faqSchemaEnabled,
     featuredEvents,
     upcomingEditions: upcomingRows.map(editionCard),
     latestArticles,
@@ -654,9 +714,11 @@ export async function getArticlePreview(id: string, viewer: { userId: string; ro
 
 export const LATEST_PAGE_SIZE = 6;
 
-export async function getLatest({ sport, type, page }: { sport?: string; type?: string; page: number }) {
+export async function getLatest({ sport, type, page, discipline }: { sport?: string; type?: string; page: number; discipline?: string }) {
   const prisma = await db();
-  const where: Prisma.ArticleWhereInput = {};
+  // A discipline filter only means something inside its sport, and only for a discipline visitors can browse.
+  const browsable = sport && discipline ? (await getPublicDisciplines(sport)).find((d) => d.slug === discipline) ?? null : null;
+  const where: Prisma.ArticleWhereInput = browsable ? await disciplineArticleScope(sport!, browsable.slug) : {};
   if (sport) where.sportSlug = sport;
   if (type) where.articleType = type;
   const [total, allPublished, articles, sports] = await Promise.all([
@@ -667,7 +729,7 @@ export async function getLatest({ sport, type, page }: { sport?: string; type?: 
   ]);
   // PHASE R: the type filter lists the active, database-backed Article Types.
   const types = (await (await import('../../articleTypes')).activeArticleTypes()).map((t) => t.name);
-  return { total, allPublished, articles, sports, types, totalPages: Math.max(1, Math.ceil(total / LATEST_PAGE_SIZE)) };
+  return { total, allPublished, articles, sports, types, totalPages: Math.max(1, Math.ceil(total / LATEST_PAGE_SIZE)), discipline: browsable };
 }
 
 export async function getAuthorPage(slug: string) {

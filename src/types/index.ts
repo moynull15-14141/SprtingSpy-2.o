@@ -131,9 +131,32 @@ export interface Sport {
   faqSchemaEnabled?: boolean;
 }
 
+/** A named subdivision of one sport (Athletics → Running). Unique by (sportSlug, slug). */
+export interface Discipline {
+  id: string;
+  sportSlug: string;
+  slug: string;
+  name: string;
+  description: string;
+  order: number;
+  /** Hidden: no public page or label. */
+  isVisible: boolean;
+  /** Retired when false: keeps its assignments, cannot be given to more content. */
+  isActive: boolean;
+  seo: SeoMetadata;
+  /** The group's own landing-page settings (same meaning as on Sport). */
+  tagline: string;
+  icon?: string | null;
+  heroImage?: string | null;
+  heroMediaId?: string | null;
+  featuredEventIds: string[];
+}
+
 export interface SportEvent {
   id: string;
   sportSlug: string; // e.g. "tennis"
+  /** Optional discipline of this event's sport. */
+  disciplineSlug?: string | null;
   slug: string; // e.g. "french-open"
   name: string; // e.g. "French Open"
   shortName: string; // e.g. "Roland-Garros"
@@ -206,6 +229,8 @@ export interface Article extends ArticleReviewFields {
   title: string;
   subtitle?: string;
   sportSlug: string;
+  /** Optional discipline of this article's sport. */
+  disciplineSlug?: string | null;
   eventSlug?: string; // Optional: articles can belong directly to sport
   editionYear?: number; // Optional: general articles or event-level articles
   articleType: ArticleType;

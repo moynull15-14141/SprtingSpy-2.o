@@ -23,15 +23,21 @@
  *   1. /{sport}/{segment}/ is served by the EVENT when one exists, so an
  *      event-less article may not use the slug of an event in its sport, and
  *      an event may not take the slug of an event-less article in its sport.
+ *      A DISCIPLINE's page will live at the same address, so a discipline,
+ *      an event and an event-less article of one sport never share a slug
+ *      (checked in all three directions, before any discipline page exists).
  *   2. A sport slug may not equal a top-level site path (/search/, /events/ …).
  */
 
 import type { Prisma } from './generated/prisma/client';
 import { prisma } from './db';
-import { articlePath, editionPath, eventPath, sportPath } from '../src/lib/paths';
+import { articlePath, disciplinePath, editionPath, eventPath, sportPath } from '../src/lib/paths';
 import { releasePath, saveRedirect } from './redirects';
 
 type Db = Prisma.TransactionClient | typeof prisma;
+
+/** The one URL of a discipline's landing page, for redirectChangedUrls after its slug changes. */
+export const disciplineUrlSnapshot = (d: { id: string; sportSlug: string; slug: string }): UrlSnapshot => new Map([[`discipline:${d.id}`, strip(disciplinePath(d.sportSlug, d.slug))]]);
 
 /** Top-level paths owned by the site itself (never usable as a sport slug). */
 export const RESERVED_SPORT_SLUGS = [
@@ -59,6 +65,8 @@ export async function snapshotUrls(db: Db, scope: Scope): Promise<UrlSnapshot> {
   if (!scope.eventSlug) {
     const sport = await db.sport.findUnique({ where: { slug: scope.sportSlug }, select: { id: true, slug: true } });
     if (sport) snap.set(`sport:${sport.id}`, strip(sportPath(sport.slug)));
+    // Discipline pages live directly under the sport and move with it.
+    for (const d of await db.discipline.findMany({ where: { sportSlug: scope.sportSlug }, select: { id: true, sportSlug: true, slug: true } })) snap.set(`discipline:${d.id}`, strip(disciplinePath(d.sportSlug, d.slug)));
   }
   const eventWhere = scope.eventSlug ? { sportSlug: scope.sportSlug, slug: scope.eventSlug } : { sportSlug: scope.sportSlug };
   const [events, editions, articles] = await Promise.all([
@@ -78,7 +86,7 @@ export async function snapshotUrls(db: Db, scope: Scope): Promise<UrlSnapshot> {
 
 /** Current URLs of the same ids after a change. */
 async function resolveIds(db: Db, before: UrlSnapshot): Promise<UrlSnapshot> {
-  const ids = { sport: [] as string[], event: [] as string[], edition: [] as string[], article: [] as string[] };
+  const ids = { sport: [] as string[], discipline: [] as string[], event: [] as string[], edition: [] as string[], article: [] as string[] };
   for (const key of before.keys()) {
     const [kind, id] = key.split(/:(.*)/s);
     ids[kind as keyof typeof ids].push(id);
@@ -90,6 +98,7 @@ async function resolveIds(db: Db, before: UrlSnapshot): Promise<UrlSnapshot> {
     ids.article.length ? db.article.findMany({ where: { id: { in: ids.article } }, select: { id: true, sportSlug: true, eventSlug: true, editionYear: true, slug: true, status: true } }) : [],
   ]);
   const after: UrlSnapshot = new Map();
+  if (ids.discipline.length) for (const d of await db.discipline.findMany({ where: { id: { in: ids.discipline } }, select: { id: true, sportSlug: true, slug: true } })) after.set(`discipline:${d.id}`, strip(disciplinePath(d.sportSlug, d.slug)));
   for (const s of sports) after.set(`sport:${s.id}`, strip(sportPath(s.slug)));
   for (const e of events) after.set(`event:${e.id}`, strip(eventPath(e.sportSlug, e.slug)));
   for (const ed of editions) after.set(`edition:${ed.id}`, strip(editionPath(ed.sportSlug, ed.eventSlug, ed.year)));
@@ -142,12 +151,24 @@ export async function assertArticleSlugFree(db: Db, a: { sportSlug: string; even
   if (a.eventSlug && a.editionYear) return; // edition articles live four segments deep
   const event = await db.sportEvent.findUnique({ where: { sportSlug_slug: { sportSlug: a.sportSlug, slug: a.slug } }, select: { name: true } });
   if (event) throw new UrlConflict(`/${a.sportSlug}/${a.slug}/ is the URL of the event "${event.name}". Choose a different article slug.`);
+  const discipline = await db.discipline.findUnique({ where: { sportSlug_slug: { sportSlug: a.sportSlug, slug: a.slug } }, select: { name: true } });
+  if (discipline) throw new UrlConflict(`/${a.sportSlug}/${a.slug}/ belongs to the group "${discipline.name}". Choose a different article slug.`);
 }
 
 /** Rule 1 (event side): an event may not take the URL of an event-less article. */
 export async function assertEventSlugFree(db: Db, e: { sportSlug: string; slug: string; ignoreEventId?: string }) {
   const article = await db.article.findFirst({ where: { sportSlug: e.sportSlug, slug: e.slug, editionYear: null }, select: { title: true, status: true } });
   if (article) throw new UrlConflict(`/${e.sportSlug}/${e.slug}/ is already used by the article "${article.title}" (${article.status}). Choose a different event slug or move that article first.`);
+  const discipline = await db.discipline.findUnique({ where: { sportSlug_slug: { sportSlug: e.sportSlug, slug: e.slug } }, select: { name: true } });
+  if (discipline) throw new UrlConflict(`/${e.sportSlug}/${e.slug}/ belongs to the group "${discipline.name}". Choose a different event slug.`);
+}
+
+/** Rule 1 (discipline side): a discipline may not take the URL of an event or of an event-less article of its sport. */
+export async function assertDisciplineSlugFree(db: Db, d: { sportSlug: string; slug: string }) {
+  const event = await db.sportEvent.findUnique({ where: { sportSlug_slug: { sportSlug: d.sportSlug, slug: d.slug } }, select: { name: true } });
+  if (event) throw new UrlConflict(`/${d.sportSlug}/${d.slug}/ is the URL of the event "${event.name}". Choose a different group slug.`);
+  const article = await db.article.findFirst({ where: { sportSlug: d.sportSlug, slug: d.slug, editionYear: null }, select: { title: true, status: true } });
+  if (article) throw new UrlConflict(`/${d.sportSlug}/${d.slug}/ is already used by the article "${article.title}" (${article.status}). Choose a different group slug.`);
 }
 
 /** Existing data that breaks rule 1 (reported by the SEO scanner; never auto-fixed). */

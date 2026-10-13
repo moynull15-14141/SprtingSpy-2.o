@@ -12,7 +12,7 @@
  * 301 redirects for every URL under the sport (server-side).
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { SportIconPicker } from './SportIconPicker';
 import { SportIcon } from '../ui/SportIcon';
 import { suggestSportIcons } from '../../config/sportIcons';
@@ -20,11 +20,13 @@ import { useApp } from '../../context/AppContext';
 import { Sport } from '../../types';
 import { Button } from '../ui/Button';
 import { EventConfigurationEditor } from './EventConfigurationEditor';
+import { DisciplineManager } from './DisciplineManager';
+import { GroupEditor } from './GroupEditor';
 import { MediaImageField } from './media/MediaShared';
 import { SeoFields, seoToDraft, draftToSeo, EMPTY_SEO_DRAFT, type SeoDraft } from './EntityFields';
 
 export const AdminSports: React.FC = () => {
-  const { sports, events, mediaItems, addSport, updateSport, deleteSport, navigate } = useApp();
+  const { sports, events, mediaItems, disciplines, addSport, updateSport, deleteSport, navigate } = useApp();
   const [isCreating, setIsCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [configurationSportSlug, setConfigurationSportSlug] = useState<string | null>(null);
@@ -44,6 +46,9 @@ export const AdminSports: React.FC = () => {
   const [faqSchemaEnabled, setFaqSchemaEnabled] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const editingSport = sports.find((s) => s.id === editingId);
+  // A group of the sport being edited, open in its own full editor (the sport form waits behind it).
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
+  const editingGroup = editingSport ? disciplines.find((d) => d.id === editingGroupId && d.sportSlug === editingSport.slug) : undefined;
 
   const resetForm = () => {
     setName('');
@@ -59,6 +64,8 @@ export const AdminSports: React.FC = () => {
     setFaqSchemaEnabled(false);
     setIsCreating(false);
     setEditingId(null);
+    setEditingGroupId(null);
+    setGroupDirty(false);
   };
 
   const handleNameChange = (val: string) => {
@@ -68,29 +75,51 @@ export const AdminSports: React.FC = () => {
     }
   };
 
+  /** The form as it would be saved. */
+  const sportFormValues = () => ({
+    name,
+    slug,
+    tagline,
+    description,
+    order: Number(order),
+    isVisible,
+    // Store the concrete icon (chosen, or the current top suggestion) so it never changes by itself.
+    icon: icon ?? suggestSportIcons(name, slug, 1)[0]?.emoji ?? null,
+    heroImage: heroImage || null,
+    featuredEventIds,
+    faqSchemaEnabled,
+    // Blank SEO fields mean "automatic default"; canonical/noindex and other stored keys are kept.
+    seo: draftToSeo(seoDraft, editingSport?.seo),
+  });
+  const storedSportValues = (s: Sport): Record<string, unknown> => ({ name: s.name, slug: s.slug, tagline: s.tagline, description: s.description, order: s.order, isVisible: s.isVisible, icon: s.icon ?? null, heroImage: s.heroImage || null, featuredEventIds: s.featuredEventIds, faqSchemaEnabled: !!s.faqSchemaEnabled, seo: s.seo });
+  // Typed but not yet saved in the sport form (an untouched icon is not a change: it is only suggested).
+  const sportDirty = !!editingSport && Object.entries(sportFormValues()).some(([k, v]) => (k !== 'icon' || icon !== null) && JSON.stringify(v) !== JSON.stringify(storedSportValues(editingSport)[k]));
+  const [groupDirty, setGroupDirty] = useState(false);
+  const unsaved = (isCreating && sportDirty) || (!!editingGroup && groupDirty);
+  // Unsaved sport or group edits are never dropped silently: the browser asks before the tab closes or
+  // reloads, and the CMS asks before another desk is opened (the same guard the Event configuration editor uses).
+  useEffect(() => {
+    if (!unsaved) return;
+    const onUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    const onDeskClick = (event: MouseEvent) => {
+      const button = (event.target as Element | null)?.closest('button[data-cms-navigation]');
+      if (!button || button.getAttribute('aria-current') === 'page') return;
+      if (!window.confirm('You have unsaved changes on this screen. Leave without saving them?')) { event.preventDefault(); event.stopPropagation(); }
+    };
+    window.addEventListener('beforeunload', onUnload);
+    document.addEventListener('click', onDeskClick, true);
+    return () => { window.removeEventListener('beforeunload', onUnload); document.removeEventListener('click', onDeskClick, true); };
+  }, [unsaved]);
+
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !slug.trim()) return;
 
-    const full = {
-      name,
-      slug,
-      tagline,
-      description,
-      order: Number(order),
-      isVisible,
-      // Store the concrete icon (chosen, or the current top suggestion) so it never changes by itself.
-      icon: icon ?? suggestSportIcons(name, slug, 1)[0]?.emoji ?? null,
-      heroImage: heroImage || null,
-      featuredEventIds,
-      faqSchemaEnabled,
-      // Blank SEO fields mean "automatic default"; canonical/noindex and other stored keys are kept.
-      seo: draftToSeo(seoDraft, editingSport?.seo),
-    };
+    const full = sportFormValues();
 
     if (editingId && editingSport) {
       // Only the fields that changed: an ordinary save never overwrites stored values with defaults.
-      const before: Record<string, unknown> = { name: editingSport.name, slug: editingSport.slug, tagline: editingSport.tagline, description: editingSport.description, order: editingSport.order, isVisible: editingSport.isVisible, icon: editingSport.icon ?? null, heroImage: editingSport.heroImage || null, featuredEventIds: editingSport.featuredEventIds, faqSchemaEnabled: !!editingSport.faqSchemaEnabled, seo: editingSport.seo };
+      const before = storedSportValues(editingSport);
       const changes = Object.fromEntries(Object.entries(full).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(before[k])));
       if (changes.slug && !confirm(`Change the URL from /${editingSport.slug}/ to /${slug}/? Every page under this sport moves; old URLs will redirect (301) to the new ones.`)) return;
       if (Object.keys(changes).length) updateSport(editingId, changes as Partial<Sport>);
@@ -133,10 +162,10 @@ export const AdminSports: React.FC = () => {
       <div className="flex items-center justify-between pb-4 border-b border-stone-200 dark:border-stone-800">
         <div>
           <h2 className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">
-            Sports Disciplines ({sports.length})
+            Sports ({sports.length})
           </h2>
           <p className="text-xs text-stone-500 mt-1 dark:text-stone-400">
-            Dynamic catalog of sports hubs. Extensible beyond the initial 12 disciplines.
+            Catalog of sports hubs. A sport can have its own groups (edit the sport to manage them).
           </p>
         </div>
         {!isCreating && (
@@ -152,13 +181,17 @@ export const AdminSports: React.FC = () => {
         </div>
       )}
 
-      {isCreating && (
+      {isCreating && editingSport && editingGroup && (
+        <GroupEditor key={editingGroup.id} group={editingGroup} sportName={editingSport.name} sportHasUnsavedChanges={sportDirty} onDirtyChange={setGroupDirty} onClose={() => { setEditingGroupId(null); setGroupDirty(false); }} />
+      )}
+
+      {isCreating && !editingGroup && (
         <form onSubmit={handleSave} className="p-6 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900/60 space-y-4">
           <div className="flex items-center justify-between border-b border-stone-200 dark:border-stone-800 pb-2">
             <h3 className="font-serif text-lg font-bold text-stone-900 dark:text-stone-100">
-              {editingId ? 'Edit Sport Hub' : 'Add New Sport Discipline'}
+              {editingId ? 'Edit Sport Hub' : 'Add New Sport'}
             </h3>
-            <button type="button" onClick={resetForm} className="text-xs text-stone-500 dark:text-stone-400">
+            <button type="button" onClick={() => { if (!sportDirty || window.confirm('Discard the unsaved changes to this sport?')) resetForm(); }} className="text-xs text-stone-500 dark:text-stone-400">
               Cancel
             </button>
           </div>
@@ -276,10 +309,14 @@ export const AdminSports: React.FC = () => {
             </fieldset>
           )}
 
+          {editingSport ? <DisciplineManager sportSlug={editingSport.slug} sportName={editingSport.name} onEdit={setEditingGroupId} /> : (
+            <p className="text-[11px] text-stone-500 dark:text-stone-400">Groups can be added after the sport has been created.</p>
+          )}
+
           <SeoFields idPrefix="sport-seo" value={seoDraft} onChange={setSeoDraft} defaults={{ title: `${name || 'Sport'} Guides, Tournament Schedules & Records | SportingSpy`, description }} />
 
           <div className="pt-2 flex justify-end gap-2 border-t border-stone-200 dark:border-stone-800">
-            <Button type="button" variant="outline" size="sm" onClick={resetForm}>
+            <Button type="button" variant="outline" size="sm" onClick={() => { if (!sportDirty || window.confirm('Discard the unsaved changes to this sport?')) resetForm(); }}>
               Cancel
             </Button>
             <Button type="submit" size="sm">

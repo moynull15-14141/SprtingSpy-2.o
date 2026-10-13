@@ -3,9 +3,11 @@ import type { Request, Response, NextFunction } from 'express';
 // Public JSON is never a Prisma nested-write instruction. These are the
 // existing editor fields, not relation names or immutable primary keys.
 const fields: Record<string, string[]> = {
-  articles: ['slug', 'title', 'subtitle', 'sportSlug', 'eventSlug', 'editionYear', 'articleType', 'excerpt', 'content', 'body', 'featuredImage', 'featuredMediaId', 'authorId', 'publishedAt', 'updatedAt', 'scheduledFor', 'status', 'readingTimeMinutes', 'featured', 'tables', 'references', 'seo', 'faqSchemaEnabled'],
+  articles: ['slug', 'title', 'subtitle', 'sportSlug', 'eventSlug', 'editionYear', 'articleType', 'excerpt', 'content', 'body', 'featuredImage', 'featuredMediaId', 'authorId', 'publishedAt', 'updatedAt', 'scheduledFor', 'status', 'readingTimeMinutes', 'featured', 'tables', 'references', 'seo', 'faqSchemaEnabled', 'disciplineSlug'],
   sports: ['slug', 'name', 'tagline', 'description', 'order', 'isVisible', 'featuredEventIds', 'colorTheme', 'heroImage', 'seo', 'icon', 'faqSchemaEnabled'],
-  events: ['sportSlug', 'slug', 'name', 'shortName', 'description', 'descriptionBody', 'history', 'frequency', 'defaultVenue', 'defaultLocation', 'currentEditionYear', 'allEditionYears', 'featured', 'isVisible', 'featuredImage', 'officialSourceUrl', 'eventType', 'seo', 'sportSpecificValues', 'alternativeNames', 'faqSchemaEnabled'],
+  events: ['sportSlug', 'slug', 'name', 'shortName', 'description', 'descriptionBody', 'history', 'frequency', 'defaultVenue', 'defaultLocation', 'currentEditionYear', 'allEditionYears', 'featured', 'isVisible', 'featuredImage', 'officialSourceUrl', 'eventType', 'seo', 'sportSpecificValues', 'alternativeNames', 'faqSchemaEnabled', 'disciplineSlug'],
+  // A discipline never moves to another sport: sportSlug is not editable.
+  disciplines: ['slug', 'name', 'tagline', 'description', 'order', 'isVisible', 'isActive', 'icon', 'heroImage', 'featuredEventIds', 'seo'],
   editions: ['eventSlug', 'sportSlug', 'year', 'title', 'startDate', 'endDate', 'venue', 'location', 'status', 'quickFacts', 'prizeMoneyTotal', 'defendingChampions', 'qualificationInfo', 'participantsCount', 'officialSourceUrl', 'description', 'descriptionBody', 'featuredImage', 'seo', 'faqSchemaEnabled'],
   authors: ['slug', 'name', 'roleTitle', 'bio', 'avatar', 'twitter', 'email', 'articleCount', 'userId'],
   comments: ['status'],

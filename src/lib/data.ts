@@ -22,6 +22,7 @@ export const getNavSports = cache(cached('navSports', content.getNavSports));
 export const getAdSlots = cache(cached('adSlots', content.getAdSlots));
 export const getSportsDirectory = cache(cached('sportsDirectory', content.getSportsDirectory));
 export const getSportHub = cache(cached('sportHub', content.getSportHub));
+export const getDisciplineHub = cache(cached('disciplineHub', content.getDisciplineHub));
 export const getEventsDirectory = cache(cached('eventsDirectory', content.getEventsDirectory));
 export const getEventPage = cache(cached('eventPage', content.getEventPage));
 export const getEditionPage = cache(cached('editionPage', content.getEditionPage));

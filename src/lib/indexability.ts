@@ -43,6 +43,22 @@ export function sportIndexability(s: { isVisible: boolean; seo?: SeoMetadata; pu
   return yes;
 }
 
+/**
+ * A group's landing page ("discipline" is the internal name of a group). It
+ * exists publicly only while its sport and the group itself are visible; a
+ * retired group keeps its page (old links still work) but is never an index
+ * target; an empty one is thin.
+ */
+export function disciplineIndexability(d: { sportVisible: boolean; isVisible: boolean; isActive: boolean; seo?: SeoMetadata; publishedArticleCount: number; visibleEventCount: number }, path?: string, origin?: string): Indexability {
+  if (!d.sportVisible) return no('its sport is hidden');
+  if (!d.isVisible) return no('group is hidden');
+  if (!d.isActive) return no('group is retired');
+  if (d.seo?.noIndex) return no('editor set noindex');
+  if (path && origin && canonicalElsewhere(d.seo, path, origin)) return no('canonical points to another URL');
+  if (d.publishedArticleCount === 0 && d.visibleEventCount === 0) return no('thin: no published articles or events yet');
+  return yes;
+}
+
 export function eventIndexability(e: { isVisible: boolean; sportVisible: boolean; seo?: SeoMetadata }, path?: string, origin?: string): Indexability {
   if (!e.isVisible || !e.sportVisible) return no('event or its sport is hidden');
   if (e.seo?.noIndex) return no('editor set noindex');

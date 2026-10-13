@@ -23,7 +23,7 @@ const STAFF_ROLES = ['Admin', 'Editor', 'Author'];
 
 interface HeaderProps {
   /** Visible sports for the navigation menus, loaded on the server. */
-  sports: { id: string; slug: string; name: string; icon?: string | null }[];
+  sports: { id: string; slug: string; name: string; icon?: string | null; groups?: { slug: string; name: string; icon?: string | null }[] }[];
   /** PHASE F.1: navigation items from the Site Experience (published, or draft in preview). */
   navigation: NavItem[];
   /** PHASE H: site name from Admin → Settings (defaults to the built-in brand). */
@@ -53,6 +53,18 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
   const { currentPath, navigate, theme, themePreference, setThemePreference, currentUser, isAuthenticated, login, logout } = useSite();
   const [isSportsMenuOpen, setIsSportsMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  // Mobile: the sport whose groups are expanded (tap to expand, one at a time).
+  const [mobileSportOpen, setMobileSportOpen] = useState<string | null>(null);
+  // A mouse pointer opens the Sports panel by hovering; the click that follows must not close it again.
+  const sportsOpenedByHover = useRef(false);
+  const sportsPanelRef = useRef<HTMLDivElement>(null);
+  const focusSportsLink = (which: 'first' | 'next' | 'previous' | 'last') => {
+    const links = [...(sportsPanelRef.current?.querySelectorAll<HTMLAnchorElement>('a[href]') ?? [])];
+    if (!links.length) return;
+    const at = links.indexOf(document.activeElement as HTMLAnchorElement);
+    const index = which === 'first' ? 0 : which === 'last' ? links.length - 1 : which === 'next' ? Math.min(links.length - 1, at + 1) : Math.max(0, at - 1);
+    links[index].focus();
+  };
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -119,12 +131,27 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
           {/* ZONE 2: 4-6 clean text navigation links */}
           <nav aria-label="Main" className="hidden min-w-0 flex-1 flex-wrap justify-center md:flex items-center gap-x-3 gap-y-1 mx-3 text-sm font-medium lg:gap-x-6">
             {navigation.filter((item) => item.desktop).map((item) => item.kind === 'sportsMenu' ? (
-            <div key={item.id} className="relative" ref={sportsMenuRef}>
+            <div key={item.id} className="relative" ref={sportsMenuRef}
+              // Hovering with a mouse opens the panel. It closes on Escape, an outside click or navigation, not when the pointer leaves.
+              onPointerEnter={(e) => { if (e.pointerType === 'mouse' && !isSportsMenuOpen) { sportsOpenedByHover.current = true; setIsSportsMenuOpen(true); } }}
+            >
               <button
                 ref={sportsButtonRef}
                 type="button"
-                onClick={() => setIsSportsMenuOpen(!isSportsMenuOpen)}
+                onClick={() => {
+                  if (isSportsMenuOpen && sportsOpenedByHover.current) { sportsOpenedByHover.current = false; return; }
+                  sportsOpenedByHover.current = false;
+                  setIsSportsMenuOpen(!isSportsMenuOpen);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key !== 'ArrowDown') return;
+                  e.preventDefault();
+                  sportsOpenedByHover.current = false;
+                  if (isSportsMenuOpen) focusSportsLink('first');
+                  else { setIsSportsMenuOpen(true); requestAnimationFrame(() => focusSportsLink('first')); }
+                }}
                 aria-expanded={isSportsMenuOpen}
+                aria-controls="sports-menu-panel"
                 data-nav-item={item.id}
                 className={`flex items-center gap-1 transition-colors py-2 cursor-pointer ${
                   isActive('/sports') || isSportsMenuOpen
@@ -147,9 +174,16 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
               {/* Sports Mega Discovery Dropdown */}
               {isSportsMenuOpen && (
                 <div
-                  className="absolute left-0 mt-2 w-96 rounded-xl bg-white dark:bg-stone-900 shadow-xl border border-stone-200 dark:border-stone-800 p-4 grid grid-cols-2 gap-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
+                  id="sports-menu-panel"
+                  ref={sportsPanelRef}
+                  data-testid="sports-menu"
+                  onKeyDown={(e) => {
+                    const move = e.key === 'ArrowDown' ? 'next' : e.key === 'ArrowUp' ? 'previous' : e.key === 'Home' ? 'first' : e.key === 'End' ? 'last' : null;
+                    if (move) { e.preventDefault(); focusSportsLink(move); }
+                  }}
+                  className={`absolute left-0 mt-2 ${sports.some((sp) => sp.groups?.length) ? 'w-[34rem] max-w-[calc(100vw-2rem)]' : 'w-96'} max-h-[75vh] overflow-y-auto rounded-xl bg-white dark:bg-stone-900 shadow-xl border border-stone-200 dark:border-stone-800 p-4 z-50 animate-in fade-in slide-in-from-top-2 duration-150`}
                 >
-                  <div className="col-span-2 pb-2 mb-2 border-b border-stone-100 dark:border-stone-800 flex justify-between items-center text-xs text-stone-500 dark:text-stone-400">
+                  <div className="pb-2 mb-2 border-b border-stone-100 dark:border-stone-800 flex justify-between items-center text-xs text-stone-500 dark:text-stone-400">
                     <span className="font-semibold uppercase tracking-wider">All Active Sports</span>
                     <Link
                       href={item.href}
@@ -159,18 +193,36 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
                       View Directory &rarr;
                     </Link>
                   </div>
-                  {sports
-                    .map((sport) => (
-                      <Link
-                        key={sport.id}
-                        href={`/${sport.slug}/`}
-                        onClick={() => setIsSportsMenuOpen(false)}
-                        className="text-left px-3 py-2 rounded-lg text-sm text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-950 dark:hover:text-white transition-colors cursor-pointer flex items-center gap-3"
-                      >
-                        <SportIcon slug={sport.slug} name={sport.name} icon={sport.icon} />
-                        <span className="font-medium">{sport.name}</span>
-                      </Link>
+                  {/* Two levels: each sport, and directly under it the groups a visitor can browse. */}
+                  <ul className="grid grid-cols-2 gap-2">
+                    {sports.map((sport) => (
+                      <li key={sport.id} data-sport={sport.slug} className="min-w-0">
+                        <Link
+                          href={`/${sport.slug}/`}
+                          onClick={() => setIsSportsMenuOpen(false)}
+                          className="text-left px-3 py-2 rounded-lg text-sm text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-950 dark:hover:text-white transition-colors cursor-pointer flex items-center gap-3"
+                        >
+                          <SportIcon slug={sport.slug} name={sport.name} icon={sport.icon} />
+                          <span className="font-medium">{sport.name}</span>
+                        </Link>
+                        {!!sport.groups?.length && (
+                          <ul aria-label={`${sport.name} groups`} className="ml-6 mt-0.5 mb-1 border-l border-stone-200 dark:border-stone-700 pl-3 space-y-0.5">
+                            {sport.groups.map((group) => (
+                              <li key={group.slug} data-group={group.slug}>
+                                <Link
+                                  href={`/${sport.slug}/${group.slug}/`}
+                                  onClick={() => setIsSportsMenuOpen(false)}
+                                  className="block rounded px-2 py-1 text-xs text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-950 dark:hover:text-white"
+                                >
+                                  {group.icon && <span aria-hidden="true" className="mr-1">{group.icon}</span>}{group.name}
+                                </Link>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </li>
                     ))}
+                  </ul>
                 </div>
               )}
             </div>
@@ -340,19 +392,46 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
                 >
                   {item.mobileLabel || item.label}
                 </Link>
-                <div className="grid grid-cols-2 gap-1 pl-4 pr-2">
-                  {sports.slice(0, 8).map((sp) => (
-                    <Link
-                      key={sp.id}
-                      href={`/${sp.slug}/`}
-                      onClick={() => setIsMobileMenuOpen(false)}
-                      className="flex items-center gap-2 text-left text-xs py-1.5 px-2 text-stone-600 dark:text-stone-400 hover:text-amber-600"
-                    >
-                      <SportIcon slug={sp.slug} name={sp.name} icon={sp.icon} size="sm" />
-                      {sp.name}
-                    </Link>
+                {/* The first eight sports as before, plus any later sport that has groups (so its groups stay reachable). */}
+                <ul className="grid grid-cols-2 gap-1 pl-4 pr-2" data-testid="mobile-sports">
+                  {sports.filter((sp, index) => index < 8 || !!sp.groups?.length).map((sp) => (
+                    <li key={sp.id} data-sport={sp.slug} className={sp.groups?.length && mobileSportOpen === sp.slug ? 'col-span-2' : undefined}>
+                      <div className="flex items-center">
+                        <Link
+                          href={`/${sp.slug}/`}
+                          onClick={() => setIsMobileMenuOpen(false)}
+                          className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs py-1.5 px-2 text-stone-600 dark:text-stone-400 hover:text-amber-600"
+                        >
+                          <SportIcon slug={sp.slug} name={sp.name} icon={sp.icon} size="sm" />
+                          {sp.name}
+                        </Link>
+                        {!!sp.groups?.length && (
+                          <button
+                            type="button"
+                            onClick={() => setMobileSportOpen(mobileSportOpen === sp.slug ? null : sp.slug)}
+                            aria-expanded={mobileSportOpen === sp.slug}
+                            aria-controls={`mobile-groups-${sp.slug}`}
+                            aria-label={`${mobileSportOpen === sp.slug ? 'Hide' : 'Show'} ${sp.name} groups`}
+                            className="shrink-0 rounded p-2 text-stone-500 hover:bg-stone-100 dark:text-stone-400 dark:hover:bg-stone-800"
+                          >
+                            <svg className={`h-3.5 w-3.5 transition-transform ${mobileSportOpen === sp.slug ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                          </button>
+                        )}
+                      </div>
+                      {!!sp.groups?.length && mobileSportOpen === sp.slug && (
+                        <ul id={`mobile-groups-${sp.slug}`} aria-label={`${sp.name} groups`} className="ml-5 mb-1 border-l border-stone-200 pl-3 dark:border-stone-700">
+                          {sp.groups.map((group) => (
+                            <li key={group.slug} data-group={group.slug}>
+                              <Link href={`/${sp.slug}/${group.slug}/`} onClick={() => setIsMobileMenuOpen(false)} className="block py-1.5 px-2 text-xs text-stone-600 dark:text-stone-400 hover:text-amber-600">
+                                {group.icon && <span aria-hidden="true" className="mr-1">{group.icon}</span>}{group.name}
+                              </Link>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
                   ))}
-                </div>
+                </ul>
               </div>
             ) : (
               <SiteLink

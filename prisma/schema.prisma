@@ -154,12 +154,53 @@ model Sport {
   // PHASE R: FAQPage structured data for this sport's FAQ is opt-in (validated before output).
   faqSchemaEnabled Boolean  @default(false)
 
-  events    SportEvent[]
-  articles  Article[]
-  heroMedia MediaItem?   @relation("SportHeroMedia", fields: [heroMediaId], references: [id], onDelete: Restrict)
-  faqs      FaqEntry[]
+  events      SportEvent[]
+  articles    Article[]
+  disciplines Discipline[]
+  heroMedia   MediaItem?   @relation("SportHeroMedia", fields: [heroMediaId], references: [id], onDelete: Restrict)
+  faqs        FaqEntry[]
 
   @@index([isVisible])
+  @@index([heroMediaId])
+}
+
+// A named subdivision of ONE sport (Athletics → Running). Not a sport and not
+// a level of the Sport → Event → Edition → Article hierarchy: Events and
+// Articles keep their required sport and may name at most one discipline of
+// that same sport. The composite foreign keys on (sportSlug, disciplineSlug)
+// make a discipline of another sport impossible at the database level.
+model Discipline {
+  id          String   @id
+  sportSlug   String
+  slug        String
+  name        String
+  description String   @default("")
+  order       Int      @default(0)
+  // Hidden: no public page or label. Retired (isActive false): keeps its
+  // existing assignments but cannot be given to more content.
+  isVisible   Boolean  @default(true)
+  isActive    Boolean  @default(true)
+  // Same shape as Sport.seo / SportEvent.seo (validateSeo).
+  seo         Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  // The group's own landing-page settings, same meaning and rules as on Sport.
+  tagline          String   @default("")
+  // Icon from the curated set in src/config/sportIcons.ts; null = none shown.
+  icon             String?
+  // Header image: a Media Library item (heroImage keeps the resolved URL).
+  heroImage        String?
+  heroMediaId      String?
+  // Events of THIS group shown first on its page, in this order.
+  featuredEventIds String[] @default([])
+
+  sport     Sport        @relation(fields: [sportSlug], references: [slug])
+  heroMedia MediaItem?   @relation("DisciplineHeroMedia", fields: [heroMediaId], references: [id], onDelete: Restrict)
+  events    SportEvent[]
+  articles  Article[]
+
+  @@unique([sportSlug, slug])
+  @@index([sportSlug, order])
   @@index([heroMediaId])
 }
 
@@ -192,12 +233,15 @@ model SportEvent {
   // PHASE R: Media Library relation for featuredImage (URL kept as the resolved value).
   featuredMediaId     String?
   faqSchemaEnabled    Boolean @default(false)
+  // Optional discipline of this event's sport; null = the whole sport (or several disciplines).
+  disciplineSlug      String?
   // PHASE M: weighted full-text document maintained by PostgreSQL (migration
   // 20261009090000_phase_m_event_search). Never written by the application;
   // read only through server/services/search.
   searchVector        Unsupported("tsvector")? @default(dbgenerated("(((setweight(to_tsvector('english'::regconfig, ((((COALESCE(name, ''::text) || ' '::text) || COALESCE(\"shortName\", ''::text)) || ' '::text) || COALESCE(\"alternativeNames\", ''::text))), 'A'::\"char\") || setweight(to_tsvector('english'::regconfig, ((((replace(COALESCE(\"sportSlug\", ''::text), '-'::text, ' '::text) || ' '::text) || replace(COALESCE(slug, ''::text), '-'::text, ' '::text)) || ' '::text) || COALESCE(\"eventType\", ''::text))), 'B'::\"char\")) || setweight(to_tsvector('english'::regconfig, ((((COALESCE(\"defaultVenue\", ''::text) || ' '::text) || COALESCE(\"defaultLocation\", ''::text)) || ' '::text) || COALESCE(frequency, ''::text))), 'C'::\"char\")) || setweight(to_tsvector('english'::regconfig, ((COALESCE(description, ''::text) || ' '::text) || COALESCE(history, ''::text))), 'D'::\"char\"))"))
 
   sport         Sport          @relation(fields: [sportSlug], references: [slug])
+  discipline    Discipline?    @relation(fields: [sportSlug, disciplineSlug], references: [sportSlug, slug], onDelete: Restrict)
   editions      EventEdition[]
   faqs          FaqEntry[]
   featuredMedia MediaItem?     @relation("EventFeaturedMedia", fields: [featuredMediaId], references: [id], onDelete: Restrict)
@@ -206,6 +250,7 @@ model SportEvent {
   // ("Event '<slug>' already exists under sport '<sportSlug>'").
   @@unique([sportSlug, slug])
   @@index([sportSlug])
+  @@index([sportSlug, disciplineSlug])
   @@index([featuredMediaId])
   @@index([searchVector], type: Gin)
   @@index([name(ops: raw("gin_trgm_ops"))], map: "SportEvent_name_trgm_idx", type: Gin)
@@ -295,6 +340,8 @@ model Article {
   reviewedAt         DateTime?
   // PHASE R: FAQPage structured data for this article's FAQ is opt-in.
   faqSchemaEnabled   Boolean       @default(false)
+  // Optional discipline of this article's sport; null = not classified.
+  disciplineSlug     String?
   // PHASE E: weighted full-text search document. A STORED generated column
   // computed by PostgreSQL from title/subtitle/type/sport/event/keywords/
   // excerpt/content (see migration 20260929090000_phase_e_search). Never
@@ -302,6 +349,7 @@ model Article {
   searchVector       Unsupported("tsvector")? @default(dbgenerated("(((setweight(to_tsvector('english'::regconfig, COALESCE(title, ''::text)), 'A'::\"char\") || setweight(to_tsvector('english'::regconfig, ((((((((COALESCE(subtitle, ''::text) || ' '::text) || COALESCE(\"articleType\", ''::text)) || ' '::text) || replace(COALESCE(\"sportSlug\", ''::text), '-'::text, ' '::text)) || ' '::text) || replace(COALESCE(\"eventSlug\", ''::text), '-'::text, ' '::text)) || ' '::text) || COALESCE(((seo -> 'keywords'::text))::text, ''::text))), 'B'::\"char\")) || setweight(to_tsvector('english'::regconfig, COALESCE(excerpt, ''::text)), 'C'::\"char\")) || setweight(to_tsvector('english'::regconfig, COALESCE(content, ''::text)), 'D'::\"char\"))"))
 
   sport         Sport          @relation(fields: [sportSlug], references: [slug])
+  discipline    Discipline?    @relation(fields: [sportSlug, disciplineSlug], references: [sportSlug, slug], onDelete: Restrict)
   author        Author         @relation(fields: [authorId], references: [id])
   edition       EventEdition?  @relation(fields: [sportSlug, eventSlug, editionYear], references: [sportSlug, eventSlug, year])
   featuredMedia MediaItem?     @relation("ArticleFeaturedMedia", fields: [featuredMediaId], references: [id], onDelete: Restrict)
@@ -328,6 +376,7 @@ model Article {
   @@index([status, publishedAt])
   @@index([articleType])
   @@index([sportSlug, eventSlug, editionYear, status, publishedAt])
+  @@index([sportSlug, disciplineSlug, status, publishedAt])
   @@index([searchVector], type: Gin)
   @@index([title(ops: raw("gin_trgm_ops"))], map: "Article_title_trgm_idx", type: Gin)
   @@index([excerpt(ops: raw("gin_trgm_ops"))], map: "Article_excerpt_trgm_idx", type: Gin)
@@ -508,6 +557,7 @@ model MediaItem {
   featuredIn     Article[]      @relation("ArticleFeaturedMedia")
   bodyUsages     ArticleMedia[]
   sportHeroes    Sport[]        @relation("SportHeroMedia")
+  groupHeroes    Discipline[]   @relation("DisciplineHeroMedia")
   eventImages    SportEvent[]   @relation("EventFeaturedMedia")
   editionImages  EventEdition[] @relation("EditionFeaturedMedia")
   pageOgImages   Page[]         @relation("PageOgMedia")

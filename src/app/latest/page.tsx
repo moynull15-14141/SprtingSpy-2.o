@@ -10,6 +10,7 @@ async function readParams(searchParams: SearchParams) {
   const params = await searchParams;
   return {
     sport: slugParam(params.sport),
+    discipline: slugParam(params.discipline),
     type: articleTypeParam(params.type),
     page: pageParam(params.page),
     invalid: (!!firstParam(params.sport) && !slugParam(params.sport)) || (!!firstParam(params.type) && !articleTypeParam(params.type)),
@@ -17,7 +18,7 @@ async function readParams(searchParams: SearchParams) {
 }
 
 export async function generateMetadata({ searchParams }: { searchParams: SearchParams }): Promise<Metadata> {
-  const { sport, type, page } = await readParams(searchParams);
+  const { sport, type, page, discipline } = await readParams(searchParams);
   const paged = page && page > 1;
   return pageMetadata({
     title: `Latest Sports Editorial, Schedules & Analysis${paged ? ` – Page ${page}` : ''} | SportingSpy`,
@@ -25,16 +26,16 @@ export async function generateMetadata({ searchParams }: { searchParams: SearchP
     // Pages of the unfiltered wire are canonical to themselves; filtered
     // combinations are noindex and point at the unfiltered listing.
     path: paged && !sport && !type ? `/latest/?page=${page}` : '/latest/',
-    noindex: !!(sport || type),
+    noindex: !!(sport || type || discipline),
   });
 }
 
 export default async function Page({ searchParams }: { searchParams: SearchParams }) {
-  const { sport, type, page, invalid } = await readParams(searchParams);
+  const { sport, type, page, invalid, discipline } = await readParams(searchParams);
   if (invalid || page === null) notFound();
   // PHASE R: Article Types are database-backed; a name that is no type at all is a 404 (as before).
   if (type && !(await (await import('../../../server/articleTypes')).allArticleTypes()).some((t) => t.name === type)) notFound();
-  const data = await getLatest({ sport: sport || undefined, type: type || undefined, page });
+  const data = await getLatest({ sport: sport || undefined, type: type || undefined, page, discipline: discipline || undefined });
   if (page > data.totalPages) notFound();
   return <><RumPageType type="latest" /><LatestArticlesPage data={data} selectedSport={sport} selectedType={type} currentPage={page} /></>;
 }

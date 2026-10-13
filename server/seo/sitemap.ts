@@ -2,7 +2,7 @@
  * XML sitemaps (PHASE D, Spec v1.1 §18).
  *
  *   /sitemap.xml                 sitemap index
- *   /sitemaps/pages.xml          static pages, sports, events, editions, authors
+ *   /sitemaps/pages.xml          static pages, sports, disciplines, events, editions, authors
  *   /sitemaps/articles-<n>.xml   published articles, in chunks
  *
  * Only indexable URLs are listed (see src/lib/indexability.ts): no drafts,

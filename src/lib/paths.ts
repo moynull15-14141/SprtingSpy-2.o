@@ -6,6 +6,8 @@
 
 export const sportPath = (sport: string) => `/${sport}/`;
 export const eventPath = (sport: string, event: string) => `/${sport}/${event}/`;
+/** A discipline's landing page shares the /{sport}/{segment}/ address with events and event-less articles (never the same slug). */
+export const disciplinePath = (sport: string, discipline: string) => `/${sport}/${discipline}/`;
 export const editionPath = (sport: string, event: string, year: number) => `/${sport}/${event}/${year}/`;
 export const authorPath = (slug: string) => `/author/${slug}/`;
 

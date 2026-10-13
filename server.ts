@@ -67,6 +67,7 @@ import { pagesRouter } from './server/pages';
 import { draftsRouter, staleVersionConflict } from './server/drafts';
 import { contactRouter } from './server/contact';
 import { sportEventConfigurationRouter } from './server/sportEventConfigurationRoutes';
+import { articleEventDisciplineError, disciplineAssignmentError, disciplineRouter, eventArticlesWithOtherDiscipline } from './server/disciplines';
 import { parseSportEventValues, resolveSportEventConfiguration } from './server/sportEventConfiguration';
 import { hashPassword, verifyPassword, validatePasswordStrength } from './server/password';
 import {
@@ -104,14 +105,14 @@ import { totpRouter } from './server/totp';
 import { documentImportRouter } from './server/documentImport/routes';
 
 const SPORT_AUDIT_FIELDS = ['name', 'slug', 'tagline', 'description', 'order', 'isVisible', 'featuredEventIds', 'heroImage', 'heroMediaId', 'icon', 'seo', 'faqSchemaEnabled'] as const;
-const EVENT_AUDIT_FIELDS = ['name', 'slug', 'sportSlug', 'shortName', 'alternativeNames', 'description', 'descriptionBody', 'history', 'frequency', 'defaultVenue', 'defaultLocation', 'currentEditionYear', 'featured', 'isVisible', 'featuredImage', 'featuredMediaId', 'officialSourceUrl', 'eventType', 'seo', 'sportSpecificValues', 'faqSchemaEnabled'] as const;
+const EVENT_AUDIT_FIELDS = ['name', 'slug', 'sportSlug', 'disciplineSlug', 'shortName', 'alternativeNames', 'description', 'descriptionBody', 'history', 'frequency', 'defaultVenue', 'defaultLocation', 'currentEditionYear', 'featured', 'isVisible', 'featuredImage', 'featuredMediaId', 'officialSourceUrl', 'eventType', 'seo', 'sportSpecificValues', 'faqSchemaEnabled'] as const;
 const EDITION_AUDIT_FIELDS = ['title', 'descriptionBody', 'startDate', 'endDate', 'venue', 'location', 'status', 'quickFacts', 'prizeMoneyTotal', 'defendingChampions', 'qualificationInfo', 'participantsCount', 'officialSourceUrl', 'description', 'featuredImage', 'featuredMediaId', 'seo', 'faqSchemaEnabled'] as const;
 // PHASE R.1: audit field lists. Secrets (passwordHash, totpSecret, tokens) are never listed.
 const USER_AUDIT_FIELDS = ['name', 'email', 'role', 'status', 'avatar'] as const;
 const AUTHOR_AUDIT_FIELDS = ['slug', 'name', 'roleTitle', 'bio', 'avatar', 'twitter', 'email', 'userId'] as const;
 const COMMENT_AUDIT_FIELDS = ['articleId', 'userId', 'userName', 'content', 'status'] as const;
 const AD_AUDIT_FIELDS = ['name', 'placementDescription', 'enabled', 'provider', 'providerSlotId', 'sponsorName', 'bannerText', 'linkUrl', 'dimensions', 'creativeId', 'creativeAlt', 'creativeFit'] as const;
-const ARTICLE_AUDIT_FIELDS = ['title', 'subtitle', 'slug', 'sportSlug', 'eventSlug', 'editionYear', 'articleType', 'excerpt', 'content', 'featuredImage', 'featuredMediaId', 'authorId', 'status', 'scheduledFor', 'publishedAt', 'featured', 'tables', 'references', 'seo', 'faqSchemaEnabled'] as const;
+const ARTICLE_AUDIT_FIELDS = ['title', 'subtitle', 'slug', 'sportSlug', 'disciplineSlug', 'eventSlug', 'editionYear', 'articleType', 'excerpt', 'content', 'featuredImage', 'featuredMediaId', 'authorId', 'status', 'scheduledFor', 'publishedAt', 'featured', 'tables', 'references', 'seo', 'faqSchemaEnabled'] as const;
 
 /** Alternative event names: one per line, trimmed, de-duplicated, at most 20. */
 function normalizeAlternativeNames(value: unknown): string {
@@ -615,7 +616,7 @@ async function startServer() {
       const previewAllowed = true;
 
       // PHASE P: media usage and Article Types load in the same parallel batch.
-      const [sports, events, editions, articles, authors, users, comments, mediaItems, adSlots, auditLogs, redirectRules, mediaUsage, articleTypes] =
+      const [sports, events, editions, articles, authors, users, comments, mediaItems, adSlots, auditLogs, redirectRules, mediaUsage, articleTypes, disciplines] =
         await Promise.all([
           prisma.sport.findMany({ orderBy: { order: 'asc' } }),
           prisma.sportEvent.findMany(),
@@ -640,6 +641,7 @@ async function startServer() {
           prisma.redirectRule.findMany({ orderBy: { createdAt: 'desc' } }),
           mediaUsageMap(role === 'Author' ? {articleWhere: articleReadWhere(req.authContext!), publicSiteOnly: true} : {}),
           allArticleTypes(),
+          prisma.discipline.findMany({ orderBy: [{ sportSlug: 'asc' }, { order: 'asc' }, { name: 'asc' }] }),
         ]);
 
       // PHASE 1/2: never send passwordHash to the client, and never send a
@@ -660,6 +662,8 @@ async function startServer() {
         mediaUsage,
         // PHASE R: database-backed Article Types (active and inactive).
         articleTypes,
+        // Disciplines of every sport (visible, hidden and retired).
+        disciplines,
       });
     })
   );
@@ -751,6 +755,8 @@ async function startServer() {
       if (validationError) {
         return res.status(400).json({ error: validationError });
       }
+      const articleDisciplineError = await disciplineAssignmentError(prisma, body.sportSlug, body.disciplineSlug) ?? await articleEventDisciplineError(prisma, { sportSlug: body.sportSlug, eventSlug: body.eventSlug, disciplineSlug: body.disciplineSlug });
+      if (articleDisciplineError) return res.status(400).json({ error: articleDisciplineError });
       // PHASE R: Article Types come from the database (active types only for new content).
       if (body.articleType === undefined) body.articleType = 'Event Guide';
       const typeError = await validateArticleTypeForWrite(body.articleType);
@@ -813,6 +819,7 @@ async function startServer() {
           title: body.title,
           subtitle: body.subtitle || '',
           sportSlug: body.sportSlug,
+          disciplineSlug: body.disciplineSlug ?? null,
           eventSlug,
           editionYear,
           articleType: body.articleType || 'Event Guide',
@@ -919,6 +926,20 @@ async function startServer() {
         }
       } else if (existing.scheduledFor || updates.scheduledFor) {
         nextScheduledFor = null;
+      }
+
+      // A discipline belongs to one sport: it is checked against the sport the article will have.
+      const articleSportAfter = updates.sportSlug ?? existing.sportSlug;
+      if ('disciplineSlug' in updates || articleSportAfter !== existing.sportSlug) {
+        // Never carried over silently: another sport may have a discipline with the same slug.
+        if (articleSportAfter !== existing.sportSlug && existing.disciplineSlug && !('disciplineSlug' in updates)) return res.status(400).json({ error: 'Clear the group (disciplineSlug: null) or choose one of the new sport when moving this article to another sport.' });
+        const disciplineError = await disciplineAssignmentError(prisma, articleSportAfter, 'disciplineSlug' in updates ? updates.disciplineSlug : null, articleSportAfter === existing.sportSlug ? existing.disciplineSlug : null);
+        if (disciplineError) return res.status(400).json({ error: disciplineError });
+      }
+      // Inside an event the article follows the event's discipline (checked whenever the event, sport or discipline changes).
+      if ('disciplineSlug' in updates || 'eventSlug' in updates || articleSportAfter !== existing.sportSlug) {
+        const followError = await articleEventDisciplineError(prisma, { sportSlug: articleSportAfter, eventSlug: 'eventSlug' in updates ? updates.eventSlug : existing.eventSlug, disciplineSlug: 'disciplineSlug' in updates ? updates.disciplineSlug : existing.disciplineSlug });
+        if (followError) return res.status(400).json({ error: followError });
       }
 
       const prepared = await prepareArticleContent(updates);
@@ -1188,6 +1209,8 @@ async function startServer() {
           error: `Cannot delete sport '${sport.name}': has ${associatedEvents} active events and ${associatedArticles} articles. Remove or reassign them first to prevent orphaned records.`,
         });
       }
+      const sportDisciplines = await prisma.discipline.count({ where: { sportSlug: sport.slug } });
+      if (sportDisciplines > 0) return res.status(400).json({ error: `Cannot delete sport '${sport.name}': it has ${sportDisciplines} group(s). Delete them first.` });
       const sportFaqs = await prisma.faqEntry.count({ where: { sportId: sport.id } });
       if (sportFaqs > 0) return res.status(400).json({ error: `Cannot delete sport '${sport.name}': it has ${sportFaqs} FAQ ${sportFaqs === 1 ? 'entry' : 'entries'}. Move or delete them in FAQ first.` });
 
@@ -1246,6 +1269,8 @@ async function startServer() {
         const sport = await tx.sport.findUniqueOrThrow({ where: { slug: body.sportSlug }, select: { eventConfiguration: true } });
         const eventValues = parseSportEventValues(body.sportSpecificValues, resolveSportEventConfiguration(sport.eventConfiguration), { newEvent: true });
         if ('error' in eventValues) return { status: 400 as const, error: eventValues.error };
+        const eventDisciplineError = await disciplineAssignmentError(tx, body.sportSlug, body.disciplineSlug);
+        if (eventDisciplineError) return { status: 400 as const, error: eventDisciplineError };
         const collision = await tx.sportEvent.findUnique({ where: { sportSlug_slug: { sportSlug: body.sportSlug, slug: body.slug } }, select: { id: true } });
         if (collision) return { status: 409 as const, error: `Event '${body.slug}' already exists under sport '${body.sportSlug}'.` };
         // PHASE R collision rule: an event may not take an event-less article's URL.
@@ -1254,6 +1279,7 @@ async function startServer() {
         const newEvent = await tx.sportEvent.create({ data: {
           id: `event-${body.slug}-${Date.now()}`,
           sportSlug: body.sportSlug,
+          disciplineSlug: body.disciplineSlug ?? null,
           slug: body.slug,
           name: body.name,
           shortName: optionalFact(body.shortName) || body.name.trim(),
@@ -1332,6 +1358,24 @@ async function startServer() {
       if (updates.sportSlug !== undefined && updates.sportSlug !== existing.sportSlug && !('sportSpecificValues' in updates) && existing.sportSpecificValues && Object.keys(existing.sportSpecificValues as object).length) {
         return res.status(400).json({ error: 'Clear sportSpecificValues before moving this event to another sport.' });
       }
+      // A discipline belongs to one sport: it is checked against the sport the event will have.
+      const eventSportAfter = updates.sportSlug ?? existing.sportSlug;
+      if ('disciplineSlug' in updates || eventSportAfter !== existing.sportSlug) {
+        // Never carried over silently: another sport may have a discipline with the same slug.
+        if (eventSportAfter !== existing.sportSlug && existing.disciplineSlug && !('disciplineSlug' in updates)) return res.status(400).json({ error: 'Clear the group (disciplineSlug: null) or choose one of the new sport when moving this event to another sport.' });
+        const disciplineError = await disciplineAssignmentError(prisma, eventSportAfter, 'disciplineSlug' in updates ? updates.disciplineSlug : null, eventSportAfter === existing.sportSlug ? existing.disciplineSlug : null);
+        if (disciplineError) return res.status(400).json({ error: disciplineError });
+      }
+      if (typeof updates.disciplineSlug === 'string' && updates.disciplineSlug !== existing.disciplineSlug && eventSportAfter === existing.sportSlug) {
+        // Its articles follow the event: none may keep a different discipline of its own.
+        const others = await eventArticlesWithOtherDiscipline(prisma, existing, updates.disciplineSlug);
+        if (others) return res.status(409).json({ error: `${others} article(s) of this event have a different group of their own. Clear or change those first; nothing is overwritten automatically.` });
+      }
+      if (eventSportAfter !== existing.sportSlug) {
+        // The event's articles move with it; their own disciplines belong to the old sport.
+        const classified = await prisma.article.count({ where: { sportSlug: existing.sportSlug, eventSlug: existing.slug, disciplineSlug: { not: null } } });
+        if (classified) return res.status(400).json({ error: `${classified} article(s) of this event have a group of "${existing.sportSlug}". Clear those groups before moving the event to another sport.` });
+      }
       if (updates.currentEditionYear != null) {
         const edition = await prisma.eventEdition.findFirst({ where: { sportSlug: existing.sportSlug, eventSlug: existing.slug, year: updates.currentEditionYear }, select: { id: true } });
         if (!edition) return res.status(400).json({ error: 'currentEditionYear must identify an existing edition of this event.' });
@@ -1339,7 +1383,7 @@ async function startServer() {
       const preparedEventDescription = 'descriptionBody' in updates ? await prepareRichDescription(updates.descriptionBody, 'Event') : null;
       if (preparedEventDescription && 'error' in preparedEventDescription) return res.status(400).json({ error: preparedEventDescription.error });
       const eventDescription = preparedEventDescription as Exclude<typeof preparedEventDescription, { error: string }>;
-      const allowed = ['name', 'slug', 'sportSlug', 'shortName', 'description', 'history', 'frequency', 'defaultVenue', 'defaultLocation', 'currentEditionYear', 'featured', 'isVisible', 'featuredImage', 'officialSourceUrl', 'eventType', 'seo', 'sportSpecificValues', 'faqSchemaEnabled'] as const;
+      const allowed = ['name', 'slug', 'sportSlug', 'shortName', 'description', 'history', 'frequency', 'defaultVenue', 'defaultLocation', 'currentEditionYear', 'featured', 'isVisible', 'featuredImage', 'officialSourceUrl', 'eventType', 'seo', 'sportSpecificValues', 'faqSchemaEnabled', 'disciplineSlug'] as const;
       const data: Record<string, unknown> = {};
       for (const key of allowed) if (key in updates) data[key] = updates[key];
       for (const key of ['history', 'frequency', 'defaultVenue', 'defaultLocation', 'featuredImage', 'officialSourceUrl', 'eventType'] as const) {
@@ -1755,6 +1799,7 @@ async function startServer() {
   app.use('/api/document-import', documentImportRouter(getAuthLookup));
   app.use(contactRouter(getAuthLookup));
   app.use('/api/sports', sportEventConfigurationRouter(getAuthLookup));
+  app.use('/api/disciplines', disciplineRouter(getAuthLookup, { validateIcon: validateSportIcon, imageIsManaged, mediaIdForUrl }));
   app.use(editorialWorkflowRouter(getAuthLookup));
 
   // PHASE P: one full article (body, tables, references) for the editor.

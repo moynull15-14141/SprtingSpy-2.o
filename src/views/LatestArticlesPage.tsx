@@ -30,6 +30,7 @@ export const LatestArticlesPage: React.FC<{ data: LatestData; selectedSport: str
   const pageHref = (page: number) => {
     const query = new URLSearchParams();
     if (selectedSport) query.set('sport', selectedSport);
+    if (data.discipline) query.set('discipline', data.discipline.slug);
     if (selectedType) query.set('type', selectedType);
     if (page > 1) query.set('page', String(page));
     const qs = query.toString();
@@ -50,7 +51,7 @@ export const LatestArticlesPage: React.FC<{ data: LatestData; selectedSport: str
         {/* Filters */}
         <div className="mt-6 flex flex-wrap items-center gap-3 pt-4 border-t border-stone-100 dark:border-stone-800">
           <FilterSelect param="sport" value={selectedSport} className={selectClass} label="Filter by sport">
-            <option value="">All Disciplines ({allPublished})</option>
+            <option value="">All Sports ({allPublished})</option>
             {sports.map((s) => (
               <option key={s.id} value={s.slug}>
                 {s.name}
@@ -67,6 +68,7 @@ export const LatestArticlesPage: React.FC<{ data: LatestData; selectedSport: str
             ))}
           </FilterSelect>
 
+          {data.discipline && <span className="text-xs text-stone-600 dark:text-stone-300" data-testid="latest-discipline">Group: <strong>{data.discipline.name}</strong></span>}
           {(selectedSport || selectedType) && (
             <Link href="/latest/" className="text-xs text-amber-700 dark:text-amber-400 font-semibold hover:underline">
               Clear Filters
