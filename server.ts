@@ -43,6 +43,7 @@ import { resolveSessionIdentity } from './server/sessionLookup';
 import { mediaRouter } from './server/media/routes';
 import { adCreativesRouter } from './server/adCreatives';
 import { mediaStorage } from './server/media/storage';
+import { variantFormats } from './server/media/processing';
 import { profileImageOrigins, validateProfileImageUrl } from './server/profileImage';
 import { mediaUsageMap } from './server/media/service';
 import { redirectRouter, redirectMovedArticle, releasePath, RedirectConflict } from './server/redirects';
@@ -273,7 +274,7 @@ async function startServer() {
   const features = featureFlags();
   // Fail fast on a misconfigured media storage provider (with a readable reason).
   let storage: ReturnType<typeof mediaStorage>;
-  try { storage = mediaStorage(); } catch (err) { throw new DeploymentConfigError(err instanceof Error ? err.message : 'Media storage is misconfigured.'); }
+  try { storage = mediaStorage(); variantFormats(); } catch (err) { throw new DeploymentConfigError(err instanceof Error ? err.message : 'Media storage is misconfigured.'); }
   // PHASE D: make sure every SEO rule has a stored, editable settings row.
   await ensureSeoRules();
   const allowedRoles: Role[] = features.readerAccounts ? ['Admin', 'Editor', 'Author', 'Reader'] : ['Admin', 'Editor', 'Author'];

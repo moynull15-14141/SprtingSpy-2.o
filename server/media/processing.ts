@@ -8,7 +8,13 @@
  *
  * Output per upload (all metadata such as EXIF/GPS stripped, orientation applied):
  *   original  — same format, long edge capped at 2560px (the fallback <img>)
- *   variants  — 400 / 800 / 1600px wide (never upscaled) in AVIF and WebP
+ *   variants  — 400 / 800 / 1600px wide (never upscaled) in WebP, and also in
+ *               AVIF when MEDIA_VARIANT_FORMATS asks for it
+ *
+ * Sized for a small instance (a fraction of one CPU, 512 MB): the upload is
+ * decoded twice (once for the original, once into a small pixel buffer that
+ * every variant is made from), one image is processed at a time, and libvips
+ * uses one thread and keeps no cache.
  */
 
 import sharp, { type Metadata, type Sharp } from 'sharp';
@@ -20,6 +26,36 @@ export const MIN_DIMENSION = 16;
 const MAX_PIXELS = 50_000_000;
 const ORIGINAL_MAX_EDGE = 2560;
 export const VARIANT_WIDTHS = [400, 800, 1600];
+
+export type VariantFormat = 'avif' | 'webp';
+
+/**
+ * Formats generated for every responsive width. WebP alone by default: on a
+ * 1919×2194 photo the AVIF sizes took 27 of 29 CPU-seconds and 230 MB, the
+ * WebP sizes and the original 1.5 CPU-seconds and 40 MB. Set
+ * MEDIA_VARIANT_FORMATS="avif,webp" on an instance with a full CPU and spare
+ * memory. Images already stored keep the formats they have.
+ */
+export function variantFormats(env: Record<string, string | undefined> = process.env): VariantFormat[] {
+  const names = (env.MEDIA_VARIANT_FORMATS || 'webp').split(',').map((n) => n.trim().toLowerCase()).filter(Boolean);
+  if (!names.length || names.some((n) => n !== 'avif' && n !== 'webp')) throw new Error('MEDIA_VARIANT_FORMATS must be "webp" or "avif,webp".');
+  // AVIF first: the browser takes the first <source> it supports.
+  return (['avif', 'webp'] as const).filter((f) => names.includes(f));
+}
+
+// libvips sizes its thread pool from the host's core count, which a small
+// container cannot use; each extra thread only adds memory. Its operation
+// cache would keep decoded pixels alive between uploads.
+sharp.concurrency(Math.min(Math.max(Math.trunc(Number(process.env.MEDIA_PROCESSING_THREADS)) || 1, 1), 16));
+sharp.cache(false);
+
+/** Runs one image at a time, in arrival order; a failed job does not block the next. */
+let queue: Promise<unknown> = Promise.resolve();
+function oneAtATime<T>(job: () => Promise<T>): Promise<T> {
+  const run = queue.then(job, job);
+  queue = run.catch(() => undefined);
+  return run;
+}
 
 type InputFormat = 'jpeg' | 'png' | 'webp' | 'avif';
 
@@ -55,7 +91,11 @@ export interface ProcessedImage {
   variants: { width: number; height: number; format: MediaFormat; ext: string; data: Buffer }[];
 }
 
-export async function processUpload(data: Buffer, originalName: string, declaredMime: string): Promise<ProcessedImage> {
+export function processUpload(data: Buffer, originalName: string, declaredMime: string): Promise<ProcessedImage> {
+  return oneAtATime(() => processOne(data, originalName, declaredMime));
+}
+
+async function processOne(data: Buffer, originalName: string, declaredMime: string): Promise<ProcessedImage> {
   if (!data.length) throw new UploadRejected('The file is empty.');
   if (data.length > MAX_UPLOAD_BYTES) throw new UploadRejected(`The file is larger than ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.`, 413);
 
@@ -83,7 +123,8 @@ export async function processUpload(data: Buffer, originalName: string, declared
   if (!width || !height || width < MIN_DIMENSION || height < MIN_DIMENSION) throw new UploadRejected(`The image must be at least ${MIN_DIMENSION}×${MIN_DIMENSION} pixels.`);
   if (width > MAX_DIMENSION || height > MAX_DIMENSION) throw new UploadRejected(`The image must be at most ${MAX_DIMENSION}×${MAX_DIMENSION} pixels.`);
 
-  const base = () => sharp(data, { limitInputPixels: MAX_PIXELS, failOn: 'error' }).rotate();
+  const formats = variantFormats();
+  const sized = () => sharp(data, { limitInputPixels: MAX_PIXELS, failOn: 'error' }).rotate().resize({ width: ORIGINAL_MAX_EDGE, height: ORIGINAL_MAX_EDGE, fit: 'inside', withoutEnlargement: true });
   const encode = (img: Sharp, f: InputFormat | 'webp' | 'avif') => {
     if (f === 'jpeg') return img.jpeg({ quality: 82, mozjpeg: true });
     if (f === 'png') return img.png({ compressionLevel: 9 });
@@ -91,14 +132,18 @@ export async function processUpload(data: Buffer, originalName: string, declared
     return img.avif({ quality: 50, effort: 4 });
   };
 
-  const originalResult = await encode(base().resize({ width: ORIGINAL_MAX_EDGE, height: ORIGINAL_MAX_EDGE, fit: 'inside', withoutEnlargement: true }), format).toBuffer({ resolveWithObject: true });
+  const originalResult = await encode(sized(), format).toBuffer({ resolveWithObject: true });
+  // The same pixels, uncompressed (at most 2560×2560×4 = 26 MB): every variant is
+  // resized from this instead of decoding the full-size upload once per variant.
+  const pixels = await sized().raw().toBuffer({ resolveWithObject: true });
+  const fromPixels = () => sharp(pixels.data, { raw: { width: pixels.info.width, height: pixels.info.height, channels: pixels.info.channels } });
 
   const widths = VARIANT_WIDTHS.filter((w) => w < originalResult.info.width);
   if (!widths.length || widths[widths.length - 1] < originalResult.info.width) widths.push(originalResult.info.width);
   const variants: ProcessedImage['variants'] = [];
   for (const w of [...new Set(widths)].slice(0, 4)) {
-    for (const f of ['avif', 'webp'] as const) {
-      const out = await encode(base().resize({ width: w, withoutEnlargement: true }), f).toBuffer({ resolveWithObject: true });
+    for (const f of formats) {
+      const out = await encode(fromPixels().resize({ width: w, withoutEnlargement: true }), f).toBuffer({ resolveWithObject: true });
       variants.push({ width: out.info.width, height: out.info.height, format: f, ext: f, data: out.data });
     }
   }

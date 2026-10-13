@@ -14,7 +14,7 @@ Multi-sport sports information platform (Spec v1.1).
 Data: PostgreSQL via Prisma 7 (`prisma/schema.prisma`).
 
 Media (Phase C): uploads go through `server/media` (validation + sharp
-processing into AVIF/WebP sizes) into a storage provider. The `local`
+processing into WebP sizes, plus AVIF when `MEDIA_VARIANT_FORMATS="avif,webp"`) into a storage provider. The `local`
 provider writes to `MEDIA_LOCAL_DIR` (default `storage/media`, served at
 `/media`). That directory is content: it must be on persistent storage and
 included in backups.

@@ -85,11 +85,13 @@ export interface LiveOptions {
   execute?: boolean;
   confirm?: string;
   batchSize?: number;
+  /** Seconds to wait before each image upload (and a readiness check). Default 20 on a real site, 0 on a local test server. */
+  uploadPauseSeconds?: number;
   onProgress?: (line: string) => void;
 }
 export interface LiveRunResult { plan: LivePlan; executed: boolean; entities?: Awaited<ReturnType<typeof ensureEntities>>; import?: ImportReport; verification?: LiveVerification }
 
-interface Run { target: LiveTarget; api: LiveApi; admin: string; state: { armed: boolean } }
+interface Run { target: LiveTarget; api: LiveApi; admin: string; state: { armed: boolean }; uploadPauseMs?: number }
 
 /** The context the shared importer works with: no database, no local environment; the target's own guard. */
 function contextOf(run: Run): PilotContext {
@@ -99,6 +101,7 @@ function contextOf(run: Run): PilotContext {
     target: {
       name: target.origin,
       hideNewSports: true,
+      uploadPauseMs: run.uploadPauseMs,
       guard: (step) => {
         resolveLiveTarget(target.origin, { allowLocalTest: target.local });
         if (api.base !== target.origin) throw new PilotIsolationError(`Refusing "${step}": the client is not bound to ${target.origin}.`);
@@ -153,7 +156,7 @@ async function planFor(run: Run, ctx: PilotContext, dry: any, ids: string[]): Pr
  * Safe to re-run at any point.
  */
 export async function runLiveImport(session: { target: LiveTarget; api: LiveApi; admin: string }, options: LiveOptions = {}): Promise<LiveRunResult> {
-  const run: Run = { ...session, state: { armed: false } };
+  const run: Run = { ...session, state: { armed: false }, uploadPauseMs: Math.max(0, options.uploadPauseSeconds ?? (session.target.local ? 0 : 20)) * 1000 };
   const ctx = contextOf(run);
   const say = options.onProgress ?? (() => undefined);
   const dry = await dryRunFor(run, ctx);

@@ -49,7 +49,7 @@ export const AdminMedia: React.FC = () => {
         <div>
           <h2 className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">Media Library</h2>
           <p className="text-xs text-stone-500 mt-1 dark:text-stone-400">
-            {mediaItems.length} images · {unusedCount} unused. Uploads are validated and converted to responsive AVIF/WebP sizes on the server.
+            {mediaItems.length} images · {unusedCount} unused. Uploads are validated and converted to responsive sizes on the server.
           </p>
         </div>
         <div className="flex gap-2">
@@ -161,7 +161,7 @@ function MediaDetail({ item, usage, canEdit, canDelete, onClose, onSave, onDelet
         <dt className="text-stone-500 dark:text-stone-400">Type</dt><dd>{item.mimeType || '—'}</dd>
         <dt className="text-stone-500 dark:text-stone-400">Dimensions</dt><dd>{item.width && item.height ? `${item.width}×${item.height}` : item.dimensions || '—'}</dd>
         <dt className="text-stone-500 dark:text-stone-400">Stored size</dt><dd>{fmtBytes(item.sizeBytes)}</dd>
-        <dt className="text-stone-500 dark:text-stone-400">Responsive sizes</dt><dd>{item.variants?.length ? [...new Set(item.variants.map((v) => v.width))].join(', ') + 'px · AVIF + WebP' : 'none'}</dd>
+        <dt className="text-stone-500 dark:text-stone-400">Responsive sizes</dt><dd>{item.variants?.length ? [...new Set(item.variants.map((v) => v.width))].join(', ') + 'px · ' + [...new Set(item.variants.map((v) => (v.format === 'avif' ? 'AVIF' : 'WebP')))].sort().join(' + ') : 'none'}</dd>
         <dt className="text-stone-500 dark:text-stone-400">Uploaded</dt><dd>{new Date(item.uploadedAt).toLocaleString('en-GB')}</dd>
         <dt className="text-stone-500 dark:text-stone-400">Updated</dt><dd>{item.updatedAt ? new Date(item.updatedAt).toLocaleString('en-GB') : '—'}</dd>
       </dl>

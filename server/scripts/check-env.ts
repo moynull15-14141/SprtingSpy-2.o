@@ -12,6 +12,7 @@ import 'dotenv/config';
 import { appEnv, deploymentConfig, DeploymentConfigError } from '../deployment';
 import { s3ConfigFromEnv } from '../media/s3';
 import { profileImageOrigins } from '../profileImage';
+import { variantFormats } from '../media/processing';
 
 const problems: string[] = [];
 const warnings: string[] = [];
@@ -27,6 +28,7 @@ if (provider === 's3' || provider === 'r2') {
 } else if (provider === 'local') {
   if (environment !== 'development' && !set('MEDIA_LOCAL_DIR')) warnings.push('MEDIA_LOCAL_DIR is not set: uploads go to ./storage/media inside the app directory. Point it at a persistent, backed-up volume (or use MEDIA_STORAGE_PROVIDER=s3).');
 } else problems.push(`MEDIA_STORAGE_PROVIDER "${provider}" is not supported; use "local", "s3" or "r2".`);
+try { variantFormats(env); } catch (e) { problems.push((e as Error).message); }
 try { profileImageOrigins(); } catch (e) { problems.push((e as Error).message); }
 
 if (environment !== 'development') {

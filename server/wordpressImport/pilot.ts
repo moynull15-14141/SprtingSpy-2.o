@@ -226,7 +226,11 @@ export function saveManifest(manifest: PilotManifest, file = PILOT_MANIFEST) {
  * (the manifest is bound to that name) and brings the check that must pass
  * before every write. Without a target, the pilot isolation guard applies.
  */
-export interface ImportTarget { name: string; guard: (step: string) => void; hideNewSports: boolean }
+export interface ImportTarget { name: string; guard: (step: string) => void; hideNewSports: boolean; /** Pause before each image upload, so a small server can finish and release the previous one. */ uploadPauseMs?: number }
+
+/** The destination stopped answering properly (restart, overload, gateway error). The run stops at once; nothing is retried blindly. */
+export class DestinationUnavailable extends Error {}
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export interface PilotContext { env: Record<string, string>; api: CmsApiClient; db?: pg.Client; wxrFile: string; zipFile: string; manifestFile?: string; dryRunDir?: string; target?: ImportTarget }
 const guard = (ctx: Pick<PilotContext, 'env' | 'target'>, step: string) => (ctx.target ? ctx.target.guard(step) : assertIsolated(ctx.env, step));
 const targetName = (ctx: Pick<PilotContext, 'env' | 'target'>) => ctx.target?.name ?? databaseNameOf(ctx.env);
@@ -313,7 +317,9 @@ export async function importPilot(ctx: PilotContext, ids: string[] = PILOT_IDS, 
       if (!plan.authorSlug) { refuse('No Author profile is approved for this post.'); continue; }
 
       // The CMS as it is now: the target sport/edition must exist, and the address must be free or ours.
-      const cms = (await ctx.api.request('GET', '/api/cms/data')).data;
+      const cmsAnswer = await ctx.api.request('GET', '/api/cms/data');
+      if (cmsAnswer.status !== 200 || !Array.isArray(cmsAnswer.data?.sports)) throw new DestinationUnavailable(`The CMS did not answer (HTTP ${cmsAnswer.status}) before post ${id}. The run stopped; nothing was written for this post. Run it again when the site is healthy.`);
+      const cms = cmsAnswer.data;
       if (!cms.sports?.some((s: any) => s.slug === plan.sportSlug)) { refuse(`Sport "${plan.sportSlug}" does not exist in the destination; the importer creates no sports.`); continue; }
       if (plan.eventSlug && !cms.editions.some((e: any) => e.sportSlug === plan.sportSlug && e.eventSlug === plan.eventSlug && e.year === plan.editionYear)) { refuse(`Event edition ${plan.sportSlug}/${plan.eventSlug}/${plan.editionYear} does not exist in the pilot database.`); continue; }
       if (!cms.articleTypes.some((t: any) => t.name === plan.articleType && t.isActive)) { refuse(`Article type "${plan.articleType}" is not an active type.`); continue; }
@@ -379,9 +385,14 @@ export async function importPilot(ctx: PilotContext, ids: string[] = PILOT_IDS, 
         if (have && cms.mediaItems.some((x: any) => x.id === have.id)) { realId.set(placeholder, have.id); report.media.reused++; continue; }
         const data = zip.read(UPLOADS_ROOT + m.file);
         if (sha256(data) !== m.sha256) { mediaProblem = `${m.file} differs from the file the dry run inspected.`; break; }
+        if (ctx.target?.uploadPauseMs) {
+          await sleep(ctx.target.uploadPauseMs);
+          if ((await ctx.api.pageStatus('/api/health/ready')) !== 200) throw new DestinationUnavailable(`The site was not ready before uploading ${m.file}. The run stopped; run it again when the site is healthy.`);
+        }
         const up = await ctx.api.upload('/api/media/upload', { title: String(m.title).slice(0, 200), altText: String(m.alt).slice(0, 300), caption: String(m.caption).slice(0, 500), source: `${SOURCE_NOTE} (${m.file})`.slice(0, 200), creationType: 'Other' }, { data, name: m.file.split('/').pop()!, type: mimeOf(m.file) });
         if (up.status === 201) { manifest.media[m.file] = { id: up.data.id, sha256: m.sha256, createdByPilot: true }; realId.set(placeholder, up.data.id); report.media.uploaded++; }
         else if (up.status === 409 && up.data?.duplicateOf?.id) { manifest.media[m.file] = { id: up.data.duplicateOf.id, sha256: m.sha256, createdByPilot: false }; realId.set(placeholder, up.data.duplicateOf.id); report.media.reused++; }
+        else if (up.status >= 500) throw new DestinationUnavailable(`The site failed while storing ${m.file} (HTTP ${up.status}); it may have restarted. The run stopped at post ${id}. Finished posts are kept; run it again when the site is healthy.`);
         else { mediaProblem = `${m.file} was not accepted (${up.status}): ${up.data?.error ?? ''}`; break; }
         save();
       }

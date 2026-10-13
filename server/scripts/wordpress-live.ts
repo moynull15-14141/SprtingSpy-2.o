@@ -4,7 +4,8 @@
  * exact --confirm phrase are given. See server/wordpressImport/live.ts.
  *
  *   npm run migration:wordpress-live -- plan     --target https://sportingspy.com [--only 3534,1163]
- *   npm run migration:wordpress-live -- import   --target … [--only …] [--batch 5] --execute --confirm "IMPORT 5 POSTS INTO sportingspy.com"
+ *   npm run migration:wordpress-live -- import   --target … [--only …] [--batch 5] [--pause 20] --execute --confirm "IMPORT 5 POSTS INTO sportingspy.com"
+ *       (--pause: seconds to wait before each image upload; the run stops at once if the site stops answering)
  *   npm run migration:wordpress-live -- verify   --target …
  *   npm run migration:wordpress-live -- rollback --target … [--execute --confirm "ROLLBACK 5 POSTS FROM sportingspy.com"]
  *   npm run migration:wordpress-live -- status   --target …        (reads the local manifest only; no network)
@@ -75,7 +76,7 @@ async function main() {
       if (!r.executed) console.log(`[live] Plan-only. To remove these untouched drafts: --execute --confirm "${r.confirmation}"`);
       return;
     }
-    const result = await runLiveImport({ target, ...session }, { only, execute: command === 'import' && flag('execute'), confirm: option('confirm'), batchSize: Number(option('batch')) || undefined, onProgress: (line) => console.log(`[live]   ${line}`) });
+    const result = await runLiveImport({ target, ...session }, { only, execute: command === 'import' && flag('execute'), confirm: option('confirm'), batchSize: Number(option('batch')) || undefined, uploadPauseSeconds: option('pause') === undefined ? undefined : Number(option('pause')), onProgress: (line) => console.log(`[live]   ${line}`) });
     console.log(JSON.stringify({ ...result, planFingerprint: planFingerprint(result.plan) }, null, 2));
     if (!result.executed && result.plan.wouldCreate.length + result.plan.toResume.length) console.log(`[live] Plan-only. Nothing was written. To import: npm run migration:wordpress-live -- import --target ${target.origin}${only ? ` --only ${only.join(',')}` : ''}${target.local ? ' --local-test' : ''} --execute --confirm "${result.plan.confirmation}"`);
     if (result.import?.refused.length || (result.verification && !result.verification.ok)) process.exitCode = 1;
