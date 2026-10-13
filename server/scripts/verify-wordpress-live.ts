@@ -15,7 +15,7 @@ import path from 'node:path';
 import { NEW_SPORTS } from '../wordpressImport/decisions';
 import { confirmationPhrase, openLiveSession, resolveLiveTarget, runLiveImport, runLiveRollback, verifyLive, LiveApi, LiveTargetError, LIVE_TARGETS } from '../wordpressImport/live';
 import { recreateDisposableDatabase } from '../wordpressImport/localDb';
-import { assertIsolated, deactivatePilotStaff, ensurePilotStaff, loadManifest, openPilotDb, startPilotServer, LoginError, PilotApi, PilotIsolationError, type Transport } from '../wordpressImport/pilot';
+import { assertIsolated, deactivatePilotStaff, DestinationUnavailable, ensurePilotStaff, loadManifest, openPilotDb, startPilotServer, LoginError, PilotApi, PilotIsolationError, type Transport } from '../wordpressImport/pilot';
 import { hashPassword } from '../password';
 
 let checks = 0;
@@ -76,13 +76,17 @@ assert.equal(server.base, ORIGIN);
 
 // Every request the live importer makes is recorded here; a fault can be injected to simulate a broken connection.
 const contacted: string[] = [];
-let fault: ((url: URL, init: RequestInit) => 'lose-answer' | 'fail-before' | null) | null = null;
+let fault: ((url: URL, init: RequestInit) => 'lose-answer' | 'fail-before' | Response | null) | null = null;
+/** Lets a test hold an answer back until something else has happened. */
+let beforeAnswer: ((url: URL, init: RequestInit) => Promise<void> | void) | null = null;
 const transport: Transport = async (url, init) => {
   const u = new URL(url);
   contacted.push(u.host);
   const f = fault?.(u, init);
   if (f === 'fail-before') throw new Error('simulated: connection dropped before the request was sent');
+  if (f instanceof Response) return f;
   const res = await fetch(url, init);
+  await beforeAnswer?.(u, init);
   if (f === 'lose-answer') { await res.arrayBuffer(); throw new Error('simulated: connection dropped before the answer arrived'); }
   return res;
 };
@@ -247,6 +251,76 @@ try {
   assert.equal((await one('select count(*)::int as n from "Article" where id = $1', [occupied.data.id])).n, 1, 'the unrelated article is still there');
   assert.deepEqual(await fingerprint(), before, 'pre-existing content is unchanged after the rollback too');
   pass('rollback: plan-only by default, exact phrase required, 4 untouched drafts removed, the edited draft and every other article kept');
+
+  // ── Stop rule: a failed readiness check during a batch stops the run before its next write ──
+  // While the image of the first post (22) is being stored, the site's readiness answers 503.
+  const STOPPED = ['22', '59'];
+  const stopPlan = await runLiveImport(session, { only: STOPPED });
+  assert.deepEqual([...stopPlan.plan.wouldCreate].sort(), STOPPED); assert.deepEqual(stopPlan.plan.refused, []);
+  const beforeStop = await counts();
+  const sent: string[] = [];
+  let sick = false; let sawNotReady: () => void = () => undefined;
+  const notReadySeen = new Promise<void>((resolve) => { sawNotReady = resolve; });
+  let writesWhenSeen = -1;
+  const writes = () => sent.filter((r) => !r.startsWith('GET ')).length;
+  fault = (u, init) => {
+    const method = String(init.method ?? 'GET').toUpperCase();
+    sent.push(`${method} ${u.pathname}`);
+    if (method === 'POST' && u.pathname === '/api/media/upload') sick = true;
+    if (sick && u.pathname === '/api/health/ready') { if (writesWhenSeen < 0) writesWhenSeen = writes(); sawNotReady(); return new Response(JSON.stringify({ status: 'not_ready', checks: { database: 'fail', storage: 'ok' } }), { status: 503, headers: { 'Content-Type': 'application/json' } }); }
+    return null;
+  };
+  // The upload that is already on its way finishes; its answer is held until the monitor has seen the 503.
+  beforeAnswer = async (u, init) => { if (init.method === 'POST' && u.pathname === '/api/media/upload') await notReadySeen; };
+  const stopLines: string[] = [];
+  const stopped = await runLiveImport(session, { only: STOPPED, execute: true, confirm: stopPlan.plan.confirmation, healthCheckSeconds: 0.05, onProgress: (l) => stopLines.push(l) }).then(() => null, (e) => e);
+  fault = null; beforeAnswer = null;
+  assert(stopped instanceof DestinationUnavailable, `the run must stop with DestinationUnavailable (got ${stopped})`);
+  assert.match(stopped.message, /readiness check .* answered HTTP 503 \(application: database fail, storage ok\)\. The run stopped before creating the article of post 22. /);
+  assert(stopLines.some((l) => l.startsWith('STOP SIGNAL: ')), 'the stop signal is reported as soon as it is raised');
+  assert.equal(writesWhenSeen, 1, 'the 503 arrived while the first image upload was on its way');
+  assert.deepEqual(sent.filter((r) => !r.startsWith('GET ')), ['POST /api/media/upload'], 'after the 503 no further image, article or FAQ request was started');
+  assert.equal(session.api.readOnly, true); assert.equal(session.api.onAnswer, null, 'the monitor is switched off after the run');
+  const stoppedManifest = loadManifest(ORIGIN, path.join(target.dir, 'manifest.json'));
+  assert.equal(stoppedManifest.posts['22'], undefined); assert.equal(stoppedManifest.posts['59'], undefined);
+  assert(stoppedManifest.history.some((h) => /run stopped: The readiness check/.test(h)), 'the manifest records why the run stopped');
+  const afterStop = await counts();
+  assert.deepEqual({ ...afterStop, MediaItem: 0 }, { ...beforeStop, MediaItem: 0 }, 'no article, import record or FAQ entry was written');
+  assert.equal(afterStop.MediaItem, beforeStop.MediaItem + 1, 'only the image that was already being stored exists');
+  // The next run picks up where it stopped: nothing twice.
+  const afterStopPlan = await runLiveImport(session, { only: STOPPED });
+  assert.deepEqual([...afterStopPlan.plan.wouldCreate].sort(), STOPPED);
+  const recovered = await runLiveImport(session, { only: STOPPED, execute: true, confirm: afterStopPlan.plan.confirmation, healthCheckSeconds: 0.05 });
+  assert.deepEqual([...recovered.import!.created].sort(), STOPPED); assert.deepEqual(recovered.import!.refused, []);
+  assert.deepEqual(recovered.import!.media, { uploaded: 2, reused: 1 }, 'the image stored before the stop is reused, not uploaded again');
+  assert(recovered.verification!.ok, recovered.verification!.problems.join(' | '));
+  assert.equal(await count('MediaItem'), beforeStop.MediaItem + 3); assert.equal(await count('ArticleImport'), beforeStop.ArticleImport + 2);
+  pass('stop rule: readiness 503 during a batch stops the run before the article is created; no image, article or FAQ request follows; the next run completes both posts and reuses the stored image');
+
+  // ── Stop rule: a 5xx answer to any importer request stops the run before the next post ──
+  const AFTER_5XX = ['130', '2702'];
+  const fivePlan = await runLiveImport(session, { only: AFTER_5XX });
+  assert.deepEqual([...fivePlan.plan.wouldCreate].sort(), AFTER_5XX);
+  let failedOnce = false; const sentAfter: string[] = [];
+  fault = (u, init) => {
+    const method = String(init.method ?? 'GET').toUpperCase();
+    if (failedOnce && method !== 'GET') sentAfter.push(`${method} ${u.pathname}`);
+    // The read-back of post 130's stored article answers 502 once (a gateway error); nothing is lost by it.
+    if (!failedOnce && method === 'GET' && /^\/api\/articles\/art-[^/]+$/.test(u.pathname)) { failedOnce = true; return new Response('Bad Gateway', { status: 502 }); }
+    return null;
+  };
+  const five = await runLiveImport(session, { only: AFTER_5XX, execute: true, confirm: fivePlan.plan.confirmation }).then(() => null, (e) => e);
+  fault = null;
+  assert(five instanceof DestinationUnavailable, `a 5xx answer must stop the run (got ${five})`);
+  assert.match(five.message, /^\/api\/articles\/art-[^ ]+ answered HTTP 502 at .*The run stopped before post 2702\./);
+  assert.deepEqual(sentAfter, [], 'no write was started after the 502');
+  assert.equal((await one(`select count(*)::int as n from "ArticleImport" where "sourceId" = '2702'`)).n, 0);
+  const fiveAgain = await runLiveImport(session, { only: AFTER_5XX });
+  assert.deepEqual(fiveAgain.plan.wouldCreate, ['2702']); assert.equal(fiveAgain.plan.toResume.length + fiveAgain.plan.alreadyImported.length, 1);
+  const fiveDone = await runLiveImport(session, { only: AFTER_5XX, execute: true, confirm: fiveAgain.plan.confirmation });
+  assert.deepEqual(fiveDone.import!.created, ['2702']); assert(fiveDone.verification!.ok, fiveDone.verification!.problems.join(' | '));
+  assert.equal((await one(`select count(*)::int as n from "ArticleImport" where "sourceId" = any($1)`, [AFTER_5XX])).n, 2, 'each post exists exactly once');
+  pass('stop rule: a 502 answer stops the run before the next post; the next run finishes without repeating the completed post');
 
   // ── Where the importer's requests went ──
   const hosts = [...new Set([...contacted, ...session.api.contacted])];

@@ -5,7 +5,8 @@
  *
  *   npm run migration:wordpress-live -- plan     --target https://sportingspy.com [--only 3534,1163]
  *   npm run migration:wordpress-live -- import   --target … [--only …] [--batch 5] [--pause 20] --execute --confirm "IMPORT 5 POSTS INTO sportingspy.com"
- *       (--pause: seconds to wait before each image upload; the run stops at once if the site stops answering)
+ *       (--pause: seconds to wait before each image upload. During an import the site's readiness is checked every
+ *        5 seconds; one failed check or any 5xx answer stops the run before its next write. Run it again to resume.)
  *   npm run migration:wordpress-live -- verify   --target …
  *   npm run migration:wordpress-live -- rollback --target … [--execute --confirm "ROLLBACK 5 POSTS FROM sportingspy.com"]
  *   npm run migration:wordpress-live -- status   --target …        (reads the local manifest only; no network)

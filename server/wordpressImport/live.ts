@@ -23,7 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { AUTHOR_PROFILE_SLUGS, NEW_SPORTS } from './decisions';
-import { CmsApiClient, destinationSnapshot, ensureEntities, importPilot, loadManifest, locateBackup, rollbackPilot, PilotIsolationError, type ImportReport, type PilotContext, type RollbackReport, type Transport } from './pilot';
+import { CmsApiClient, DestinationUnavailable, destinationSnapshot, ensureEntities, importPilot, loadManifest, locateBackup, rollbackPilot, saveManifest, PilotIsolationError, type ImportReport, type PilotContext, type RollbackReport, type StopSignal, type Transport } from './pilot';
 
 /** The only sites a live import may ever talk to. */
 export const LIVE_TARGETS = ['https://sportingspy.com'] as const;
@@ -87,11 +87,13 @@ export interface LiveOptions {
   batchSize?: number;
   /** Seconds to wait before each image upload (and a readiness check). Default 20 on a real site, 0 on a local test server. */
   uploadPauseSeconds?: number;
+  /** Seconds between readiness checks while a confirmed run is writing. One failed check stops the run. Default 5 on a real site, 0 (off) on a local test server. */
+  healthCheckSeconds?: number;
   onProgress?: (line: string) => void;
 }
 export interface LiveRunResult { plan: LivePlan; executed: boolean; entities?: Awaited<ReturnType<typeof ensureEntities>>; import?: ImportReport; verification?: LiveVerification }
 
-interface Run { target: LiveTarget; api: LiveApi; admin: string; state: { armed: boolean }; uploadPauseMs?: number }
+interface Run { target: LiveTarget; api: LiveApi; admin: string; state: { armed: boolean }; uploadPauseMs?: number; stop?: StopSignal }
 
 /** The context the shared importer works with: no database, no local environment; the target's own guard. */
 function contextOf(run: Run): PilotContext {
@@ -102,6 +104,7 @@ function contextOf(run: Run): PilotContext {
       name: target.origin,
       hideNewSports: true,
       uploadPauseMs: run.uploadPauseMs,
+      stop: run.stop,
       guard: (step) => {
         resolveLiveTarget(target.origin, { allowLocalTest: target.local });
         if (api.base !== target.origin) throw new PilotIsolationError(`Refusing "${step}": the client is not bound to ${target.origin}.`);
@@ -109,6 +112,38 @@ function contextOf(run: Run): PilotContext {
       },
     },
   };
+}
+
+/**
+ * Watches the site for the whole of a confirmed run. A readiness check that
+ * is not HTTP 200 (or gets no answer in 10 s), or any 5xx answer to the
+ * importer's own requests, raises the run's stop signal; the import loop
+ * reads it before every write. Returns the function that ends the watch.
+ */
+function watchHealth(run: Run, stop: StopSignal, everyMs: number, say: (line: string) => void): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let over = false;
+  const raise = (reason: string) => { if (!stop.reason) { stop.reason = reason; say(`STOP SIGNAL: ${reason}`); } };
+  run.api.onAnswer = (status, pathname) => { if (status >= 500 && pathname !== '/api/health/ready') raise(`${pathname} answered HTTP ${status} at ${new Date().toISOString()}.`); };
+  const check = async () => {
+    if (over || stop.reason) return;
+    const at = new Date().toISOString();
+    let late: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const answer = await Promise.race([run.api.request('GET', '/api/health/ready'), new Promise<null>((resolve) => { late = setTimeout(() => resolve(null), 10_000); })]);
+      if (over) return;
+      if (!answer) raise(`The readiness check sent at ${at} got no answer within 10 seconds.`);
+      else if (answer.status !== 200) {
+        // The application's own answer names its two checks; anything else came from in front of it.
+        const checks = answer.data?.checks;
+        raise(`The readiness check sent at ${at} answered HTTP ${answer.status} (${checks ? `application: database ${checks.database}, storage ${checks.storage}` : 'not the application\'s own answer: proxy or platform'}).`);
+      }
+    } catch { if (!over) raise(`The readiness check sent at ${at} could not reach the site.`); }
+    finally { if (late) clearTimeout(late); }
+    if (!over && !stop.reason) { timer = setTimeout(check, everyMs); timer.unref(); }
+  };
+  if (everyMs > 0) void check();
+  return () => { over = true; if (timer) clearTimeout(timer); run.api.onAnswer = null; };
 }
 
 /** The dry run against the target's own state. It has no database code and gets a bare environment and file paths only. */
@@ -156,7 +191,7 @@ async function planFor(run: Run, ctx: PilotContext, dry: any, ids: string[]): Pr
  * Safe to re-run at any point.
  */
 export async function runLiveImport(session: { target: LiveTarget; api: LiveApi; admin: string }, options: LiveOptions = {}): Promise<LiveRunResult> {
-  const run: Run = { ...session, state: { armed: false }, uploadPauseMs: Math.max(0, options.uploadPauseSeconds ?? (session.target.local ? 0 : 20)) * 1000 };
+  const run: Run = { ...session, state: { armed: false }, uploadPauseMs: Math.max(0, options.uploadPauseSeconds ?? (session.target.local ? 0 : 20)) * 1000, stop: { reason: null } };
   const ctx = contextOf(run);
   const say = options.onProgress ?? (() => undefined);
   const dry = await dryRunFor(run, ctx);
@@ -169,6 +204,7 @@ export async function runLiveImport(session: { target: LiveTarget; api: LiveApi;
 
   run.state.armed = true;
   run.api.readOnly = false;
+  const endWatch = watchHealth(run, run.stop!, Math.max(0, options.healthCheckSeconds ?? (session.target.local ? 0 : 5)) * 1000, say);
   try {
     const manifest = loadManifest(run.target.origin, ctx.manifestFile);
     manifest.history.push(`${new Date().toISOString()} run started by ${run.admin}: ${plan.confirmation}`);
@@ -189,9 +225,17 @@ export async function runLiveImport(session: { target: LiveTarget; api: LiveApi;
       total.media.uploaded += r.media.uploaded; total.media.reused += r.media.reused; total.faq += r.faq;
       say(`Batch ${Math.floor(i / size) + 1}/${Math.ceil(work.length / size)}: created ${r.created.length}, resumed ${r.resumed.length}, skipped ${r.skipped.length}, refused ${r.refused.length}. Total so far: ${total.created.length} created, ${total.resumed.length} resumed, ${total.refused.length} refused.`);
     }
+    endWatch();
     const verification = await verifyLive(session, { ids: work });
     return { plan: { ...plan, mode: 'import' }, executed: true, entities, import: total, verification };
-  } finally { run.state.armed = false; run.api.readOnly = true; }
+  } catch (err) {
+    if (err instanceof DestinationUnavailable) {
+      const manifest = loadManifest(run.target.origin, ctx.manifestFile);
+      manifest.history.push(`${new Date().toISOString()} run stopped: ${err.message}`);
+      saveManifest(manifest, ctx.manifestFile);
+    }
+    throw err;
+  } finally { endWatch(); run.state.armed = false; run.api.readOnly = true; }
 }
 
 export interface LiveVerification { ok: boolean; problems: string[]; checked: number; drafts: number; reviewRequired: number; scheduled: number; published: number; faq: number; images: number; importRecords: number; workflowProbed: boolean }

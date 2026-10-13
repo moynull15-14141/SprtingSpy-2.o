@@ -150,13 +150,15 @@ export class CmsApiClient {
   readonly contacted = new Set<string>();
   /** While true, anything but reading (and signing in or out) is refused before it is sent. */
   readOnly = false;
+  /** Called with the HTTP status of every answer (a live run stops on a 5xx). */
+  onAnswer: ((status: number, pathname: string) => void) | null = null;
   constructor(readonly base: string, private readonly transport: Transport = (url, init) => fetch(url, init)) {}
   private fetch(route: string, init: RequestInit): Promise<Response> {
     const url = new URL(route, this.base);
     if (url.origin !== new URL(this.base).origin) throw new PilotIsolationError(`Refusing a request outside ${this.base}.`);
     if (this.readOnly && !['GET', 'HEAD'].includes(String(init.method ?? 'GET').toUpperCase()) && !['/api/auth/login', '/api/auth/logout'].includes(url.pathname)) throw new PilotIsolationError(`Refusing ${init.method} ${url.pathname}: this run is plan-only.`);
     this.contacted.add(url.host);
-    return this.transport(url.toString(), init);
+    return this.transport(url.toString(), init).then((res) => { this.onAnswer?.(res.status, url.pathname); return res; });
   }
   private remember(res: Response) { for (const c of res.headers.getSetCookie()) { const [pair] = c.split(';'); const at = pair.indexOf('='); const value = pair.slice(at + 1); if (value) this.cookies.set(pair.slice(0, at), value); else this.cookies.delete(pair.slice(0, at)); } }
   private headers(extra: Record<string, string> = {}) { return { Cookie: [...this.cookies].map(([k, v]) => `${k}=${v}`).join('; '), 'x-csrf-token': this.cookies.get('csrf_token') ?? '', ...extra }; }
@@ -226,11 +228,19 @@ export function saveManifest(manifest: PilotManifest, file = PILOT_MANIFEST) {
  * (the manifest is bound to that name) and brings the check that must pass
  * before every write. Without a target, the pilot isolation guard applies.
  */
-export interface ImportTarget { name: string; guard: (step: string) => void; hideNewSports: boolean; /** Pause before each image upload, so a small server can finish and release the previous one. */ uploadPauseMs?: number }
+export interface ImportTarget { name: string; guard: (step: string) => void; hideNewSports: boolean; /** Pause before each image upload, so a small server can finish and release the previous one. */ uploadPauseMs?: number; /** Raised while a run is going on (failed readiness check, 5xx answer); checked before every write. */ stop?: StopSignal }
+
+/** Shared between a run's health monitor and its import loop. A reason, once set, stays set for that run. */
+export interface StopSignal { reason: string | null }
 
 /** The destination stopped answering properly (restart, overload, gateway error). The run stops at once; nothing is retried blindly. */
 export class DestinationUnavailable extends Error {}
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Stops the run before `next` starts when the stop signal is raised. Whatever is already stored stays; the next run resumes from it. */
+function haltIfStopped(ctx: Pick<PilotContext, 'target'>, next: string) {
+  const reason = ctx.target?.stop?.reason;
+  if (reason) throw new DestinationUnavailable(`${reason} The run stopped before ${next}. Finished posts are kept; run it again when the site is healthy.`);
+}
 export interface PilotContext { env: Record<string, string>; api: CmsApiClient; db?: pg.Client; wxrFile: string; zipFile: string; manifestFile?: string; dryRunDir?: string; target?: ImportTarget }
 const guard = (ctx: Pick<PilotContext, 'env' | 'target'>, step: string) => (ctx.target ? ctx.target.guard(step) : assertIsolated(ctx.env, step));
 const targetName = (ctx: Pick<PilotContext, 'env' | 'target'>) => ctx.target?.name ?? databaseNameOf(ctx.env);
@@ -257,6 +267,7 @@ export async function ensureEntities(ctx: PilotContext, only?: { sports?: string
   for (const sport of NEW_SPORTS.filter((s) => !only?.sports || only.sports.includes(s.slug))) {
     const existing = cms.sports.find((s: any) => s.slug === sport.slug);
     if (existing) { out.sportsExisting.push(sport.slug); manifest.sports[sport.slug] ??= { id: existing.id, createdByPilot: false }; continue; }
+    haltIfStopped(ctx, `creating the sport "${sport.slug}"`);
     // On a live site a new sport stays hidden until an Admin shows it, once its first article is published.
     const made = await ctx.api.request('POST', '/api/sports', { name: sport.name, slug: sport.slug, ...(ctx.target?.hideNewSports ? { isVisible: false } : {}) });
     if (made.status !== 201) throw new Error(`Sport "${sport.slug}" could not be created through the CMS (${made.status}): ${made.data?.error ?? ''}`);
@@ -267,6 +278,7 @@ export async function ensureEntities(ctx: PilotContext, only?: { sports?: string
   for (const [name, slug] of Object.entries(AUTHOR_PROFILE_SLUGS).filter(([, s]) => !only?.authors || only.authors.includes(s))) {
     const existing = cms.authors.find((a: any) => a.slug === slug);
     if (existing) { out.authorsExisting.push(slug); manifest.authors[slug] ??= { id: existing.id, createdByPilot: false }; continue; }
+    haltIfStopped(ctx, `creating the author profile "${slug}"`);
     const author = await createAuthorProfile(ctx, name, slug);
     manifest.authors[slug] = { id: author.id, createdByPilot: true };
     out.authorsCreated.push(slug);
@@ -305,6 +317,7 @@ export async function importPilot(ctx: PilotContext, ids: string[] = PILOT_IDS, 
   try {
     for (const id of ids) {
       guard(ctx, `import WordPress post ${id}`);
+      haltIfStopped(ctx, `post ${id}`);
       const entry = (dry.posts as any[]).find((p) => p.wordpressId === id);
       const file = fs.readdirSync(path.join(dryRunDir, 'posts')).find((f) => f.startsWith(`${id}-`));
       if (!entry || !file) { report.refused.push({ id, reason: 'Not in the dry-run output.' }); continue; }
@@ -328,6 +341,7 @@ export async function importPilot(ctx: PilotContext, ids: string[] = PILOT_IDS, 
       /** Finishes a post whose article exists but whose FAQ entries were not (all) stored. The FAQ import skips entries that are already there. */
       const finish = async (articleId: string): Promise<boolean> => {
         if (post.faqs.length) {
+          haltIfStopped(ctx, `the FAQ entries of post ${id}`);
           const faq = await ctx.api.request('POST', '/api/faq/import', { articleId, faqs: post.faqs.map((q: any) => ({ question: q.question, answer: q.answer })) });
           if (faq.status !== 201) { refuse(`The article exists (${articleId}) but its FAQ entries were refused (${faq.status}): ${faq.data?.error ?? ''}`); return false; }
           report.faq += faq.data.created.length;
@@ -366,6 +380,7 @@ export async function importPilot(ctx: PilotContext, ids: string[] = PILOT_IDS, 
       let author = cms.authors.find((a: any) => a.slug === plan.authorSlug);
       if (!author) {
         if (AUTHOR_PROFILE_SLUGS[plan.sourceAttribution] !== plan.authorSlug) { refuse(`"${plan.authorSlug}" is not an approved profile for "${plan.sourceAttribution}".`); continue; }
+        haltIfStopped(ctx, `the author profile of post ${id}`);
         try { author = await createAuthorProfile(ctx, plan.sourceAttribution, plan.authorSlug); } catch (err) { refuse(err instanceof Error ? err.message : String(err)); continue; }
         manifest.authors[plan.authorSlug] = { id: author.id, createdByPilot: true }; save();
         report.authorsCreated.push(plan.authorSlug);
@@ -385,8 +400,10 @@ export async function importPilot(ctx: PilotContext, ids: string[] = PILOT_IDS, 
         if (have && cms.mediaItems.some((x: any) => x.id === have.id)) { realId.set(placeholder, have.id); report.media.reused++; continue; }
         const data = zip.read(UPLOADS_ROOT + m.file);
         if (sha256(data) !== m.sha256) { mediaProblem = `${m.file} differs from the file the dry run inspected.`; break; }
+        haltIfStopped(ctx, `uploading ${m.file}`);
         if (ctx.target?.uploadPauseMs) {
           await sleep(ctx.target.uploadPauseMs);
+          haltIfStopped(ctx, `uploading ${m.file}`);
           if ((await ctx.api.pageStatus('/api/health/ready')) !== 200) throw new DestinationUnavailable(`The site was not ready before uploading ${m.file}. The run stopped; run it again when the site is healthy.`);
         }
         const up = await ctx.api.upload('/api/media/upload', { title: String(m.title).slice(0, 200), altText: String(m.alt).slice(0, 300), caption: String(m.caption).slice(0, 500), source: `${SOURCE_NOTE} (${m.file})`.slice(0, 200), creationType: 'Other' }, { data, name: m.file.split('/').pop()!, type: mimeOf(m.file) });
@@ -413,6 +430,7 @@ export async function importPilot(ctx: PilotContext, ids: string[] = PILOT_IDS, 
         ...(plan.eventSlug ? { eventSlug: plan.eventSlug, editionYear: plan.editionYear } : {}),
         ...(entry.featuredImage.available ? { featuredMediaId: realId.get(entry.featuredImage.placeholderMediaId) } : {}),
       };
+      haltIfStopped(ctx, `creating the article of post ${id}`);
       const created = await ctx.api.request('POST', '/api/articles', payload);
       if (created.status !== 201) { refuse(`The CMS refused the article (${created.status}): ${created.data?.error ?? ''}`); continue; }
       const article = created.data;
