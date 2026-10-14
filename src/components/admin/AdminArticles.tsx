@@ -417,7 +417,8 @@ export const AdminArticles: React.FC = () => {
       seo: {
         ...otherSeo,
         metaTitle: metaTitle || title,
-        metaDescription: metaDescription || excerpt,
+        // An excerpt longer than the 500-character meta limit is not copied (pages fall back to the excerpt).
+        metaDescription: metaDescription || (excerpt.length <= 500 ? excerpt : undefined),
         ogTitle: ogTitle.trim() || undefined,
         ogDescription: ogDescription.trim() || undefined,
         ogImage: ogImage.trim() || undefined,
@@ -437,10 +438,10 @@ export const AdminArticles: React.FC = () => {
         return true;
       };
       if (editingId) {
-        let stale = false;
-        const updated = await updateArticle(editingId, articlePayload as never, { expectedVersion: autosave.baseVersion(), onStale: () => { stale = true; } });
+        let stale = false, reason = '';
+        const updated = await updateArticle(editingId, articlePayload as never, { expectedVersion: autosave.baseVersion(), onStale: () => { stale = true; }, onError: (message) => { reason = message; } });
         if (stale) { setStaleSave(true); return null; }
-        if (!updated) setFormError('The article was not saved. Check the server message and try again; your changes are still in the editor.');
+        if (!updated) setFormError(`The article was not saved${reason ? `: ${reason}` : '.'} Your changes are still in the editor.`);
         if (updated && !(await savePendingFaqs(editingId))) return null;
         if (updated) await autosave.applied(); // the working copy is now the article itself
         return updated ? editingId : null;
@@ -905,6 +906,7 @@ export const AdminArticles: React.FC = () => {
               <textarea
                 rows={2}
                 required
+                maxLength={1000}
                 value={excerpt}
                 onChange={(e) => setExcerpt(e.target.value)}
                 placeholder="1–2 sentence summary of this dossier or guide..."

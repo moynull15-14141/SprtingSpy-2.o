@@ -38,7 +38,7 @@ import { EXPECTED_VERSION_HEADER } from '../lib/drafts';
 const STAFF_ROLES = ['Admin', 'Editor', 'Author'];
 
 /** PHASE AUTOSAVE: optional optimistic-concurrency precondition for item saves. */
-export interface SaveOptions { expectedVersion?: string | null; onStale?: () => void }
+export interface SaveOptions { expectedVersion?: string | null; onStale?: () => void; /** The server's reason when the save is refused. */ onError?: (message: string) => void }
 const versionHeaders = (opts?: SaveOptions): Record<string, string> | undefined => (opts?.expectedVersion ? { [EXPECTED_VERSION_HEADER]: opts.expectedVersion } : undefined);
 
 interface AdminDataContextType {
@@ -365,6 +365,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       refreshData();
       return true;
     }
+    if (res.error) opts?.onError?.(res.error);
     return false;
   };
 
