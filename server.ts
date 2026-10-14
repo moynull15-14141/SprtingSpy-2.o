@@ -51,7 +51,7 @@ import { settingsRouter } from './server/settings';
 import { prepareArticleContent, prepareRichDescription, syncBodyMedia } from './server/articleContent';
 import { articlePath, siteOrigin } from './src/lib/paths';
 import { sitemapFiles } from './server/seo/sitemap';
-import { robotsTxt } from './server/seo/robots';
+import { robotsTxt, canonicalHostOf, indexingBlocked } from './server/seo/robots';
 import { seoRouter } from './server/seo/routes';
 import { searchPageRateLimit, searchRouter } from './server/services/search/routes';
 import { trackingConfig } from './server/trackingConfig';
@@ -303,8 +303,12 @@ async function startServer() {
   // PHASE F: the CSP needs the configured providers synchronously; load them once before serving.
   await trackingConfig().catch(() => undefined);
   app.use(securityHeaders);
-  // PHASE J: nothing served by a staging copy may be indexed.
-  if (deployment.appEnv === 'staging') app.use((_req, res, next) => { res.setHeader('X-Robots-Tag', 'noindex, nofollow'); next(); });
+  // PHASE J: nothing served by a staging copy may be indexed; in production,
+  // nothing served under a host other than the canonical one (e.g. the
+  // platform's *.onrender.com name). Page-level robots rules are unaffected.
+  const canonicalHost = canonicalHostOf(deployment.origin);
+  const blocksIndexing = (req: Request) => indexingBlocked(deployment.appEnv, req.headers.host, canonicalHost);
+  app.use((req, res, next) => { if (blocksIndexing(req)) res.setHeader('X-Robots-Tag', 'noindex, nofollow'); next(); });
   app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
   app.use(enforceProductionTransport);
   app.use(corsPolicy);
@@ -434,9 +438,9 @@ async function startServer() {
     const xml = (await cachedSitemapFiles(seoOrigin())).files.get(req.params.file);
     return xml ? sendXml(res, xml) : res.status(404).json({ error: 'Not found.' });
   }));
-  app.get('/robots.txt', (_req: Request, res: Response) => {
+  app.get('/robots.txt', (req: Request, res: Response) => {
     res.header('Content-Type', 'text/plain; charset=utf-8');
-    return res.send(robotsTxt(seoOrigin(), deployment.appEnv));
+    return res.send(robotsTxt(seoOrigin(), deployment.appEnv, deployment.appEnv === 'production' && blocksIndexing(req)));
   });
   // IndexNow key file (only when a key is configured).
   app.get(/^\/([A-Za-z0-9-]{8,128})\.txt$/, asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
