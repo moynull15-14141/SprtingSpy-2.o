@@ -1206,7 +1206,7 @@ async function startServer() {
 
       if (associatedEvents > 0 || associatedArticles > 0) {
         return res.status(400).json({
-          error: `Cannot delete sport '${sport.name}': has ${associatedEvents} active events and ${associatedArticles} articles. Remove or reassign them first to prevent orphaned records.`,
+          error: `Cannot delete sport '${sport.name}': it has ${associatedEvents} event(s) and ${associatedArticles} article(s), drafts and archived ones included. Move or delete them first.`,
         });
       }
       const sportDisciplines = await prisma.discipline.count({ where: { sportSlug: sport.slug } });
@@ -1647,7 +1647,7 @@ async function startServer() {
       });
       if (dependentArticles > 0) {
         return res.status(400).json({
-          error: `Cannot delete edition '${ed.title}': ${dependentArticles} article(s) reference it. Reassign or archive them first to prevent orphaned records.`,
+          error: `Cannot delete edition '${ed.title}': ${dependentArticles} article(s) reference it. Drafts and archived articles count too: move them to another edition, or remove the edition from them, first.`,
         });
       }
       const editionFaqs = await prisma.faqEntry.count({ where: { editionId: ed.id } });

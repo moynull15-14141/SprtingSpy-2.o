@@ -446,13 +446,14 @@ export const AdminArticles: React.FC = () => {
         if (updated) await autosave.applied(); // the working copy is now the article itself
         return updated ? editingId : null;
       }
-      const created = await addArticle(articlePayload as never);
+      let createReason = '';
+      const created = await addArticle(articlePayload as never, (message) => { createReason = message; });
       if (created) {
         setEditingId(created.id); // a retry updates this Article instead of creating another one
         if (!(await savePendingFaqs(created.id))) return null;
         await autosave.applied();
       }
-      else setFormError('The article was not saved. Check the server message and try again; your changes are still in the editor.');
+      else setFormError(`The article was not saved${createReason ? `: ${createReason}` : '.'} Your changes are still in the editor.`);
       return created?.id ?? null;
     } finally {
       setSaving(false);

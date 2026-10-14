@@ -892,6 +892,7 @@ export const AdminEvents: React.FC = () => {
                         >
                           Edit
                         </button>
+                        {currentUser.role === 'Admin' && (
                         <button
                           onClick={() => {
                             if (confirm(`Delete permanent event "${evt.name}"?`)) {
@@ -902,6 +903,7 @@ export const AdminEvents: React.FC = () => {
                         >
                           Delete
                         </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -1130,6 +1132,7 @@ export const AdminEvents: React.FC = () => {
                       >
                         Edit
                       </button>
+                      {currentUser.role === 'Admin' && (
                       <button
                         onClick={() => {
                           if (confirm(`Delete tournament edition "${ed.title}"?`)) {
@@ -1140,6 +1143,7 @@ export const AdminEvents: React.FC = () => {
                       >
                         Delete
                       </button>
+                      )}
                     </td>
                   </tr>
                 ))}

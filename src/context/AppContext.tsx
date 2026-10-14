@@ -72,7 +72,7 @@ interface AdminDataContextType {
   addEdition: (edition: Omit<EventEdition, 'id'>) => Promise<boolean>;
   updateEdition: (id: string, updates: Partial<EventEdition>, opts?: SaveOptions) => Promise<boolean>;
   deleteEdition: (id: string) => Promise<boolean>;
-  addArticle: (article: Omit<Article, 'id' | 'publishedAt' | 'content'> & { content?: string }) => Promise<Article | null>;
+  addArticle: (article: Omit<Article, 'id' | 'publishedAt' | 'content'> & { content?: string }, onError?: (message: string) => void) => Promise<Article | null>;
   updateArticle: (id: string, updates: Partial<Article>, opts?: SaveOptions) => Promise<boolean>;
   deleteArticle: (id: string) => Promise<boolean>;
 
@@ -338,7 +338,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return false;
   };
 
-  const addArticle = async (newArticle: Omit<Article, 'id' | 'publishedAt' | 'content'> & { content?: string }): Promise<Article | null> => {
+  const addArticle = async (newArticle: Omit<Article, 'id' | 'publishedAt' | 'content'> & { content?: string }, onError?: (message: string) => void): Promise<Article | null> => {
     const res = await apiCall<Article>('/api/articles', {
       method: 'POST',
       body: newArticle,
@@ -349,6 +349,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       refreshData();
       return res.data;
     }
+    if (res.error) onError?.(res.error);
     return null;
   };
 
