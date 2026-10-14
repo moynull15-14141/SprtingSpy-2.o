@@ -26,7 +26,7 @@ export async function authorWriteGuard(ctx: AuthContext, body: Record<string, an
   checkArticlePayload(body, !existing);
   if (ctx.role !== 'Author') {
     const nextStatus = body.status ?? existing?.status ?? 'draft';
-    if (existing && ['published','scheduled'].includes(nextStatus) && existing.reviewStatus !== 'not_required' && existing.reviewStatus !== 'approved') fail(409, 'This Author submission must be approved before publishing or scheduling.');
+    if (existing && ['published','scheduled'].includes(nextStatus) && existing.reviewStatus !== 'not_required' && existing.reviewStatus !== 'approved') fail(409, 'This article requires review: submit it for review and have it approved before publishing or scheduling.');
     return body.authorId;
   }
   const profile = await prisma.author.findUnique({ where: { userId: ctx.userId }, select: { id: true } });

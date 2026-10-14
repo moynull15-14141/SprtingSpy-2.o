@@ -36,6 +36,8 @@ export function ArticleReviewPanel({ article, saveDraft, onWorkflowChange }: {ar
   const isAuthor=currentUser.role==='Author';
   const state=workflow?.reviewStatus ?? article?.reviewStatus ?? (isAuthor?'draft':'not_required');
   const privateArticle=!article || ['draft','preview'].includes(article.status);
+  // Authors always submit their own drafts; staff submit review-required drafts (e.g. imports).
+  const canSubmit=privateArticle && (isAuthor ? state!=='in_review' : !!article && (state==='draft'||state==='changes_requested'));
   const canDecide=canReviewArticles(currentUser.role) && state==='in_review' && (currentUser.role==='Admin'||workflow?.reviewerId===currentUser.id);
   const latestDecision=workflow?.history.find(event=>['Requested Article Changes','Approved Article'].includes(event.action));
   async function submit(){
@@ -66,7 +68,10 @@ export function ArticleReviewPanel({ article, saveDraft, onWorkflowChange }: {ar
     {workflow?.reviewer&&<p>Reviewer: <strong>{workflow.reviewer.name}</strong> ({workflow.reviewer.role}{workflow.reviewer.status==='inactive'?', inactive':''})</p>}
     {workflow?.reviewComment&&<div className="space-y-1 rounded border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/40"><p className="font-semibold">Latest review comment{latestDecision ? ` · ${latestDecision.userName}` : ''}</p><p className="whitespace-pre-wrap break-words">{workflow.reviewComment}</p>{workflow.reviewDecidedAt&&<p>{new Date(workflow.reviewDecidedAt).toLocaleString()}</p>}</div>}
     {isAuthor&&state==='in_review'&&<p>Awaiting the reviewer’s decision. Editing resumes if changes are requested.</p>}
-    {isAuthor&&privateArticle&&state!=='in_review'&&<>
+    {!isAuthor&&canSubmit&&<p>This article must be submitted and approved before it can be published or scheduled. Choose another Admin or Editor as reviewer.</p>}
+    {!isAuthor&&state==='in_review'&&!canDecide&&<p>Awaiting the assigned reviewer’s decision.</p>}
+    {!isAuthor&&state==='approved'&&privateArticle&&<p>Approved. You can now publish or schedule it using the existing controls.</p>}
+    {canSubmit&&<>
       <label htmlFor="article-reviewer" className="block font-semibold">Select reviewer *</label>
       <select id="article-reviewer" className={field} value={selected} disabled={busy||loading} onChange={e=>setSelected(e.target.value)}><option value="">Choose an eligible reviewer</option>{reviewers.map(r=><option key={r.id} value={r.id}>{r.name} ({r.role})</option>)}</select>
       {!loading&&!reviewers.length&&<p role="status">No eligible active reviewers are available. Ask an Admin to assign an active Admin or Editor account.</p>}
