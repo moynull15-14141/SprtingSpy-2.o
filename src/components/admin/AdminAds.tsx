@@ -121,7 +121,7 @@ export const AdminAds: React.FC = () => {
               <label className="block font-semibold mb-1">Direct Sponsor Name</label>
               <input
                 type="text"
-                value={sponsorName}
+                maxLength={150} value={sponsorName}
                 onChange={(e) => setSponsorName(e.target.value)}
                 placeholder="e.g. Rolex, Emirates, Precision Timing"
                 className="w-full p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"
@@ -142,7 +142,7 @@ export const AdminAds: React.FC = () => {
             <label className="block font-semibold mb-1">Sponsorship Copy / Tagline</label>
             <input
               type="text"
-              value={bannerText}
+              maxLength={300} value={bannerText}
               onChange={(e) => setBannerText(e.target.value)}
               placeholder="e.g. Official Chronometer Partner of Grand Slam Championship Coverage."
               className="w-full p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"

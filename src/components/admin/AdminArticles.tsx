@@ -1008,6 +1008,7 @@ export const AdminArticles: React.FC = () => {
                 <input
                   id="seo-title"
                   type="text"
+                  maxLength={300}
                   value={metaTitle}
                   onChange={(e) => setMetaTitle(e.target.value)}
                   placeholder={title || 'Page Title'}
@@ -1019,6 +1020,7 @@ export const AdminArticles: React.FC = () => {
                 <textarea
                   id="seo-description"
                   rows={3}
+                  maxLength={500}
                   value={metaDescription}
                   onChange={(e) => setMetaDescription(e.target.value)}
                   placeholder={excerpt || 'Meta Description'}

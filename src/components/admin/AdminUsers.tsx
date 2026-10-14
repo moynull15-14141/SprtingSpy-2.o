@@ -125,7 +125,7 @@ export const AdminUsers: React.FC = () => {
               <input
                 type="text"
                 required
-                value={name}
+                maxLength={150} value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. David Campbell"
                 className="w-full p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"
@@ -136,7 +136,7 @@ export const AdminUsers: React.FC = () => {
               <input
                 type="email"
                 required
-                value={email}
+                maxLength={200} value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="d.campbell@sportingspy.com"
                 className="w-full p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"

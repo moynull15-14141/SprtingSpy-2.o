@@ -115,7 +115,7 @@ export const AdminAuthors: React.FC = () => {
               <input
                 type="text"
                 required
-                value={name}
+                maxLength={150} value={name}
                 onChange={(e) => {
                   setName(e.target.value);
                   if (!editingId && !slug) setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
@@ -129,7 +129,7 @@ export const AdminAuthors: React.FC = () => {
               <input
                 type="text"
                 required
-                value={slug}
+                maxLength={120} value={slug}
                 onChange={(e) => setSlug(e.target.value)}
                 placeholder="alistair-vance"
                 className="w-full p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 font-mono"
@@ -140,7 +140,7 @@ export const AdminAuthors: React.FC = () => {
               <input
                 type="text"
                 required
-                value={roleTitle}
+                maxLength={150} value={roleTitle}
                 onChange={(e) => setRoleTitle(e.target.value)}
                 placeholder="e.g. Chief Tennis Correspondent"
                 className="w-full p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"
@@ -163,7 +163,7 @@ export const AdminAuthors: React.FC = () => {
               <label className="block font-semibold mb-1">Twitter / X Handle</label>
               <input
                 type="text"
-                value={twitter}
+                maxLength={100} value={twitter}
                 onChange={(e) => setTwitter(e.target.value)}
                 placeholder="@AlistairVanceTennis"
                 className="w-full p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"
@@ -173,7 +173,7 @@ export const AdminAuthors: React.FC = () => {
               <label className="block font-semibold mb-1">Contact Email</label>
               <input
                 type="email"
-                value={email}
+                maxLength={200} value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="a.vance@sportingspy.com"
                 className="w-full p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"
@@ -186,7 +186,7 @@ export const AdminAuthors: React.FC = () => {
             <textarea
               rows={3}
               required
-              value={bio}
+              maxLength={3000} value={bio}
               onChange={(e) => setBio(e.target.value)}
               placeholder="Background, tournament beats covered, sports credentials..."
               className="w-full p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"

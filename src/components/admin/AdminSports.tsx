@@ -204,7 +204,7 @@ export const AdminSports: React.FC = () => {
               <input
                 type="text"
                 required
-                value={name}
+                maxLength={200} value={name}
                 onChange={(e) => handleNameChange(e.target.value)}
                 placeholder="e.g. Cricket, Swimming, Skiing"
                 className="w-full text-xs p-2.5 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"
@@ -217,7 +217,7 @@ export const AdminSports: React.FC = () => {
               <input
                 type="text"
                 required
-                value={slug}
+                maxLength={120} value={slug}
                 onChange={(e) => setSlug(e.target.value)}
                 placeholder="e.g. cricket"
                 className="w-full text-xs p-2.5 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 font-mono"
@@ -233,7 +233,7 @@ export const AdminSports: React.FC = () => {
             </label>
             <input
               type="text"
-              value={tagline}
+              maxLength={300} value={tagline}
               onChange={(e) => setTagline(e.target.value)}
               placeholder="e.g. Test Matches, World Cups, Pitch Conditions & Formats"
               className="w-full text-xs p-2.5 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"
@@ -247,7 +247,7 @@ export const AdminSports: React.FC = () => {
             <textarea
               rows={3}
               required
-              value={description}
+              maxLength={5000} value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Authoritative summary of what SportingSpy documents for this sport..."
               className="w-full text-xs p-2.5 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"
