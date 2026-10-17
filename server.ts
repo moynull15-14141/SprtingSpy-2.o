@@ -52,6 +52,7 @@ import { prepareArticleContent, prepareRichDescription, syncBodyMedia } from './
 import { articlePath, siteOrigin } from './src/lib/paths';
 import { sitemapFiles } from './server/seo/sitemap';
 import { robotsTxt, canonicalHostOf, indexingBlocked } from './server/seo/robots';
+import { deletePlanRouter } from './server/deletePlans';
 import { seoRouter } from './server/seo/routes';
 import { searchPageRateLimit, searchRouter } from './server/services/search/routes';
 import { trackingConfig } from './server/trackingConfig';
@@ -1803,6 +1804,8 @@ async function startServer() {
   app.use('/api/document-import', documentImportRouter(getAuthLookup));
   app.use(contactRouter(getAuthLookup));
   app.use('/api/sports', sportEventConfigurationRouter(getAuthLookup));
+  // Guided deletion of events, editions, sports and groups: the CMS dialog lists what is linked and keeps private articles.
+  app.use(deletePlanRouter(getAuthLookup, { onGone: (paths, reason) => notifyIndexNow(seoOrigin(), paths, reason) }));
   app.use('/api/disciplines', disciplineRouter(getAuthLookup, { validateIcon: validateSportIcon, imageIsManaged, mediaIdForUrl }));
   app.use(editorialWorkflowRouter(getAuthLookup));
 

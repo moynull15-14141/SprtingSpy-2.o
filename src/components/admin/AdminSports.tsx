@@ -22,11 +22,12 @@ import { Button } from '../ui/Button';
 import { EventConfigurationEditor } from './EventConfigurationEditor';
 import { DisciplineManager } from './DisciplineManager';
 import { GroupEditor } from './GroupEditor';
+import { DeleteDependentsDialog } from './DeleteDependentsDialog';
 import { MediaImageField } from './media/MediaShared';
 import { SeoFields, seoToDraft, draftToSeo, EMPTY_SEO_DRAFT, type SeoDraft } from './EntityFields';
 
 export const AdminSports: React.FC = () => {
-  const { sports, events, mediaItems, disciplines, addSport, updateSport, deleteSport, navigate } = useApp();
+  const { sports, events, mediaItems, disciplines, addSport, updateSport, navigate } = useApp();
   const [isCreating, setIsCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [configurationSportSlug, setConfigurationSportSlug] = useState<string | null>(null);
@@ -45,6 +46,8 @@ export const AdminSports: React.FC = () => {
   const [featuredEventIds, setFeaturedEventIds] = useState<string[]>([]);
   const [faqSchemaEnabled, setFaqSchemaEnabled] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  // Guided deletion: the dialog lists the sport's events, groups, articles and FAQ entries.
+  const [deletingSportId, setDeletingSportId] = useState<string | null>(null);
   const editingSport = sports.find((s) => s.id === editingId);
   // A group of the sport being edited, open in its own full editor (the sport form waits behind it).
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
@@ -159,6 +162,7 @@ export const AdminSports: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {deletingSportId && <DeleteDependentsDialog kind="sport" id={deletingSportId} onClose={() => setDeletingSportId(null)} onDeleted={(message) => { setDeletingSportId(null); if (editingId === deletingSportId) resetForm(); setFeedback(message); setTimeout(() => setFeedback(null), 8000); }} />}
       <div className="flex items-center justify-between pb-4 border-b border-stone-200 dark:border-stone-800">
         <div>
           <h2 className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">
@@ -376,11 +380,7 @@ export const AdminSports: React.FC = () => {
                     Edit
                   </button>
                   <button
-                    onClick={() => {
-                      if (confirm(`Delete sport "${sport.name}"?`)) {
-                        deleteSport(sport.id);
-                      }
-                    }}
+                    onClick={() => setDeletingSportId(sport.id)}
                     className="text-rose-600 dark:text-rose-400 hover:underline"
                   >
                     Delete

@@ -19,6 +19,7 @@ import { DynamicEventFields } from './DynamicEventFields';
 import { parseSportEventValues } from '../../../server/sportEventConfiguration';
 import dynamic from 'next/dynamic';
 import { MediaImageField } from './media/MediaShared';
+import { DeleteDependentsDialog } from './DeleteDependentsDialog';
 import { docToPlainText, type RichDoc } from '../../lib/richText';
 import { readTabState, writeTabState } from '../../lib/admin/workspace';
 
@@ -66,10 +67,8 @@ export const AdminEvents: React.FC = () => {
     mediaItems,
     addEvent,
     updateEvent,
-    deleteEvent,
     addEdition,
     updateEdition,
-    deleteEdition,
     navigate,
     apiCall,
     disciplines,
@@ -144,6 +143,8 @@ export const AdminEvents: React.FC = () => {
 
   const [feedback, setFeedback] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  // Guided deletion: the dialog lists linked editions, articles and FAQ entries.
+  const [deleting, setDeleting] = useState<{ kind: 'event' | 'edition'; id: string } | null>(null);
   const flash = (message: string) => { setFeedback(message); setTimeout(() => setFeedback(null), 5000); };
 
   // ── PHASE AUTOSAVE: event and edition forms autosave to server working copies (never the live rows). ──
@@ -625,6 +626,7 @@ export const AdminEvents: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {deleting && <DeleteDependentsDialog kind={deleting.kind} id={deleting.id} onClose={() => setDeleting(null)} onDeleted={(message) => { setDeleting(null); flash(message); }} />}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-stone-200 dark:border-stone-800 gap-3">
         <div>
           <h2 className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">
@@ -895,9 +897,7 @@ export const AdminEvents: React.FC = () => {
                         {currentUser.role === 'Admin' && (
                         <button
                           onClick={() => {
-                            if (confirm(`Delete permanent event "${evt.name}"?`)) {
-                              deleteEvent(evt.id);
-                            }
+                            setDeleting({ kind: 'event', id: evt.id });
                           }}
                           className="text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
                         >
@@ -1135,9 +1135,7 @@ export const AdminEvents: React.FC = () => {
                       {currentUser.role === 'Admin' && (
                       <button
                         onClick={() => {
-                          if (confirm(`Delete tournament edition "${ed.title}"?`)) {
-                            deleteEdition(ed.id);
-                          }
+                          setDeleting({ kind: 'edition', id: ed.id });
                         }}
                         className="text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
                       >

@@ -55,6 +55,7 @@
     "test:settings-ui": "tsx server/scripts/verify-settings-ui.ts",
     "test:ad-creatives": "tsx server/scripts/verify-ad-creatives.ts",
     "test:phase-h": "tsx server/scripts/verify-phase-h.ts",
+    "test:guided-delete": "tsx server/scripts/verify-guided-delete.ts",
     "test:indexing-host": "tsx server/scripts/verify-indexing-host.ts",
     "test:phase-j": "tsx server/scripts/verify-phase-j.ts",
     "test:phase-i": "tsx server/scripts/verify-phase-i.ts",

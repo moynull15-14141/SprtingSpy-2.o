@@ -13,6 +13,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import type { Discipline } from '../../types';
+import { DeleteDependentsDialog } from './DeleteDependentsDialog';
 
 const slugOf = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const inputClass = 'w-full min-w-0 rounded border border-stone-300 bg-white p-2 text-xs dark:border-stone-700 dark:bg-stone-950';
@@ -27,6 +28,8 @@ export function DisciplineManager({ sportSlug, sportName, onEdit }: { sportSlug:
   const [slug, setSlug] = useState('');
   const [slugTouched, setSlugTouched] = useState(false);
   const [notice, setNotice] = useState('');
+  // Guided deletion: the dialog lists the events and articles that lose the group.
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const usage = (d: Discipline) => ({
     events: events.filter((e) => e.sportSlug === d.sportSlug && e.disciplineSlug === d.slug).length,
@@ -59,13 +62,11 @@ export function DisciplineManager({ sportSlug, sportName, onEdit }: { sportSlug:
     const calls = order.map((id, position) => ({ id, position: position + 1 })).filter(({ id, position }) => list.find((d) => d.id === id)!.order !== position).map(({ id, position }) => put(id, { order: position }));
     void run(`"${current.name}" moved ${direction < 0 ? 'up' : 'down'}.`, ...calls);
   };
-  const remove = (d: Discipline) => {
-    if (!window.confirm(`Delete the group "${d.name}"? This cannot be undone.`)) return;
-    void run(`Group "${d.name}" deleted.`, () => apiCall<{ success: boolean }>(`/api/disciplines/${d.id}`, { method: 'DELETE' }));
-  };
+  const remove = (d: Discipline) => { setNotice(''); setDeletingId(d.id); };
 
   return (
     <fieldset className="rounded-lg border border-stone-200 p-3 dark:border-stone-800" aria-busy={busy} data-testid="discipline-manager">
+      {deletingId && <DeleteDependentsDialog kind="group" id={deletingId} onClose={() => setDeletingId(null)} onDeleted={(message) => { setDeletingId(null); setNotice(message); }} />}
       <legend className="px-1 text-xs font-bold uppercase tracking-wider text-stone-700 dark:text-stone-200">Groups in {sportName} ({list.length})</legend>
       <p className="mb-2 text-[11px] text-stone-500 dark:text-stone-400">
         Optional groups directly under this sport (for example Running, Jumping). Each group has its own landing page; use Edit for its name, URL, tagline, description, image, featured events and SEO. Events and articles of {sportName} can be given one group. A group is not a separate sport and cannot contain other groups. Changes here are saved immediately.
@@ -90,7 +91,7 @@ export function DisciplineManager({ sportSlug, sportName, onEdit }: { sportSlug:
                     <button type="button" disabled={busy} onClick={() => onEdit(d.id)} aria-label={`Edit ${d.name}`} className="font-semibold text-amber-700 hover:underline disabled:opacity-50 dark:text-amber-400">Edit</button>
                     <button type="button" disabled={busy} onClick={() => void run(`"${d.name}" is now ${d.isVisible ? 'hidden' : 'visible'}.`, put(d.id, { isVisible: !d.isVisible }))} aria-label={`${d.isVisible ? 'Hide' : 'Show'} ${d.name}`} className="text-stone-600 hover:underline disabled:opacity-50 dark:text-stone-300">{d.isVisible ? 'Hide' : 'Show'}</button>
                     <button type="button" disabled={busy} onClick={() => { if (d.isActive && !window.confirm(`Retire "${d.name}"? It stays on the content that already has it, but can no longer be chosen for other events or articles.`)) return; void run(`"${d.name}" ${d.isActive ? 'retired' : 'reactivated'}.`, put(d.id, { isActive: !d.isActive })); }} aria-label={`${d.isActive ? 'Retire' : 'Reactivate'} ${d.name}`} className="text-stone-600 hover:underline disabled:opacity-50 dark:text-stone-300">{d.isActive ? 'Retire' : 'Reactivate'}</button>
-                    <button type="button" disabled={busy || inUse} onClick={() => remove(d)} aria-label={`Delete ${d.name}`} title={inUse ? 'In use: retire it instead, or clear it from that content first.' : undefined} className="text-rose-600 hover:underline disabled:cursor-not-allowed disabled:opacity-40 dark:text-rose-400">Delete</button>
+                    <button type="button" disabled={busy} onClick={() => remove(d)} aria-label={`Delete ${d.name}`} title={inUse ? 'Its events and articles are kept without the group; the dialog lists them first.' : undefined} className="text-rose-600 hover:underline disabled:cursor-not-allowed disabled:opacity-40 dark:text-rose-400">Delete</button>
                   </span>
                 )}
               </li>

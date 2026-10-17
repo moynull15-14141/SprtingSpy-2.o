@@ -163,6 +163,7 @@ try {
   await manager.getByRole('button', { name: 'Retire Throwing' }).click();
   await until(disciplinesOfA, (rows) => !rows.find((d) => d.slug === 'throwing')!.isActive, 'Throwing retired');
   await manager.getByRole('button', { name: 'Delete High Jump' }).click();
+  await cms.getByTestId('delete-dialog').getByTestId('dd-confirm').click(); // guided Delete dialog (nothing linked)
   await until(disciplinesOfA, (rows) => rows.length === 2, 'High Jump deleted');
   assert.deepEqual((await disciplinesOfA()).map((d) => [d.slug, d.name, d.isVisible, d.isActive]), [['running', 'Running', true, true], ['throwing', 'Throwing', true, false]]);
   const actions = (await prisma.auditLog.findMany({ where: { userId: adminId }, select: { action: true } })).map((l) => l.action);
@@ -186,12 +187,17 @@ try {
   await until(() => prisma.sportEvent.findUniqueOrThrow({ where: { id: `${fx}-event` } }), (e) => e.disciplineSlug === 'running', 'the event got its discipline');
   pass('Event form: the selector offers "None" and the active groups of the event\'s sport (a retired one is not offered); the choice is saved');
 
-  // ── Sport form again: a discipline in use cannot be deleted ──
+  // ── Sport form again: a group in use opens the guided Delete dialog, which lists what loses it; Cancel keeps everything ──
   await cms.goto(`${base}/admin/#sports`);
   await cms.locator('tr', { hasText: `${fx} Athletics` }).getByRole('button', { name: 'Edit', exact: true }).click();
   await manager.locator('[data-discipline="running"]').getByText('1 event(s), 0 article(s)').waitFor();
-  assert.equal(await manager.getByRole('button', { name: 'Delete Running' }).isDisabled(), true);
+  assert.equal(await manager.getByRole('button', { name: 'Delete Running' }).isDisabled(), false);
   assert.equal(await manager.getByRole('button', { name: 'Delete Throwing' }).isDisabled(), false);
+  await manager.getByRole('button', { name: 'Delete Running' }).click();
+  await cms.getByTestId('delete-dialog').getByTestId('dd-detached-events').waitFor();
+  await cms.getByTestId('delete-dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
+  await cms.getByTestId('delete-dialog').waitFor({ state: 'detached' });
+  assert((await disciplinesOfA()).some((d) => d.slug === 'running'), 'Cancel deletes nothing');
   // Featured events: only this group's own events are offered, and the choice is the group's.
   await manager.getByRole('button', { name: 'Edit Running' }).click();
   const runningEditor = cms.getByTestId('group-editor');
@@ -202,7 +208,7 @@ try {
   assert.deepEqual((await prisma.sport.findUniqueOrThrow({ where: { id: `${fx}-sport-a` } })).featuredEventIds, [], 'the sport\'s own featured list is not touched');
   await runningEditor.getByRole('button', { name: `Back to ${fx} Athletics` }).last().click();
   await manager.locator('[data-discipline="running"]').waitFor();
-  pass('Sport form shows where a group is used and disables Delete while it is');
+  pass('Sport form shows where a group is used; Delete opens the guided dialog listing what loses the group, and Cancel keeps everything');
 
   // ── Article form (the one existing editor): optional selector; follows the event; cleared with the sport ──
   await cms.goto(`${base}/admin/#articles`);
