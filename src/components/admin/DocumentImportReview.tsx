@@ -12,7 +12,11 @@ import {
  * `create`: step two of Create Article → Create from source (opens expanded; Back returns to the choice).
  * `editor`: collapsed "Import from source" inside the open Article editor, with overwrite review.
  */
-interface Props { variant: 'create' | 'editor'; taxonomy: TaxonomyData; current: CmsTransfer; onTransfer: (transfer: CmsTransfer) => void; onClose?: () => void }
+interface Props {
+  variant: 'create' | 'editor'; taxonomy: TaxonomyData; current: CmsTransfer; onTransfer: (transfer: CmsTransfer) => void; onClose?: () => void;
+  /** Controlled open state: the caller renders the trigger (the Article editor puts it in its bar). */
+  open?: boolean; onOpenChange?: (open: boolean) => void;
+}
 const confidenceStyle: Record<ImportConfidence, string> = {
   HIGH: 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300',
   MEDIUM: 'border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300',
@@ -22,8 +26,11 @@ const confidenceStyle: Record<ImportConfidence, string> = {
 const evidenceLocation = (e: { page?: number; paragraph?: number; table?: number; row?: number; line?: number; sectionKind?: string; sourceType?: string }) => [e.sourceType === 'manual-text' && 'Manual Text', e.page && `Page ${e.page}`, e.line && `Line ${e.line}`, e.paragraph && `Paragraph ${e.paragraph}`, e.table && `Table ${e.table}`, e.row && `Row ${e.row}`, e.sectionKind === 'heading' && 'Heading'].filter(Boolean).join(' · ') || 'Location unavailable';
 const csrf = () => document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/)?.[1];
 
-export function DocumentImportReview({ variant, taxonomy, current, onTransfer, onClose }: Props) {
-  const [open, setOpen] = useState(variant === 'create');
+export function DocumentImportReview({ variant, taxonomy, current, onTransfer, onClose, open: openProp, onOpenChange }: Props) {
+  const [ownOpen, setOwnOpen] = useState(variant === 'create');
+  const controlled = openProp !== undefined;
+  const open = controlled ? openProp : ownOpen;
+  const setOpen = (value: boolean) => { if (controlled) onOpenChange?.(value); else setOwnOpen(value); };
   const [sourceMethod, setSourceMethod] = useState<'document' | 'manual-text'>('document');
   const [file, setFile] = useState<File | null>(null);
   const [manualText, setManualText] = useState('');
@@ -118,7 +125,7 @@ export function DocumentImportReview({ variant, taxonomy, current, onTransfer, o
     setOpen(false); resetResult();
   };
 
-  if (!open) return <div><Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)} data-testid="import-from-source"><Upload size={14} aria-hidden="true" /> Import from source</Button></div>;
+  if (!open) return controlled ? null : <div><Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)} data-testid="import-from-source"><Upload size={14} aria-hidden="true" /> Import from source</Button></div>;
   return (
     <section className="rounded-xl border border-amber-300 bg-white p-4 shadow-sm dark:border-amber-800 dark:bg-stone-950 sm:p-5" aria-labelledby="document-import-heading" data-testid="source-import-panel">
       <div className="flex flex-wrap items-start justify-between gap-3">

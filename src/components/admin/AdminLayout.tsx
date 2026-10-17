@@ -124,10 +124,11 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
   useEffect(() => { if (!deskAllowed) setActiveTab('dashboard'); }, [deskAllowed, setActiveTab]);
 
   return (
-    <div className="cms-shell space-y-4">
+    // While an editor is open the console header folds away (more writing room); its heading stays for screen readers.
+    <div className="cms-shell space-y-4" data-editor-active={editorFocus || undefined}>
 
       {/* Admin Top Status Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 pb-3 dark:border-stone-800">
+      <div className="cms-console-header flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 pb-3 dark:border-stone-800">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-500">
@@ -141,7 +142,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
           </h1>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="cms-console-links flex items-center gap-2">
           <button data-cms-navigation onClick={() => navigate('/account')} className="px-3 py-1.5 rounded-lg border border-stone-300 dark:border-stone-700 text-xs font-medium text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors">My account</button>
           <button
             data-cms-navigation

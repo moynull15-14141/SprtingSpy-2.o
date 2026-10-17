@@ -107,7 +107,7 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
   };
 
   return (
-    <header className="sticky top-0 z-40 bg-white/95 dark:bg-[#0c0d0e]/95 backdrop-blur-md border-b border-stone-200 dark:border-stone-800 transition-colors">
+    <header className="site-header sticky top-0 z-40 bg-white/95 dark:bg-[#0c0d0e]/95 backdrop-blur-md border-b border-stone-200 dark:border-stone-800 transition-colors">
       <div className="max-w-[120rem] mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* ZONE 1: Brand Zone - Single element wordmark */}

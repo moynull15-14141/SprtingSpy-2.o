@@ -5,7 +5,7 @@
  * Select Article Type -> Write -> Featured Image -> SEO Check -> Publish Status.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { legacyToDoc, validateRichDoc, type RichDoc } from '../../lib/richText';
 import { MediaPicker, ReviewBadge, thumbnailUrl } from './media/MediaShared';
@@ -40,7 +40,7 @@ import { Article, ArticleType, SeoMetadata } from '../../types';
 import { Button } from '../ui/Button';
 import { useArticleSearch } from './useArticleSearch';
 import { ImportSourceBadge, ImportSourceNote } from './ImportSource';
-import { FileInput, PenLine } from 'lucide-react';
+import { ArrowLeft, ChevronDown, FileInput, Maximize2, Minimize2, PanelRightClose, PanelRightOpen, PenLine, Upload } from 'lucide-react';
 import { DocumentImportReview } from './DocumentImportReview';
 import type { CmsTransfer, PendingFaq } from '../../lib/documentImport';
 
@@ -91,6 +91,48 @@ export const AdminArticles: React.FC = () => {
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('sportingspy:cms-editor', { detail: { active: isCreating } }));
     return () => { window.dispatchEvent(new CustomEvent('sportingspy:cms-editor', { detail: { active: false } })); };
+  }, [isCreating]);
+  // Editor layout preferences, remembered per browser (storage failures are ignored).
+  const [panelHidden, setPanelHidden] = useState(false);
+  const [focusMode, setFocusMode] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(true);
+  const [importOpen, setImportOpen] = useState(false);
+  useEffect(() => { setPanelHidden(readPref('cms-editor-panel-hidden')); setFocusMode(readPref('cms-editor-focus')); }, []);
+  // Article setup starts open for a new article; an existing one follows the last choice.
+  useEffect(() => { if (isCreating) { setSetupOpen(!(editingId && readPref('cms-article-setup-collapsed'))); setImportOpen(false); } }, [isCreating]); // eslint-disable-line react-hooks/exhaustive-deps
+  const togglePanel = () => setPanelHidden((v) => { writePref('cms-editor-panel-hidden', !v); return !v; });
+  const toggleFocus = () => setFocusMode((v) => { writePref('cms-editor-focus', !v); return !v; });
+  // Focus mode hides the public header, the desk navigation and the settings panel; Esc leaves it.
+  const focusActive = isCreating && focusMode;
+  useEffect(() => {
+    if (!focusActive) return;
+    document.documentElement.setAttribute('data-cms-focus', '');
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      // The writing area marks Escape as handled without using it, so it still leaves focus mode;
+      // an open editor menu or dialog (block menu, link form, modal) gets the Escape instead.
+      const fromWriting = !!target?.closest('.ProseMirror');
+      if (e.key !== 'Escape' || (e.defaultPrevented && !fromWriting) || target?.closest('input, select, textarea, [role="dialog"], [role="menu"]') || document.querySelector('[aria-modal="true"], .cms-article-form [role="dialog"], .cms-article-form [role="menu"]')) return;
+      setFocusMode(false); writePref('cms-editor-focus', false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => { document.documentElement.removeAttribute('data-cms-focus'); window.removeEventListener('keydown', onKey); };
+  }, [focusActive]);
+  // The editor bar and the content pane are measured so the toolbar and the settings panel pin below the bar.
+  const formRef = useRef<HTMLFormElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const form = formRef.current; const bar = barRef.current;
+    if (!isCreating || !form || !bar) return;
+    const pane = form.closest('.cms-main') as HTMLElement | null;
+    const update = () => {
+      form.style.setProperty('--cms-bar-measured', `${Math.ceil(bar.getBoundingClientRect().height)}px`);
+      if (pane) form.style.setProperty('--cms-pane-h', `${pane.clientHeight}px`);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(bar); if (pane) observer.observe(pane);
+    return () => observer.disconnect();
   }, [isCreating]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const editingArticleForPermissions = articles.find(article => article.id === editingId);
@@ -485,6 +527,30 @@ export const AdminArticles: React.FC = () => {
   };
 
   /**
+   * Ctrl/Cmd+S: saves the writing in the article's current saved state (a new
+   * article as a draft). It never publishes, unpublishes or reschedules, and
+   * the editor stays open.
+   */
+  const quickSave = async () => {
+    if (saving || authorLocked) return;
+    const keep = (editingArticle?.status ?? 'draft') as typeof status;
+    const id = await saveArticle(keep);
+    if (!id) return;
+    setFeedback(`Saved “${title}” (${keep}).`);
+    restartAutosave(id);
+  };
+  const quickSaveRef = useRef(quickSave);
+  quickSaveRef.current = quickSave;
+  useEffect(() => {
+    if (!isCreating) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); void quickSaveRef.current(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isCreating]);
+
+  /**
    * Opens the staff-only preview in a new tab. Previewing never changes what
    * is live or scheduled (PHASE 6): only a private draft that stays private is
    * saved first; a live, scheduled or archived article, or a draft whose
@@ -507,6 +573,14 @@ export const AdminArticles: React.FC = () => {
 
   const featuredMedia = featuredMediaId ? mediaItems.find((m) => m.id === featuredMediaId) : undefined;
   const savedState = savedStateLabel(editingArticle);
+  /** One line shown on the folded Article setup: sport · event · edition · type · byline. */
+  const setupSummary = [
+    sports.find((s) => s.slug === sportSlug)?.name ?? 'No sport',
+    isAboutEvent ? (eventSlug ? events.find((e) => e.sportSlug === sportSlug && e.slug === eventSlug)?.name ?? eventSlug : 'No event chosen') : 'General sport guide',
+    isAboutEvent && eventSlug && editionYear ? String(editionYear) : '',
+    articleType,
+    authors.find((a) => a.id === authorId)?.name ?? '',
+  ].filter(Boolean).join(' · ');
   const severityCounts = seoCheck?.checklist.reduce((counts, item) => {
     if (item.passed) counts.passed++;
     else if (item.severity === 'blocking') counts.blocking++;
@@ -636,41 +710,73 @@ export const AdminArticles: React.FC = () => {
         />
       )}
 
-      {feedback && (
+      {feedback && !isCreating && (
         <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-300">
           {feedback}
         </div>
       )}
 
-      {isCreating && !isAuthor && (
-        <DocumentImportReview
-          variant="editor"
-          taxonomy={{ sports, events, editions, authors, articleTypes }}
-          current={{ title, subtitle, excerpt, body: bodyDoc, sportSlug, eventSlug: eventSlug || undefined, editionYear, articleType, authorId, metaTitle, metaDescription, keywords: otherSeo.keywords }}
-          onTransfer={applyDocumentImport}
-        />
-      )}
-
       {/* ARTICLE WORKFLOW FORM */}
       {isCreating && (
-        <form onSubmit={handleSave} className="cms-article-form rounded-xl border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-900/60">
-          <div className="flex items-center justify-between gap-3 border-b border-stone-200 px-4 py-3 dark:border-stone-800 sm:px-5">
-            <div className="min-w-0">
-              <h3 className="truncate font-serif text-lg font-bold text-stone-900 dark:text-stone-100">
-                {editingId ? 'Edit Article Dossier' : 'New Article Guided Workflow'}
-              </h3>
-              {/* PHASE 6: what is saved now, independent of the "Publishing state" control. */}
-              <span data-testid="article-saved-state" data-tone={savedState.tone} className={`mt-0.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${SAVED_STATE_TONE[savedState.tone]}`}>{savedState.label}</span>
-            </div>
-            <AutosaveStatus autosave={autosave} onLoadNewer={autosave.conflict ? () => { const c = autosave.conflict!; applyPayload(c.payload as Partial<ArticleDraftPayload>); autosave.start({ entityId: c.entityId, baseVersion: c.baseVersion, draft: c }); } : undefined} />
+        <form ref={formRef} onSubmit={handleSave} data-panel-hidden={panelHidden || undefined} className="cms-article-form rounded-xl border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-900/60">
+          {/* Editor bar: pinned while the article scrolls (on phones its actions become a bottom bar). */}
+          <div ref={barRef} data-testid="article-editor-bar" className="cms-editor-bar flex flex-wrap items-center gap-x-3 gap-y-2 rounded-t-xl border-b border-stone-200 bg-stone-50 px-3 py-2 dark:border-stone-800 dark:bg-[#16181b] sm:px-4">
             <button
               type="button"
               onClick={() => void closeEditor()}
-              className="shrink-0 rounded-md px-2 py-1 text-xs font-semibold text-stone-500 hover:bg-stone-100 hover:text-stone-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:hover:bg-stone-800 dark:hover:text-stone-200 dark:text-stone-400"
+              aria-label="Back to articles"
+              title="Back to articles"
+              className="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-stone-600 hover:bg-stone-200/70 hover:text-stone-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:text-stone-300 dark:hover:bg-stone-800 dark:hover:text-stone-100"
             >
-              &larr; Back to articles
+              <ArrowLeft size={16} aria-hidden="true" /><span className="hidden sm:inline">Articles</span>
             </button>
+            <div className="min-w-0 flex-1 basis-40">
+              <div className="flex min-w-0 items-center gap-2">
+                <h3 className="truncate font-serif text-sm font-bold text-stone-900 dark:text-stone-100 sm:text-base">
+                  {editingId ? 'Edit Article Dossier' : 'New Article Guided Workflow'}
+                </h3>
+                {/* PHASE 6: what is saved now, independent of the "Publishing state" control. */}
+                <span data-testid="article-saved-state" data-tone={savedState.tone} className={`inline-block shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${SAVED_STATE_TONE[savedState.tone]}`}>{savedState.label}</span>
+              </div>
+              <p className="truncate text-[11px] text-stone-500 dark:text-stone-400" title={title || undefined}>{title || 'Untitled article'}</p>
+            </div>
+            <AutosaveStatus autosave={autosave} onLoadNewer={autosave.conflict ? () => { const c = autosave.conflict!; applyPayload(c.payload as Partial<ArticleDraftPayload>); autosave.start({ entityId: c.entityId, baseVersion: c.baseVersion, draft: c }); } : undefined} />
+            <div className="flex shrink-0 items-center gap-0.5">
+              {!isAuthor && <button type="button" onClick={() => setImportOpen((v) => !v)} aria-expanded={importOpen} aria-label="Import from source" title="Import from source (PDF, DOCX or pasted text)" data-testid="import-from-source" className={barIconButton}>
+                <Upload size={17} aria-hidden="true" />
+              </button>}
+              <button type="button" onClick={togglePanel} aria-controls="article-settings-panel" aria-expanded={!panelHidden} aria-label={panelHidden ? 'Show settings panel' : 'Hide settings panel'} title={panelHidden ? 'Show settings panel (SEO, review, publishing)' : 'Hide settings panel for a wider writing column'} className={barIconButton}>
+                {panelHidden ? <PanelRightOpen size={17} aria-hidden="true" /> : <PanelRightClose size={17} aria-hidden="true" />}
+              </button>
+              <button type="button" onClick={toggleFocus} aria-pressed={focusMode} aria-label={focusMode ? 'Exit focus mode' : 'Focus mode'} title={focusMode ? 'Exit focus mode (Esc)' : 'Focus mode: hide everything except the article'} className={barIconButton}>
+                {focusMode ? <Minimize2 size={17} aria-hidden="true" /> : <Maximize2 size={17} aria-hidden="true" />}
+              </button>
+            </div>
+            <div className="cms-editor-actions flex shrink-0 items-center gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={handlePreview} disabled={saving || plan === 'save-first'} title={plan === 'save' ? `Saves as ${status} (still private) and opens the preview.` : plan === 'saved-version' ? 'Shows the last saved version; does not save, publish or schedule.' : 'Save the article first.'}>
+                Preview
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => saveAs('draft')} disabled={saving || authorLocked} title="Save as a private draft (Ctrl+S saves in the current state)">
+                Save draft
+              </Button>
+              {!isAuthor && <Button type="button" size="sm" onClick={() => saveAs('published')} isLoading={saving}>
+                Publish
+              </Button>}
+            </div>
           </div>
+          {!isAuthor && importOpen && (
+            <div className="px-3 pt-3 sm:px-4">
+              <DocumentImportReview
+                variant="editor"
+                open={importOpen}
+                onOpenChange={setImportOpen}
+                taxonomy={{ sports, events, editions, authors, articleTypes }}
+                current={{ title, subtitle, excerpt, body: bodyDoc, sportSlug, eventSlug: eventSlug || undefined, editionYear, articleType, authorId, metaTitle, metaDescription, keywords: otherSeo.keywords }}
+                onTransfer={applyDocumentImport}
+              />
+            </div>
+          )}
+          {feedback && <p role="status" className="mx-3 mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 sm:mx-4">{feedback}</p>}
           {recovery && <div className="px-4 pt-3 sm:px-5"><DraftRecoveryBanner offer={recovery} onContinue={continueDraft} onDiscard={() => void discardRecovery()} /></div>}
           {staleSave && <div className="px-4 pt-3 sm:px-5"><StaleSaveWarning onDismiss={() => setStaleSave(false)} onApplyAnyway={() => { autosave.setBaseVersion(null); setStaleSave(false); void saveAs(status); }} /></div>}
           {formError && (
@@ -689,9 +795,106 @@ export const AdminArticles: React.FC = () => {
               <label className="sr-only" htmlFor="article-title">Article Title (H1) *</label>
               <input type="text" required value={title} onChange={(e) => handleTitleChange(e.target.value)} placeholder="Article title (H1) — e.g. 2027 French Open Schedule & Daily Order of Play" id="article-title" className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 font-serif text-lg font-semibold dark:border-stone-700 dark:bg-stone-950" />
             </div>
+            <div>
+              <label htmlFor="article-subtitle" className="sr-only">Subtitle / Deck</label>
+              <input
+                id="article-subtitle"
+                type="text"
+                maxLength={300}
+                value={subtitle}
+                onChange={(e) => setSubtitle(e.target.value)}
+                placeholder="Secondary editorial deck (optional) — a line under the headline"
+                className="w-full rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm text-stone-700 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-300"
+              />
+            </div>
           </section>
-          <section className="space-y-4 rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-950" aria-labelledby="article-setup-heading">
-            <div><h4 id="article-setup-heading" className="text-xs font-bold uppercase tracking-[0.16em] text-stone-700 dark:text-stone-200">Article setup</h4><p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400">Required publishing context and byline.</p></div>
+          {/* WORKFLOW STEP 6: WRITE */}
+          <section className="space-y-4 rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-950" aria-labelledby="article-basics-heading">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1"><h4 id="article-basics-heading" className="text-xs font-bold uppercase tracking-[0.16em] text-stone-700 dark:text-stone-200">Article basics & content</h4><p className="text-[11px] text-stone-500 dark:text-stone-400"><span className="text-rose-600">*</span> Required fields. Write the article before running the SEO check.</p></div>
+            {/* The body comes first: writing starts right under the title. */}
+            <div>
+              <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-x-3"><span className="text-xs font-semibold text-stone-700 dark:text-stone-300">Article body *</span><span className="text-[11px] text-stone-500 dark:text-stone-400">Select text to style it; first-letter and featured-image controls are below.</span></div>
+              <RichTextEditor key={editorKey} initialDoc={bodyDoc} editable={!authorLocked} firstParagraphFocusRequest={firstParagraphFocusRequest} onChange={doc => setBodyDoc(previous => ({ ...doc, ...(previous.attrs ? { attrs: previous.attrs } : {}) }))} />
+            </div>
+
+            <div>
+              <label htmlFor="article-excerpt" className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
+                Editorial Excerpt / Summary (Used in cards & meta description) *
+              </label>
+              <textarea
+                rows={2}
+                required
+                maxLength={1000}
+                value={excerpt}
+                onChange={(e) => setExcerpt(e.target.value)}
+                placeholder="1–2 sentence summary of this dossier or guide..."
+                id="article-excerpt" className="w-full text-xs p-2.5 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="article-slug" className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
+                URL Slug * (Short, lowercase, hyphenated)
+              </label>
+              <div className="flex items-center gap-1 text-xs text-stone-500 font-mono dark:text-stone-400">
+                <span>/</span>
+                <input
+                  type="text"
+                  required
+                  value={slug}
+                  onChange={(e) => setSlug(e.target.value)}
+                  placeholder="schedule"
+                  id="article-slug" className="w-full text-xs p-2 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 font-mono"
+                />
+              </div>
+            </div>
+
+            <div>
+              <span className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">Featured image</span>
+              <div id="featured-image" tabIndex={-1} className="flex flex-wrap items-center gap-3 p-3 rounded-lg border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-900">
+                {featuredMedia ? (
+                  <>
+                    <img src={thumbnailUrl(featuredMedia)} alt={featuredMedia.altText} className="w-28 aspect-video object-cover rounded" />
+                    <div className="min-w-0 text-xs space-y-1">
+                      <div className="font-semibold">{featuredMedia.title}</div>
+                      <div className="truncate text-stone-500 dark:text-stone-400">Alt: {featuredMedia.altText || 'Missing'}</div>
+                      <div className="truncate text-stone-500 dark:text-stone-400">{featuredMedia.filename || featuredMedia.url}</div>
+                      <ReviewBadge state={featuredMedia.copyrightReview} />
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex min-h-20 flex-1 items-center justify-center rounded-md border border-dashed border-stone-300 text-xs text-stone-500 dark:border-stone-700 dark:text-stone-400">{featuredImage ? `Legacy image: ${featuredImage}` : 'Choose an approved image from the Media Library.'}</div>
+                )}
+                <div className="ml-auto flex gap-2">
+                  <Button type="button" size="sm" variant="outline" onClick={() => setPickingFeatured(true)}>{featuredMedia ? 'Change' : 'Choose from library'}</Button>
+                  {featuredMedia && <Button type="button" size="sm" variant="ghost" onClick={() => setFeaturedMediaId(null)}>Remove</Button>}
+                </div>
+              </div>
+              {pickingFeatured && (
+                <MediaPicker
+                  onSelect={(item) => { setFeaturedMediaId(item.id); setFeaturedImage(item.url); setPickingFeatured(false); }}
+                  onClose={() => setPickingFeatured(false)}
+                />
+              )}
+            </div>
+            <ArticleAppearanceEditor value={bodyDoc.attrs || {}} caption={featuredMedia?.caption} credit={featuredMedia?.credit} firstParagraph={bodyDoc.content.find(node => node.type === 'paragraph')} onEditFirstParagraph={() => setFirstParagraphFocusRequest(request => request + 1)} onChange={attrs => setBodyDoc(previous => ({ ...previous, attrs }))}/>
+          </section>
+
+          {/* Publishing context: below the writing, foldable to a one-line summary. */}
+          <details
+            open={setupOpen}
+            onToggle={(e) => { const opened = e.currentTarget.open; if (opened !== setupOpen) { setSetupOpen(opened); if (editingId) writePref('cms-article-setup-collapsed', !opened); } }}
+            data-testid="article-setup"
+            className="group rounded-xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-950"
+          >
+            <summary className="flex cursor-pointer list-none items-start justify-between gap-3 rounded-xl p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 [&::-webkit-details-marker]:hidden">
+              <div className="min-w-0">
+                <h4 id="article-setup-heading" className="text-xs font-bold uppercase tracking-[0.16em] text-stone-700 dark:text-stone-200">Article setup</h4>
+                <p className="mt-1 truncate text-[11px] text-stone-500 dark:text-stone-400" data-testid="article-setup-summary">{setupSummary}</p>
+              </div>
+              <ChevronDown size={18} aria-hidden="true" className="mt-0.5 shrink-0 text-stone-500 transition-transform group-open:rotate-180" />
+            </summary>
+            <div className="space-y-4 border-t border-stone-200 p-4 dark:border-stone-800">
 
           {/* WORKFLOW STEP 1: SPORT */}
           <div className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2">
@@ -863,94 +1066,8 @@ export const AdminArticles: React.FC = () => {
               </select>
             </div>
           </div>
-          </section>
-
-          {/* WORKFLOW STEP 6: WRITE */}
-          <section className="space-y-4 rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-950" aria-labelledby="article-basics-heading">
-            <div><h4 id="article-basics-heading" className="text-xs font-bold uppercase tracking-[0.16em] text-stone-700 dark:text-stone-200">Article basics & content</h4><p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400"><span className="text-rose-600">*</span> Required fields. Write the visible article before running the full SEO check.</p></div>
-            <div className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2">
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-                  Subtitle / Deck
-                </label>
-                <input
-                  type="text"
-                  value={subtitle}
-                  onChange={(e) => setSubtitle(e.target.value)}
-                  placeholder="Secondary editorial deck for headline context..."
-                  className="w-full text-xs p-2 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-                  URL Slug * (Short, lowercase, hyphenated)
-                </label>
-                <div className="flex items-center gap-1 text-xs text-stone-500 font-mono dark:text-stone-400">
-                  <span>/</span>
-                  <input
-                    type="text"
-                    required
-                    value={slug}
-                    onChange={(e) => setSlug(e.target.value)}
-                    placeholder="schedule"
-                    id="article-slug" className="w-full text-xs p-2 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 font-mono"
-                  />
-                </div>
-              </div>
             </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-                Editorial Excerpt / Summary (Used in cards & meta description) *
-              </label>
-              <textarea
-                rows={2}
-                required
-                maxLength={1000}
-                value={excerpt}
-                onChange={(e) => setExcerpt(e.target.value)}
-                placeholder="1–2 sentence summary of this dossier or guide..."
-                id="article-excerpt" className="w-full text-xs p-2.5 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"
-              />
-            </div>
-
-            <div>
-              <span className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">Article body *</span>
-              <p className="mb-2 text-[11px] text-stone-500 dark:text-stone-400">Select text, then choose Text size or Text color in the toolbar. First-letter and featured-image controls are below.</p>
-              <RichTextEditor key={editorKey} initialDoc={bodyDoc} editable={!authorLocked} firstParagraphFocusRequest={firstParagraphFocusRequest} onChange={doc => setBodyDoc(previous => ({ ...doc, ...(previous.attrs ? { attrs: previous.attrs } : {}) }))} />
-            </div>
-
-            <div>
-              <span className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">Featured image</span>
-              <div id="featured-image" tabIndex={-1} className="flex flex-wrap items-center gap-3 p-3 rounded-lg border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-900">
-                {featuredMedia ? (
-                  <>
-                    <img src={thumbnailUrl(featuredMedia)} alt={featuredMedia.altText} className="w-28 aspect-video object-cover rounded" />
-                    <div className="min-w-0 text-xs space-y-1">
-                      <div className="font-semibold">{featuredMedia.title}</div>
-                      <div className="truncate text-stone-500 dark:text-stone-400">Alt: {featuredMedia.altText || 'Missing'}</div>
-                      <div className="truncate text-stone-500 dark:text-stone-400">{featuredMedia.filename || featuredMedia.url}</div>
-                      <ReviewBadge state={featuredMedia.copyrightReview} />
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex min-h-20 flex-1 items-center justify-center rounded-md border border-dashed border-stone-300 text-xs text-stone-500 dark:border-stone-700 dark:text-stone-400">{featuredImage ? `Legacy image: ${featuredImage}` : 'Choose an approved image from the Media Library.'}</div>
-                )}
-                <div className="ml-auto flex gap-2">
-                  <Button type="button" size="sm" variant="outline" onClick={() => setPickingFeatured(true)}>{featuredMedia ? 'Change' : 'Choose from library'}</Button>
-                  {featuredMedia && <Button type="button" size="sm" variant="ghost" onClick={() => setFeaturedMediaId(null)}>Remove</Button>}
-                </div>
-              </div>
-              {pickingFeatured && (
-                <MediaPicker
-                  onSelect={(item) => { setFeaturedMediaId(item.id); setFeaturedImage(item.url); setPickingFeatured(false); }}
-                  onClose={() => setPickingFeatured(false)}
-                />
-              )}
-            </div>
-            <ArticleAppearanceEditor value={bodyDoc.attrs || {}} caption={featuredMedia?.caption} credit={featuredMedia?.credit} firstParagraph={bodyDoc.content.find(node => node.type === 'paragraph')} onEditFirstParagraph={() => setFirstParagraphFocusRequest(request => request + 1)} onChange={attrs => setBodyDoc(previous => ({ ...previous, attrs }))}/>
-          </section>
+          </details>
 
           {/* PHASE H: sources / references shown under the article (Spec §7.5, §13). */}
           <section className="space-y-3 rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-950" aria-labelledby="references-heading">
@@ -985,7 +1102,7 @@ export const AdminArticles: React.FC = () => {
           </section>
           </fieldset>
 
-          <aside className="cms-seo-sidebar min-w-0 space-y-4 break-words" aria-label="Publishing and SEO sidebar">
+          <aside id="article-settings-panel" className="cms-seo-sidebar min-w-0 space-y-4 break-words" aria-label="Publishing and SEO sidebar">
           <ArticleReviewPanel article={editingArticle} saveDraft={() => saveArticle('draft')} onWorkflowChange={() => restartAutosave(editingId)} />
 
           {/* WORKFLOW STEP 7: SEO CHECK */}
@@ -1194,19 +1311,11 @@ export const AdminArticles: React.FC = () => {
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <Button type="button" variant="ghost" size="sm" onClick={() => void discardAndClose()}>
                 Discard
               </Button>
-              <Button type="button" variant="outline" size="sm" onClick={handlePreview} disabled={saving || plan === 'save-first'} title={plan === 'save' ? `Saves as ${status} (still private) and opens the preview.` : plan === 'saved-version' ? 'Shows the last saved version; does not save, publish or schedule.' : 'Save the article first.'}>
-                Preview
-              </Button>
-              <Button type="button" variant="outline" size="sm" onClick={() => saveAs('draft')} disabled={saving || authorLocked}>
-                Save draft
-              </Button>
-              {!isAuthor && <Button type="button" size="sm" onClick={() => saveAs('published')} isLoading={saving}>
-                Publish
-              </Button>}
+              <p className="text-[11px] text-stone-500 dark:text-stone-400">Preview, Save draft{isAuthor ? '' : ' and Publish'} are in the editor bar. <kbd className="rounded border border-stone-300 px-1 font-mono text-[10px] dark:border-stone-700">Ctrl</kbd>+<kbd className="rounded border border-stone-300 px-1 font-mono text-[10px] dark:border-stone-700">S</kbd> saves.</p>
             </div>
             <button type="submit" disabled={authorLocked} className="w-full text-center text-[11px] font-semibold text-stone-500 hover:text-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:text-stone-400">Save using selected state ({status})</button>
           </section>
@@ -1247,6 +1356,10 @@ const STATUS_BADGE: Record<string, string> = {
   archived: 'bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300',
 };
 const filterClass = 'rounded-lg border border-stone-300 bg-white p-2 text-xs dark:border-stone-700 dark:bg-stone-950';
+/** Per-browser editor preferences; the editor works the same when storage is unavailable. */
+const readPref = (key: string) => { try { return localStorage.getItem(key) === '1'; } catch { return false; } };
+const writePref = (key: string, on: boolean) => { try { localStorage.setItem(key, on ? '1' : '0'); } catch { /* storage unavailable */ } };
+const barIconButton = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-200/70 hover:text-stone-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 aria-pressed:bg-amber-100 aria-pressed:text-amber-900 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-100 dark:aria-pressed:bg-amber-950 dark:aria-pressed:text-amber-300';
 
 /** Article list with keyword search (title/body/id/slug) and filters, one server page at a time. */
 function ArticleRepository({ reloadKey, sports, authors, onView, onEdit, onReview, onDelete, unsavedIds }: {

@@ -39,7 +39,8 @@ assert(editor.includes("min-h-[420px]"));
 assert(css.includes('min-height: 32rem'));
 pass('article body provides adaptive 420px stacked and 512px desktop writing heights');
 
-assert(article.match(/md:grid-cols-2/g)?.length! >= 4);
+// The subtitle moved under the title (no longer paired with the slug), leaving three responsive two-column grids.
+assert(article.match(/md:grid-cols-2/g)?.length! >= 3);
 assert(article.includes('min-w-0') && article.includes('break-words'));
 assert(layout.includes('lg:break-words'));
 pass('setup/basics grids stack before controls become cramped and long CMS labels wrap naturally');
