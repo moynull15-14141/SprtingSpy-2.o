@@ -121,25 +121,26 @@ try {
   const draft = await status(editor, '/api/articles', 201, 'POST', { title: `${fixture} draft`, slug: `${fixture}-draft`, sportSlug: edition.sportSlug, eventSlug: edition.eventSlug, editionYear: edition.year, content: 'x', authorId, status: 'draft', articleType: 'News' });
   createdArticleIds.push(draft.data.id);
 
-  // ── U1: registration ──
+  // ── U1: registration (no e-mail provider in tests → auto-verify + auto-login) ──
   const regEmail = `${fixture}-reg@example.test`;
-  const reg = await status(anon, '/api/auth/register', 201, 'POST', { name: 'New Reader', email: regEmail, password });
-  assert(reg.data.message && !reg.text.includes(password));
+  const regClient = await new Client().seed();
+  const reg = await status(regClient, '/api/auth/register', 201, 'POST', { name: 'New Reader', email: regEmail, password });
+  assert(reg.data.autoLogin === true && !reg.text.includes(password), 'no e-mail provider: register signs the reader in');
   const regUser = await prisma.user.findUniqueOrThrow({ where: { email: regEmail } });
   createdUserIds.push(regUser.id);
   assert.equal(regUser.role, 'Reader', 'registration must create a Reader');
-  assert.equal(regUser.emailVerifiedAt, null, 'new reader starts unverified');
+  assert(regUser.emailVerifiedAt, 'auto-verified when no e-mail provider is configured');
   assert(verifyPassword(password, regUser.passwordHash) && regUser.passwordHash.startsWith('scrypt:'));
-  const tokenRow = await prisma.emailVerificationToken.findFirstOrThrow({ where: { userId: regUser.id } });
-  assert(tokenRow.tokenHash.length === 64 && tokenRow.usedAt === null, 'verification token stored hashed, unused');
+  assert.equal(await prisma.session.count({ where: { userId: regUser.id } }), 1, 'auto-logged-in: a session was created');
+  assert.equal((await status(regClient, '/api/auth/me', 200)).data.user.email, regEmail, 'the auto-login session authenticates');
   // Role injection is rejected by the strict allow-list (never creates privilege).
   await status(anon, '/api/auth/register', 400, 'POST', { name: 'x', email: `${fixture}-inj@example.test`, password, role: 'Admin' });
   assert.equal(await prisma.user.count({ where: { email: `${fixture}-inj@example.test` } }), 0);
-  // Duplicate registration does not reveal the account exists (same generic 2xx).
+  // Duplicate registration does not sign in and does not reveal the account exists.
   const dup = await status(anon, '/api/auth/register', 202, 'POST', { name: 'New Reader', email: regEmail, password });
-  assert.equal(dup.data.message, reg.data.message);
+  assert(dup.data.message && !dup.headers.getSetCookie().some((c) => c.startsWith('sid=')), 'duplicate: generic message, no login');
   assert.equal(await prisma.user.count({ where: { email: regEmail } }), 1);
-  tested('U1 registration: creates a Reader (never a privileged role), stores a hashed single-use token, rejects client-supplied role, and does not leak account existence on duplicates');
+  tested('U1 registration: creates a Reader (never privileged); with no e-mail provider it auto-verifies and signs in; rejects client-supplied role; duplicates neither sign in nor leak existence');
 
   // ── U1: e-mail verification (token lifecycle) ──
   const verifyFlow = await makeReader('verify', { verified: false });

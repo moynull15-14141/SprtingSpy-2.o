@@ -433,7 +433,7 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
                       {features.readerAccounts && (
                         <div className="mt-1 border-t border-stone-100 pt-2 text-center dark:border-stone-800">
                           <span className="text-[11px] text-stone-500 dark:text-stone-400">New to SportingSpy? </span>
-                          <a href="/register" className="text-[11px] font-semibold text-amber-700 hover:underline dark:text-amber-400">Create a free account</a>
+                          <a href={`/register?next=${encodeURIComponent(currentPath)}`} className="text-[11px] font-semibold text-amber-700 hover:underline dark:text-amber-400">Create a free account</a>
                         </div>
                       )}
                     </form>

@@ -31,6 +31,7 @@ import { createRateLimiter } from './rateLimit';
 import { recordAudit } from './audit';
 import { featureFlags } from './features';
 import { sendMail, mailConfigured } from './mailer';
+import { generateSessionId, buildSessionCookie, sessionExpiryFromNow } from './session';
 import { siteOrigin } from '../src/lib/paths';
 
 const VERIFY_TTL_MS = 24 * 60 * 60_000; // 24 hours
@@ -121,6 +122,11 @@ export function registerRouter(getLookup: () => AuthLookup) {
     }
 
     const now = new Date();
+    // When no e-mail provider is configured there is nothing to verify against,
+    // so the address is confirmed at creation. Comments stay moderated, and the
+    // moment RESEND_API_KEY/MAIL_FROM are set this branch is skipped and real
+    // e-mail verification applies to new registrations.
+    const autoVerify = !mailConfigured();
     const user = await prisma.user.create({
       data: {
         id: `user-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
@@ -132,12 +138,23 @@ export function registerRouter(getLookup: () => AuthLookup) {
         joinedAt: now,
         updatedAt: now,
         status: 'active',
+        emailVerifiedAt: autoVerify ? now : null,
         passwordHash: hashPassword(password),
       },
     });
+
+    if (autoVerify) {
+      // Sign the new reader in immediately (session cookie) so they return to
+      // where they were — e.g. the article they wanted to comment on.
+      const session = await prisma.session.create({ data: { id: generateSessionId(), userId: user.id, createdAt: now, expiresAt: new Date(sessionExpiryFromNow()) } });
+      res.append('Set-Cookie', buildSessionCookie(session.id));
+      await recordAudit(prisma, { userId: user.id, userName: user.name, action: 'Reader Registered', entityType: 'User', entityId: user.id, details: 'Reader account created, auto-verified (no e-mail provider configured) and signed in.' });
+      return res.status(201).json({ autoLogin: true });
+    }
+
     const token = await issueVerificationToken(user.id, 'self');
     const sent = await sendVerificationEmail(user.email, user.name, verifyUrl(token));
-    await recordAudit(prisma, { userId: user.id, userName: user.name, action: 'Reader Registered', entityType: 'User', entityId: user.id, details: sent ? 'Reader account created; verification e-mail sent.' : 'Reader account created; no e-mail provider configured, so no verification link was sent.' });
+    await recordAudit(prisma, { userId: user.id, userName: user.name, action: 'Reader Registered', entityType: 'User', entityId: user.id, details: sent ? 'Reader account created; verification e-mail sent.' : 'Reader account created; the verification e-mail could not be delivered.' });
     return res.status(201).json({ message: GENERIC_MESSAGE, emailConfigured: mailConfigured() });
   }));
 

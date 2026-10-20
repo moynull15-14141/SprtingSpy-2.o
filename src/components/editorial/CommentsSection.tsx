@@ -18,7 +18,7 @@ interface CommentsSectionProps {
 }
 
 export const CommentsSection: React.FC<CommentsSectionProps> = ({ articleId, initialComments }) => {
-  const { currentUser, isAuthenticated, apiCall, showNotification, features } = useSite();
+  const { currentUser, isAuthenticated, apiCall, showNotification, features, currentPath } = useSite();
   // The visitor's own submissions this visit, shown with their moderation state.
   const [ownComments, setOwnComments] = useState<Comment[]>([]);
   const [content, setContent] = useState('');
@@ -122,7 +122,7 @@ export const CommentsSection: React.FC<CommentsSectionProps> = ({ articleId, ini
       ) : (
         <div className="mb-8 p-4 rounded-xl bg-stone-50 dark:bg-stone-900/60 border border-stone-200 dark:border-stone-800 text-xs text-stone-600 dark:text-stone-400">
           {features.readerAccounts ? (
-            <>Join the discussion — <a href="/register" className="font-semibold text-amber-700 hover:underline dark:text-amber-400">create a free reader account</a>, or sign in from the account menu in the top bar.</>
+            <>Join the discussion — <a href={`/register?next=${encodeURIComponent(currentPath)}`} className="font-semibold text-amber-700 hover:underline dark:text-amber-400">create a free reader account</a>, or sign in from the account menu in the top bar.</>
           ) : (
             <>Log in via the account menu in the top bar to join the discussion.</>
           )}

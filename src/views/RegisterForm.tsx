@@ -8,6 +8,7 @@
  */
 
 import React, { useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useSite } from '../context/SiteContext';
 import { Button } from '../components/ui/Button';
 
@@ -15,6 +16,9 @@ const input = 'w-full text-sm p-2.5 rounded-lg border border-stone-300 dark:bord
 
 export function RegisterForm() {
   const { apiCall, features, isAuthenticated } = useSite();
+  // Where to return after signing up — only a safe same-site path is honoured.
+  const nextParam = useSearchParams().get('next') || '';
+  const next = nextParam.startsWith('/') && !nextParam.startsWith('//') && !/[\r\n\t]/.test(nextParam) ? nextParam : '/';
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -25,9 +29,12 @@ export function RegisterForm() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true); setError(null);
-    const res = await apiCall<{ message: string }>('/api/auth/register', { method: 'POST', body: { name: name.trim(), email: email.trim(), password } });
+    const res = await apiCall<{ message?: string; autoLogin?: boolean }>('/api/auth/register', { method: 'POST', body: { name: name.trim(), email: email.trim(), password } });
     setBusy(false);
-    if (res.data) setMessage(res.data.message); else setError(res.error);
+    if (!res.data) { setError(res.error); return; }
+    // Signed in at creation (no e-mail provider): go back where they were.
+    if (res.data.autoLogin) { window.location.assign(next); return; }
+    setMessage(res.data.message || 'Check your e-mail to finish creating your account.');
   };
 
   return (
