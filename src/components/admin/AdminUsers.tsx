@@ -29,6 +29,8 @@ export const AdminUsers: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
+  // Filter the list by status or role (dropdown beside "Add Staff User").
+  const [userFilter, setUserFilter] = useState<'all' | 'active' | 'inactive' | 'staff' | Role>('all');
 
   const resetForm = () => {
     setName('');
@@ -82,6 +84,15 @@ export const AdminUsers: React.FC = () => {
     }
   };
 
+  const filteredUsers = users.filter((u) => {
+    const status = u.status || 'active';
+    if (userFilter === 'all') return true;
+    if (userFilter === 'active') return status === 'active';
+    if (userFilter === 'inactive') return status !== 'active';
+    if (userFilter === 'staff') return ['Admin', 'Editor', 'Author'].includes(u.role);
+    return u.role === userFilter; // Admin | Editor | Author | Reader
+  });
+
   return (
     <div className="space-y-6">
       {resetLink && (
@@ -91,21 +102,39 @@ export const AdminUsers: React.FC = () => {
           <button type="button" onClick={() => setResetLink(null)} className="mt-2 font-semibold underline">Done</button>
         </div>
       )}
-      <div className="flex items-center justify-between pb-4 border-b border-stone-200 dark:border-stone-800">
+      <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-stone-200 dark:border-stone-800">
         <div>
           <h2 className="font-serif text-2xl font-bold text-stone-900 dark:text-stone-100">
-            Staff Accounts & Roles ({users.length})
+            Staff Accounts & Roles ({userFilter === 'all' ? users.length : `${filteredUsers.length} of ${users.length}`})
           </h2>
           <p className="text-xs text-stone-500 mt-1 dark:text-stone-400">
             Section 20: Role-Based Access Control (Admin, Editor, Author, Reader). Every action here is
             enforced by the server against the real logged-in session.
           </p>
         </div>
-        {!isCreating && currentUser.role === 'Admin' && (
-          <Button onClick={() => setIsCreating(true)} size="sm">
-            + Add Staff User
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {/* Filter the list by status or role. */}
+          <select
+            aria-label="Filter users"
+            value={userFilter}
+            onChange={(e) => setUserFilter(e.target.value as typeof userFilter)}
+            className="rounded-lg border border-stone-300 bg-white px-2.5 py-2 text-xs font-medium text-stone-700 focus:outline-none focus:ring-2 focus:ring-amber-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300"
+          >
+            <option value="all">All users</option>
+            <option value="active">Active only</option>
+            <option value="inactive">Inactive only</option>
+            <option value="staff">Staff (Admin/Editor/Author)</option>
+            <option value="Admin">Admins</option>
+            <option value="Editor">Editors</option>
+            <option value="Author">Authors</option>
+            <option value="Reader">Readers</option>
+          </select>
+          {!isCreating && currentUser.role === 'Admin' && (
+            <Button onClick={() => setIsCreating(true)} size="sm">
+              + Add Staff User
+            </Button>
+          )}
+        </div>
       </div>
 
       {feedback && (
@@ -196,7 +225,9 @@ export const AdminUsers: React.FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-100 dark:divide-stone-800">
-            {users.map((u) => {
+            {filteredUsers.length === 0 ? (
+              <tr><td colSpan={currentUser.role === 'Admin' ? 6 : 5} className="p-6 text-center text-stone-500 dark:text-stone-400">No users match this filter.</td></tr>
+            ) : filteredUsers.map((u) => {
               const status = u.status || 'active';
               return (
                 <tr key={u.id} className="hover:bg-stone-50 dark:hover:bg-stone-900/40">
