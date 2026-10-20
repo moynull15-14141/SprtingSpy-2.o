@@ -350,12 +350,12 @@ try {
 
       // Staff login from the public header, then the CMS.
       await tab.goto(base + '/');
-      await tab.getByRole('button', { name: /Staff Login/ }).click();
+      await tab.getByRole('button', { name: /Sign in/ }).click();
       await tab.getByPlaceholder('Email').fill(`${adminId}@example.test`);
       await tab.getByPlaceholder('Password').fill(password);
       await tab.getByRole('button', { name: 'Log In', exact: true }).click();
+      await tab.waitForURL(`${base}/admin/`);
       await tab.getByText(/Welcome back/).waitFor();
-      await tab.goto(`${base}/admin/`);
       await tab.getByRole('heading', { name: 'Content Management System', exact: true }).waitFor();
       await tab.getByRole('button', { name: 'Articles', exact: true }).click();
       await tab.getByText(editionArticle.title).first().waitFor();

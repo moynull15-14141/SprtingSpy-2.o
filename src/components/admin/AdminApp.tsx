@@ -22,6 +22,7 @@ import { AdminSeoAudit } from './AdminSeoAudit';
 import { AdminAuditLogs } from './AdminAuditLogs';
 import { AdminAuthors } from './AdminAuthors';
 import { AdminUsers } from './AdminUsers';
+import { AdminReaders } from './AdminReaders';
 import { AdminRedirects } from './AdminRedirects';
 import { AdminSettings } from './AdminSettings';
 import { AdminSiteExperience } from './site/AdminSiteExperience';
@@ -52,6 +53,8 @@ export function AdminApp() {
                 return <AdminAuthors />;
               case 'users':
                 return <AdminUsers />;
+              case 'readers':
+                return <AdminReaders />;
               case 'comments':
                 return <AdminComments />;
               case 'media':

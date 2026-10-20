@@ -94,6 +94,11 @@ try {
   assert.equal(await menu.locator('[data-group] [data-group], [data-group] ul').count(), 0, 'nothing is nested under a group');
   assert(shown.length > 2, 'the site\'s own sports are still listed');
   assert.equal(await menu.getByRole('link', { name: /View Directory/ }).getAttribute('href'), '/sports/');
+  await desktop.mouse.move(8, 400);
+  await menu.waitFor({ state: 'detached' });
+  assert.equal(await sportsButton.getAttribute('aria-expanded'), 'false', 'moving outside the Sports trigger and panel closes a hover-opened menu');
+  await sportsButton.hover();
+  await menu.waitFor();
   // The click that follows a hover keeps the panel open; a second click closes it.
   await sportsButton.click();
   assert.equal(await sportsButton.getAttribute('aria-expanded'), 'true', 'hover then click does not close the panel');

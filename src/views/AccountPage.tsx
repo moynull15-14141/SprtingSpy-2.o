@@ -61,6 +61,7 @@ const AccountDetails: React.FC = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [retry, setRetry] = useState(0);
+  const [deletePassword, setDeletePassword] = useState('');
   const date = (value: string) => new Date(value).toLocaleString(accountLanguage === 'bn' ? 'bn-BD' : 'en-GB');
   const loadSessions = async () => {
     const result = await apiCall<{ sessions: AccountSession[] }>('/api/auth/sessions');
@@ -134,10 +135,34 @@ const AccountDetails: React.FC = () => {
     if (!result.data) { setError(result.error || 'Could not revoke session.'); return; }
     setSuccess(t('Selected sessions signed out.', 'নির্বাচিত সেশন থেকে সাইন আউট করা হয়েছে।')); await loadSessions();
   };
+  // PHASE U — reader privacy: download a copy of your own data.
+  const exportData = async () => {
+    begin('export');
+    try {
+      const res = await fetch('/api/auth/me/export', { credentials: 'include' });
+      if (!res.ok) { setError(t('Could not export your data.', 'আপনার তথ্য রপ্তানি করা যায়নি।')); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a'); link.href = url; link.download = 'sportingspy-account.json'; link.click();
+      URL.revokeObjectURL(url);
+      setSuccess(t('Your data has been downloaded.', 'আপনার তথ্য ডাউনলোড হয়েছে।'));
+    } catch { setError(t('Could not export your data.', 'আপনার তথ্য রপ্তানি করা যায়নি।')); }
+    finally { setBusy(''); }
+  };
+  // PHASE U — reader privacy: permanently delete your own account.
+  const deleteAccount = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!confirm(t('Permanently delete your account? This cannot be undone.', 'আপনার অ্যাকাউন্ট স্থায়ীভাবে মুছে ফেলবেন? এটি ফেরানো যাবে না।'))) return;
+    begin('delete');
+    const result = await apiCall<{ success: boolean }>('/api/auth/me/delete', { method: 'POST', body: { password: deletePassword } });
+    setBusy(''); setDeletePassword('');
+    if (!result.data) { setError(result.error || 'Could not delete your account.'); return; }
+    window.location.assign('/'); // account and session are gone; reset to the home page
+  };
   if (!profile) return <div className="max-w-xl mx-auto py-12" role="status">{error ? <><p role="alert">{error}</p><Button onClick={() => { setError(''); setRetry(v => v + 1); }}>{t('Retry', 'আবার চেষ্টা করুন')}</Button></> : t('Loading account…', 'অ্যাকাউন্ট লোড হচ্ছে…')}</div>;
   return <div className="max-w-4xl mx-auto space-y-6" lang={accountLanguage}>
     <div><p className="text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-500">SportingSpy</p><h1 className="mt-2 font-serif text-3xl font-bold">{t('My account & settings', 'আমার অ্যাকাউন্ট ও সেটিংস')}</h1><p className="mt-2 text-sm text-stone-500 dark:text-stone-400">{t('Your profile, security and reading preferences.', 'আপনার প্রোফাইল, নিরাপত্তা ও পড়ার পছন্দ।')}</p></div>
-    <nav aria-label={t('Account sections', 'অ্যাকাউন্ট বিভাগ')} className="flex flex-wrap gap-4 text-sm text-amber-700 dark:text-amber-400"><a href="#profile">{t('Profile', 'প্রোফাইল')}</a><a href="#security">{t('Security', 'নিরাপত্তা')}</a><a href="#preferences">{t('Preferences', 'পছন্দ')}</a></nav>
+    <nav aria-label={t('Account sections', 'অ্যাকাউন্ট বিভাগ')} className="flex flex-wrap gap-4 text-sm text-amber-700 dark:text-amber-400"><a href="#profile">{t('Profile', 'প্রোফাইল')}</a><a href="#security">{t('Security', 'নিরাপত্তা')}</a><a href="#preferences">{t('Preferences', 'পছন্দ')}</a>{profile.role === 'Reader' && <a href="#privacy">{t('Privacy', 'গোপনীয়তা')}</a>}</nav>
     {error && <p role="alert" className="rounded-lg border border-rose-300 p-4 text-sm text-rose-700 dark:text-rose-300">{error}</p>}
     {success && <p role="status" className="rounded-lg border border-emerald-300 p-4 text-sm text-emerald-700 dark:text-emerald-300">{success}</p>}
     <section id="profile" className={cardClass}>
@@ -184,5 +209,19 @@ const AccountDetails: React.FC = () => {
       <label className="block text-sm">{t('Theme', 'থিম')}<select aria-label={t('Theme', 'থিম')} className={inputClass} value={themePreference} onChange={e => setThemePreference(e.target.value === 'light' || e.target.value === 'dark' ? e.target.value : 'system')}><option value="system">{t('System', 'সিস্টেম')}</option><option value="light">{t('Light', 'হালকা')}</option><option value="dark">{t('Dark', 'গাঢ়')}</option></select></label>
       {features.readerAccounts && <label className="block text-sm">{t('Account language', 'অ্যাকাউন্টের ভাষা')}<select aria-label={t('Account language', 'অ্যাকাউন্টের ভাষা')} className={inputClass} value={accountLanguage} onChange={e => setAccountLanguage(e.target.value === 'bn' ? 'bn' : 'en')}><option value="en">English</option><option value="bn">বাংলা</option></select></label>}
     </section>
+    {profile.role === 'Reader' && <section id="privacy" className={cardClass}>
+      <h2 className="font-serif text-xl font-bold">{t('Your data & privacy', 'আপনার তথ্য ও গোপনীয়তা')}</h2>
+      <div className="space-y-2">
+        <h3 className="font-semibold text-sm">{t('Download your data', 'আপনার তথ্য ডাউনলোড করুন')}</h3>
+        <p className="text-sm text-stone-500 dark:text-stone-400">{t('Download a copy of your account details and comments as a JSON file.', 'আপনার অ্যাকাউন্টের তথ্য ও মন্তব্য একটি JSON ফাইল হিসেবে ডাউনলোড করুন।')}</p>
+        <Button variant="outline" disabled={!!busy} isLoading={busy === 'export'} onClick={exportData}>{t('Download my data', 'আমার তথ্য ডাউনলোড')}</Button>
+      </div>
+      <form onSubmit={deleteAccount} className="border-t border-stone-200 dark:border-stone-800 pt-5 space-y-3">
+        <h3 className="font-semibold text-sm text-rose-700 dark:text-rose-400">{t('Delete account', 'অ্যাকাউন্ট মুছুন')}</h3>
+        <p className="text-sm text-stone-500 dark:text-stone-400">{t('Permanently delete your account. Your comments may remain for moderation records but are no longer linked to your profile. This cannot be undone.', 'আপনার অ্যাকাউন্ট স্থায়ীভাবে মুছে ফেলুন। মডারেশন রেকর্ডের জন্য আপনার মন্তব্য থেকে যেতে পারে তবে আপনার প্রোফাইলের সাথে আর যুক্ত থাকবে না। এটি ফেরানো যাবে না।')}</p>
+        <label className="block text-sm">{t('Confirm your password', 'আপনার পাসওয়ার্ড নিশ্চিত করুন')}<input className={inputClass} type="password" required maxLength={200} autoComplete="current-password" value={deletePassword} onChange={e => setDeletePassword(e.target.value)} /></label>
+        <Button type="submit" variant="danger" disabled={!!busy} isLoading={busy === 'delete'}>{t('Delete my account', 'আমার অ্যাকাউন্ট মুছুন')}</Button>
+      </form>
+    </section>}
   </div>;
 };

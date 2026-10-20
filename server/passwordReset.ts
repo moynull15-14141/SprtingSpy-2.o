@@ -23,39 +23,38 @@ import { requireRole, type AuthLookup } from './auth';
 import { hashPassword, validatePasswordStrength } from './password';
 import { createRateLimiter } from './rateLimit';
 import { recordAudit } from './audit';
+import { featureFlags } from './features';
+import { sendMail, mailConfigured } from './mailer';
 import { siteOrigin } from '../src/lib/paths';
 
 const SELF_TTL_MS = 30 * 60_000;
 const ADMIN_TTL_MS = 24 * 60 * 60_000;
-const GENERIC_REQUEST_MESSAGE = 'If that address belongs to an active staff account, a reset link has been sent. The link expires in 30 minutes.';
+const GENERIC_REQUEST_MESSAGE = 'If that address belongs to an active account, a reset link has been sent. The link expires in 30 minutes.';
 
 export const hashResetToken = (token: string) => crypto.createHash('sha256').update(`sportingspy/password-reset/v1:${token}`).digest('hex');
 const newToken = () => crypto.randomBytes(32).toString('base64url');
 const resetUrl = (token: string) => `${siteOrigin()}/reset-password/?token=${encodeURIComponent(token)}`;
 
-/** True when an e-mail provider is configured for reset links. */
+/** True when an e-mail provider is configured for reset links (shared mailer). */
 export function resetEmailConfigured(): boolean {
-  return !!(process.env.RESEND_API_KEY && process.env.MAIL_FROM);
+  return mailConfigured();
 }
 
 async function sendResetEmail(to: string, name: string, link: string): Promise<boolean> {
-  if (!resetEmailConfigured()) return false;
-  try {
-    const response = await fetch(process.env.RESEND_API_URL || 'https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        from: process.env.MAIL_FROM,
-        to: [to],
-        subject: 'Reset your SportingSpy password',
-        text: `Hello ${name},\n\nA password reset was requested for your SportingSpy staff account. Open this link within 30 minutes to choose a new password:\n\n${link}\n\nIf you did not ask for this, ignore this message; your password stays the same.\n`,
-      }),
-      signal: AbortSignal.timeout(10_000),
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
+  return sendMail({
+    to,
+    subject: 'Reset your SportingSpy password',
+    text: `Hello ${name},\n\nA password reset was requested for your SportingSpy account. Open this link within 30 minutes to choose a new password:\n\n${link}\n\nIf you did not ask for this, ignore this message; your password stays the same.\n`,
+  });
+}
+
+/**
+ * PHASE U: who may use the self-service reset. Staff always; readers only when
+ * reader accounts are enabled (so the feature stays dark while the flag is off,
+ * and no reader-shaped oracle is introduced before launch).
+ */
+function selfServiceEligible(role: string): boolean {
+  return role !== 'Reader' || featureFlags().readerAccounts;
 }
 
 /** Creates a token for the user (voiding older unused ones) and returns the raw token. */
@@ -98,7 +97,7 @@ export function passwordResetRouter(getLookup: () => AuthLookup) {
     if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Enter a valid e-mail address.' });
     if (limited(requests, `ip:${ipOf(req)}`, res) || limited(requests, `email:${email}`, res)) return;
     const user = await prisma.user.findUnique({ where: { email }, select: { id: true, name: true, email: true, status: true, role: true } });
-    if (user && user.status === 'active' && user.role !== 'Reader') {
+    if (user && user.status === 'active' && selfServiceEligible(user.role)) {
       if (resetEmailConfigured()) {
         const token = await issueResetToken(user.id, 'self', SELF_TTL_MS);
         const sent = await sendResetEmail(user.email, user.name, resetUrl(token));

@@ -278,7 +278,9 @@ export interface Author {
 
 // Phase 1: staff account status. Deactivated staff can no longer log in or
 // hold a session, but their historical audit/content attribution is preserved.
-export type UserStatus = 'active' | 'inactive';
+// PHASE U adds reader moderation states. `suspended` and `banned` both block
+// login and hold no session (a ban is the stronger, admin-reversible-only one).
+export type UserStatus = 'active' | 'inactive' | 'suspended' | 'banned';
 
 export interface User {
   id: string;
@@ -289,6 +291,12 @@ export interface User {
   joinedAt: string; // acts as this account's createdAt
   updatedAt?: string;
   status?: UserStatus; // defaults to 'active' via server-side migration if absent
+  // PHASE U: when the account confirmed its e-mail (ISO string). Undefined/null
+  // means unverified — readers must verify before they can comment.
+  emailVerifiedAt?: string | null;
+  // PHASE U: admin-only context for a non-active status (never shown to the
+  // account itself or on public pages; present only in admin reader views).
+  statusReason?: string | null;
   // Server-only. NEVER sent to the client — see server/password.ts and the
   // sanitizeUser() serializer in server.ts, which strips this before any
   // response leaves the server. Optional so this shared type can still
@@ -319,6 +327,8 @@ export interface SessionRecord {
   expiresAt: string;
 }
 
+export type CommentStatus = 'pending' | 'approved' | 'rejected' | 'spam';
+
 export interface Comment {
   id: string;
   articleId: string;
@@ -328,7 +338,13 @@ export interface Comment {
   userRole?: Role;
   content: string;
   createdAt: string;
-  status: 'pending' | 'approved' | 'rejected';
+  status: CommentStatus;
+  // PHASE U: moderation metadata (admin views only). Public approved comments
+  // never carry these.
+  moderatedBy?: string | null;
+  moderatedAt?: string | null;
+  moderationNote?: string | null;
+  deletedAt?: string | null;
 }
 
 export type MediaCreationType =

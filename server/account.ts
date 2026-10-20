@@ -11,7 +11,7 @@ import { validateProfileImageUrl } from './profileImage';
 import type { Prisma } from './generated/prisma/client';
 
 // Explicit projections: adding a sensitive column later cannot expose it here.
-const userSelect = { id: true, name: true, email: true, role: true, avatar: true, joinedAt: true, updatedAt: true, status: true, totpEnabledAt: true } as const;
+const userSelect = { id: true, name: true, email: true, role: true, avatar: true, joinedAt: true, updatedAt: true, status: true, totpEnabledAt: true, emailVerifiedAt: true } as const;
 const authorSelect = { id: true, slug: true, name: true, roleTitle: true, bio: true, avatar: true, twitter: true, email: true } as const;
 export const accountSelect = { ...userSelect, authorProfile: { select: authorSelect } } as const;
 
@@ -175,6 +175,54 @@ export function accountRouter(lookup: () => AuthLookup) {
     });
     if (result.current) res.append('Set-Cookie', buildExpiredSessionCookie());
     return res.status(result.status).json(result.error ? { error: result.error } : { success: true, current: result.current });
+  }));
+
+  // PHASE U — Account privacy: self-service data export. Returns the signed-in
+  // account's own profile plus every comment they authored (their data only).
+  router.get('/me/export', limit(updates), wrap(async (req, res) => {
+    const userId = req.authContext!.userId;
+    const [user, comments] = await Promise.all([
+      prisma.user.findUnique({ where: { id: userId }, select: accountSelect }),
+      prisma.comment.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, select: { id: true, articleId: true, content: true, status: true, createdAt: true } }),
+    ]);
+    if (!user) return res.status(401).json({ error: 'Not authenticated.' });
+    res.setHeader('Content-Disposition', 'attachment; filename="sportingspy-account.json"');
+    return res.json({ exportedAt: new Date().toISOString(), account: user, comments });
+  }));
+
+  // PHASE U — Account privacy: reader self-deletion. Readers only, so a
+  // self-deletion can never orphan an editorial byline or audit attribution
+  // (staff accounts are managed by an Admin). Retention policy: the account row
+  // and its sessions / verification / reset tokens are removed (FK cascade);
+  // the reader's COMMENTS are intentionally kept — they carry only the display
+  // name the reader chose (denormalized, no live FK to User), which preserves
+  // moderation and audit history without retaining other personal data.
+  router.post('/me/delete', limit(passwords), wrap(async (req, res) => {
+    const error = bodyError(req.body, ['password']);
+    if (error) return res.status(400).json({ error });
+    const { password } = req.body as { password?: unknown };
+    if (typeof password !== 'string' || !password || password.length > 200) return res.status(400).json({ error: 'Your password is required to delete your account.' });
+    const result = await prisma.$transaction(async (tx) => {
+      if (!await lockAccount(tx, req)) return { status: 401 as const, error: 'Session expired. Please sign in.' };
+      const user = await tx.user.findUniqueOrThrow({ where: { id: req.authContext!.userId } });
+      if (user.role !== 'Reader') return { status: 403 as const, error: 'Staff accounts are managed by an administrator and cannot be self-deleted here.' };
+      if (!verifyPassword(password, user.passwordHash)) {
+        await audit(tx, req, 'Account Deletion Failed', 'Password verification failed for self-deletion.');
+        return { status: 400 as const, error: 'Your password is incorrect.' };
+      }
+      // Privacy: detach the reader's comments from their identity. Retention
+      // keeps the moderation record (content + status), but the display name,
+      // avatar and role are removed so a deleted account is no longer linked to
+      // its comments (matches the account page's promise).
+      await tx.comment.updateMany({ where: { userId: user.id }, data: { userName: '[deleted user]', userAvatar: null, userRole: null } });
+      // Audit BEFORE deletion: AuditLog.userId is free-text (not a FK), so the
+      // record survives the account removal.
+      await recordAudit(tx, { userId: user.id, userName: user.name, action: 'Reader Account Deleted', entityType: 'User', entityId: user.id, details: 'Reader self-deleted their account; sessions and tokens removed, comments retained but anonymized.' });
+      await tx.user.delete({ where: { id: user.id } });
+      return { status: 200 as const };
+    });
+    if (result.status === 200) res.append('Set-Cookie', buildExpiredSessionCookie());
+    return res.status(result.status).json(result.status === 200 ? { success: true } : { error: result.error });
   }));
   return router;
 }

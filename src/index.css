@@ -85,6 +85,46 @@
 .site-shell:has([data-admin-shell]) > footer,
 .site-shell:has([data-admin-shell]) > .site-footer-blocks,
 .site-shell:has([data-admin-shell]) > .site-announcements { display: none; }
+
+/* The public brand/navigation is not part of the editorial workspace. On CMS
+   routes its header contributes no height; only the existing theme and staff
+   controls are overlaid on the compact console header below. */
+.site-shell:has([data-admin-shell]) > .site-header {
+  position: relative;
+  top: auto;
+  height: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  backdrop-filter: none;
+}
+.site-shell:has([data-admin-shell]) .site-header-row { height: 0; }
+.site-shell:has([data-admin-shell]) .site-header-brand,
+.site-shell:has([data-admin-shell]) .site-header-nav,
+.site-shell:has([data-admin-shell]) .site-header-mobile-toggle,
+.site-shell:has([data-admin-shell]) .site-header-mobile-nav { display: none; }
+.site-shell:has([data-admin-shell]) .site-header-actions {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 50;
+}
+.site-shell:has([data-admin-shell]) .cms-console-links {
+  /* Theme (36px) + staff menu (up to ~112px) + their gap, with a clear
+     16px gutter before the console links. */
+  margin-right: 10.5rem;
+  flex-shrink: 0;
+}
+@media (min-width: 640px) {
+  .site-shell:has([data-admin-shell]) .site-header-actions { right: 1.5rem; }
+}
+@media (min-width: 1024px) {
+  .site-shell:has([data-admin-shell]) .site-header-actions { right: 2rem; }
+}
+@media (max-width: 767px) {
+  .site-shell:has([data-admin-shell]) .cms-console-header { padding-right: 7.5rem; }
+  .site-shell:has([data-admin-shell]) .cms-console-links { margin-right: 0; }
+}
 /* PHASE R UI/UX: anchors, focus and scroll-into-view stop below the sticky
    64px header instead of underneath it (WCAG 2.4.11 focus not obscured). */
 html { scroll-padding-top: 5rem; }

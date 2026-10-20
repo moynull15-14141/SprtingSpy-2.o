@@ -744,8 +744,20 @@ export async function getAuthorPage(slug: string) {
 /** Approved comments only; callers check the comments launch flag first. */
 export async function getApprovedComments(articleId: string): Promise<Comment[]> {
   const prisma = await db();
-  const rows = await prisma.comment.findMany({ where: { articleId, status: 'approved' }, orderBy: { createdAt: 'desc' } });
-  return rows.map((c) => ({ ...c, userAvatar: c.userAvatar ?? undefined, userRole: c.userRole ?? undefined, createdAt: c.createdAt.toISOString() }));
+  const rows = await prisma.comment.findMany({ where: { articleId, status: 'approved', deletedAt: null }, orderBy: { createdAt: 'desc' } });
+  // Only the public-facing fields leave the server — moderation metadata
+  // (moderatedBy/At, moderationNote, deletedAt) is never exposed to visitors.
+  return rows.map((c) => ({
+    id: c.id,
+    articleId: c.articleId,
+    userId: c.userId,
+    userName: c.userName,
+    userAvatar: c.userAvatar ?? undefined,
+    userRole: c.userRole ?? undefined,
+    content: c.content,
+    status: c.status,
+    createdAt: c.createdAt.toISOString(),
+  }));
 }
 
 export { listArticles as _listArticles, countArticles as _countArticles, summarize as _summarize, summarySelect as _summarySelect, summarizeEvents as _summarizeEvents, publishedArticleWhere as _publishedArticleWhere, visibleEventWhere as _visibleEventWhere, toSport as _toSport, toEdition as _toEdition, db as _db };

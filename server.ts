@@ -25,6 +25,9 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'node:crypto';
 import { accountRouter } from './server/account';
+import { registerRouter } from './server/register';
+import { moderationRouter } from './server/moderation';
+import { readersRouter } from './server/readers';
 import { rejectNestedCmsWrites } from './server/cmsFields';
 import { deploymentConfig, DeploymentConfigError, enforceProductionTransport } from './server/deployment';
 import { prisma } from './server/db';
@@ -603,8 +606,16 @@ async function startServer() {
   // PHASE R: password reset is public (token-based), so it is mounted BEFORE
   // the account router, whose router-level requireAuth covers /api/auth/*.
   app.use('/api/auth', passwordResetRouter(getAuthLookup));
+  // PHASE U: public reader registration + e-mail verification. Mounted BEFORE
+  // the authed account router (whose router-level requireAuth would otherwise
+  // reject these public routes), exactly like passwordResetRouter above.
+  app.use('/api/auth', registerRouter(getAuthLookup));
   app.use('/api/auth/totp', totpRouter(getAuthLookup));
   app.use('/api/auth', accountRouter(getAuthLookup));
+  // PHASE U: comment moderation (Admin/Editor) and reader management (Admin).
+  // Server-enforced authorization lives in these routers, not in the CMS UI.
+  app.use(moderationRouter(getAuthLookup));
+  app.use(readersRouter(getAuthLookup));
 
   // 6. REST API Endpoints
 
@@ -637,7 +648,9 @@ async function startServer() {
           prisma.author.findMany(),
           role === 'Admin' ? prisma.user.findMany() : Promise.resolve([]),
           features.comments
-            ? prisma.comment.findMany({ where: ['Admin', 'Editor'].includes(role) ? undefined : { OR: [{ status: 'approved' }, { userId }] }, orderBy: { createdAt: 'desc' } })
+            // PHASE U: exclude soft-deleted, and bound the bulk load (the
+            // moderation desk pages through /api/moderation/comments instead).
+            ? prisma.comment.findMany({ where: ['Admin', 'Editor'].includes(role) ? { deletedAt: null } : { deletedAt: null, OR: [{ status: 'approved' }, { userId }] }, orderBy: { createdAt: 'desc' }, take: 500 })
             : Promise.resolve([]),
           prisma.mediaItem.findMany({ orderBy: { uploadedAt: 'desc' } }),
           prisma.adSlotConfig.findMany({ include: { creative: true } }),
@@ -1714,6 +1727,19 @@ async function startServer() {
       const article = await prisma.article.findUnique({ where: { id: body.articleId } });
       if (!article) {
         return res.status(404).json({ error: 'Article not found.' });
+      }
+
+      // PHASE U: comments are only allowed on PUBLISHED articles, and only from
+      // a verified, active Reader. Staff accounts (Admin/Editor/Author) comment
+      // without e-mail verification. Enforced here at the API layer, not the UI.
+      if (article.status !== 'published') {
+        return res.status(403).json({ error: 'Comments are only allowed on published articles.' });
+      }
+      if (fullUser && fullUser.status !== 'active') {
+        return res.status(403).json({ error: 'Your account cannot post comments.' });
+      }
+      if (role === 'Reader' && !fullUser?.emailVerifiedAt) {
+        return res.status(403).json({ error: 'Please verify your e-mail address before you can comment.' });
       }
 
       const trimmedContent = body.content.trim();

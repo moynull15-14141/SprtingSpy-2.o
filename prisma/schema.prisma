@@ -42,6 +42,11 @@ enum Role {
 enum UserStatus {
   active
   inactive
+  // PHASE U (reader platform): reader moderation states. Both block login and
+  // hold no session — the existing `status === 'active'` checks enforce this
+  // with no change. A ban is the stronger restriction (admin-reversible only).
+  suspended
+  banned
 }
 
 enum ArticleStatus {
@@ -73,6 +78,8 @@ enum CommentStatus {
   pending
   approved
   rejected
+  // PHASE U: flagged as spam by a moderator. Never shown publicly.
+  spam
 }
 
 // ArticleType and MediaCreationType are deliberately plain, app-validated
@@ -454,10 +461,21 @@ model User {
   totpSecret    String?
   totpEnabledAt DateTime?
 
+  // PHASE U (reader platform): when the account confirmed its e-mail address
+  // (NULL = unverified). Readers must verify before they can comment; staff
+  // accounts are provisioned by an Admin and are not required to verify.
+  emailVerifiedAt DateTime?
+  // PHASE U: admin-only context for a non-active status (suspend/ban reason,
+  // when and by whom). Never sent to the account itself or to public pages.
+  statusReason    String?
+  statusUpdatedAt DateTime?
+  statusUpdatedBy String?
+
   authorProfile Author?
   assignedReviews Article[] @relation("ArticleReviewer")
   sessions      Session[]
   passwordResets PasswordResetToken[]
+  emailVerifications EmailVerificationToken[]
 
   @@index([email])
   @@index([role, status])
@@ -499,6 +517,25 @@ model PasswordResetToken {
   @@index([expiresAt])
 }
 
+// PHASE U (reader platform): single-use e-mail verification tokens, modeled on
+// PasswordResetToken. Only a SHA-256 hash of the token is stored; the token
+// itself exists only inside the verification link. Issuing a new token voids
+// older unused ones. A reader must verify before commenting.
+model EmailVerificationToken {
+  id        String    @id
+  userId    String
+  tokenHash String    @unique
+  createdAt DateTime
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdBy String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
 // ── Comments (denormalized author fields preserved exactly as the JSON
 // version stores them — no live join to User, so a comment keeps showing
 // its author's name/avatar/role even if that User is later deleted, exactly
@@ -514,11 +551,24 @@ model Comment {
   content    String
   createdAt  DateTime
   status     CommentStatus @default(pending)
+  // PHASE U: moderation metadata + soft delete. A soft-deleted comment keeps
+  // its row (for audit/history) but is never shown publicly and never counted.
+  // `updatedAt` is managed by Prisma; moderatedBy/At/Note record the last
+  // moderator decision.
+  updatedAt      DateTime?  @updatedAt
+  moderatedBy    String?
+  moderatedAt    DateTime?
+  moderationNote String?
+  deletedAt      DateTime?
 
   article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
 
   @@index([articleId])
   @@index([status])
+  // PHASE U: moderation queue ordering and per-reader comment history.
+  @@index([status, createdAt])
+  @@index([userId])
+  @@index([deletedAt])
 }
 
 // ── Standalone collections (no relations in the current app — preserved

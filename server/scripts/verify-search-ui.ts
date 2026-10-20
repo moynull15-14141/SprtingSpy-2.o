@@ -35,6 +35,19 @@ try {
   let suggestionRequests = 0;
   page.on('request', (r) => { if (r.url().includes('/api/search/suggestions')) suggestionRequests++; });
 
+  await page.goto(`${base}/`, { waitUntil: 'networkidle' });
+  const headerSearchButton = page.getByRole('button', { name: 'Search', exact: true });
+  await headerSearchButton.click();
+  const headerSearchInput = page.getByLabel('Search articles, sports and events');
+  assert(await headerSearchInput.evaluate((element) => element === document.activeElement), 'opening navbar search focuses its input');
+  await page.keyboard.press('Escape');
+  await headerSearchInput.waitFor({ state: 'hidden' });
+  await headerSearchButton.click();
+  await page.getByLabel('Search articles, sports and events').fill(word);
+  await page.getByLabel('Search articles, sports and events').press('Enter');
+  await page.waitForURL((url) => url.pathname === '/search/' && url.searchParams.get('q') === word);
+  pass('navbar Search opens a focused input, closes on Escape, and Enter navigates to the URL-driven search page');
+
   await page.goto(`${base}/search/`, { waitUntil: 'networkidle' });
   const box = page.getByRole('combobox', { name: 'Search SportingSpy' });
   assert(await box.evaluate((el) => el === document.activeElement), 'empty search page focuses the input');
@@ -85,6 +98,14 @@ try {
   pass('no-result state is shown');
 
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${base}/`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: 'Toggle Navigation Menu' }).click();
+  const mobileHeaderSearch = page.getByRole('search', { name: 'Mobile search' }).getByLabel('Search articles, sports and events');
+  await mobileHeaderSearch.fill(word);
+  await mobileHeaderSearch.press('Enter');
+  await page.waitForURL((url) => url.pathname === '/search/' && url.searchParams.get('q') === word);
+  pass('mobile navbar search submits its query to the search page');
+
   await page.goto(`${base}/search/?q=${word}`, { waitUntil: 'networkidle' });
   assert(!(await page.locator('#search-filters').isVisible()), 'filters are collapsed on mobile');
   await page.getByRole('button', { name: /Filters/ }).click();
@@ -104,7 +125,7 @@ try {
   await page.goto(`${base}/admin/`, { waitUntil: 'networkidle' });
   await page.getByPlaceholder('Email').fill(email);
   await page.getByPlaceholder('Password').fill(password);
-  await page.getByRole('button', { name: 'Sign In' }).click();
+  await page.locator('main').getByRole('button', { name: 'Sign In', exact: true }).click();
   await page.getByRole('heading', { name: 'Content Management System' }).waitFor();
   await page.getByRole('button', { name: 'Articles', exact: true }).click(); // exact: Phase I added an "articles awaiting review" dashboard button
   const cmsSearch = page.getByPlaceholder('Title, text, slug or article ID…');

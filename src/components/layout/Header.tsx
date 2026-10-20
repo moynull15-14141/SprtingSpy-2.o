@@ -31,10 +31,10 @@ interface HeaderProps {
 }
 
 /**
- * PHASE R UI/UX: a click-opened menu closes on Escape (focus returns to its
- * button), on a click or tap outside it, and on navigation — not merely when
- * the pointer leaves it (which stranded the Sports panel over the page and
- * closed the sign-in form while typing).
+ * PHASE R UI/UX: click-opened menus close on Escape, an outside click/tap or
+ * navigation. The desktop Sports panel also follows conventional hover
+ * behavior: pointer in opens it and pointer out closes it. Sign-in remains
+ * click-only so moving the pointer never interrupts its form.
  */
 function useDismissible(open: boolean, close: () => void, wrapper: React.RefObject<HTMLElement | null>, trigger: React.RefObject<HTMLElement | null>, path: string) {
   useEffect(() => {
@@ -50,7 +50,7 @@ function useDismissible(open: boolean, close: () => void, wrapper: React.RefObje
 
 export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) => {
   const brandName = siteName && siteName !== BRANDING.name ? siteName : BRANDING.shortName;
-  const { currentPath, navigate, theme, themePreference, setThemePreference, currentUser, isAuthenticated, login, logout } = useSite();
+  const { currentPath, navigate, theme, themePreference, setThemePreference, currentUser, isAuthenticated, login, logout, features } = useSite();
   const [isSportsMenuOpen, setIsSportsMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   // Mobile: the sport whose groups are expanded (tap to expand, one at a time).
@@ -66,6 +66,8 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
     links[index].focus();
   };
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -85,6 +87,7 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
       setTotpRequired(false);
       setTotpCode('');
       setIsUserMenuOpen(false);
+      navigate(result.user && STAFF_ROLES.includes(result.user.role) ? '/admin/' : '/account');
     } else {
       if (result.totpRequired) setTotpRequired(true);
       setLoginError(result.totpRequired && !totpRequired ? null : result.error || 'Login failed.');
@@ -95,10 +98,30 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
   const sportsButtonRef = useRef<HTMLButtonElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const userButtonRef = useRef<HTMLButtonElement>(null);
-  const closeSportsMenu = React.useCallback(() => setIsSportsMenuOpen(false), []);
+  const searchMenuRef = useRef<HTMLDivElement>(null);
+  const searchButtonRef = useRef<HTMLButtonElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const closeSportsMenu = React.useCallback(() => {
+    sportsOpenedByHover.current = false;
+    setIsSportsMenuOpen(false);
+  }, []);
   const closeUserMenu = React.useCallback(() => setIsUserMenuOpen(false), []);
+  const closeSearchMenu = React.useCallback(() => setIsSearchOpen(false), []);
   useDismissible(isSportsMenuOpen, closeSportsMenu, sportsMenuRef, sportsButtonRef, currentPath);
   useDismissible(isUserMenuOpen, closeUserMenu, userMenuRef, userButtonRef, currentPath);
+  useDismissible(isSearchOpen, closeSearchMenu, searchMenuRef, searchButtonRef, currentPath);
+  useEffect(() => {
+    if (isSearchOpen) requestAnimationFrame(() => searchInputRef.current?.focus());
+  }, [isSearchOpen]);
+
+  const submitSearch = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const query = searchQuery.trim();
+    if (!query) return;
+    closeSearchMenu();
+    setIsMobileMenuOpen(false);
+    navigate(`/search/?q=${encodeURIComponent(query)}`);
+  };
 
   const isActive = (path: string) => {
     if (path === '/' && currentPath === '/') return true;
@@ -108,10 +131,10 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
 
   return (
     <header className="site-header sticky top-0 z-40 bg-white/95 dark:bg-[#0c0d0e]/95 backdrop-blur-md border-b border-stone-200 dark:border-stone-800 transition-colors">
-      <div className="max-w-[120rem] mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
+      <div className="site-header-frame max-w-[120rem] mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="site-header-row flex items-center justify-between h-16">
           {/* ZONE 1: Brand Zone - Single element wordmark */}
-          <div className="flex items-center gap-2">
+          <div className="site-header-brand flex items-center gap-2">
             <Link
               href="/"
               onClick={() => {
@@ -129,11 +152,13 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
           </div>
 
           {/* ZONE 2: 4-6 clean text navigation links */}
-          <nav aria-label="Main" className="hidden min-w-0 flex-1 flex-wrap justify-center md:flex items-center gap-x-3 gap-y-1 mx-3 text-sm font-medium lg:gap-x-6">
+          <nav aria-label="Main" className="site-header-nav hidden min-w-0 flex-1 flex-wrap justify-center md:flex items-center gap-x-3 gap-y-1 mx-3 text-sm font-medium lg:gap-x-6">
             {navigation.filter((item) => item.desktop).map((item) => item.kind === 'sportsMenu' ? (
             <div key={item.id} className="relative" ref={sportsMenuRef}
-              // Hovering with a mouse opens the panel. It closes on Escape, an outside click or navigation, not when the pointer leaves.
-              onPointerEnter={(e) => { if (e.pointerType === 'mouse' && !isSportsMenuOpen) { sportsOpenedByHover.current = true; setIsSportsMenuOpen(true); } }}
+              // The trigger and its absolute panel form one hover region: crossing
+              // between them stays open; leaving both closes a hover-opened panel.
+              onPointerEnter={(e) => { if (e.pointerType === 'mouse' && !isSportsMenuOpen) { closeSearchMenu(); sportsOpenedByHover.current = true; setIsSportsMenuOpen(true); } }}
+              onPointerLeave={(e) => { if (e.pointerType === 'mouse' && sportsOpenedByHover.current) closeSportsMenu(); }}
             >
               <button
                 ref={sportsButtonRef}
@@ -226,6 +251,57 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
                 </div>
               )}
             </div>
+            ) : item.icon === 'search' ? (
+            <div key={item.id} ref={searchMenuRef} className="relative flex items-center">
+              {/* The box sits BEFORE the button in the DOM, so when it grows from
+                  width 0 it reveals on the left and pushes the "Search" button
+                  smoothly to the right — the two stay side by side, never overlapping. */}
+              <form
+                id="header-search-panel"
+                role="search"
+                aria-label="Search SportingSpy"
+                aria-hidden={!isSearchOpen}
+                onSubmit={submitSearch}
+                className={`overflow-hidden transition-[width,opacity,margin] duration-300 ease-out motion-reduce:transition-none ${isSearchOpen ? 'pointer-events-auto mr-2 w-44 opacity-100 lg:w-64 xl:w-72' : 'pointer-events-none mr-0 w-0 opacity-0'}`}
+              >
+                <label htmlFor="header-search-query" className="sr-only">Search articles, sports and events</label>
+                <div className="relative w-44 lg:w-64 xl:w-72">
+                  <input
+                    ref={searchInputRef}
+                    id="header-search-query"
+                    type="search"
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder="Search articles, sports and events"
+                    autoComplete="off"
+                    tabIndex={isSearchOpen ? 0 : -1}
+                    required
+                    className="w-full rounded-lg border border-stone-300 bg-white py-2 pl-3 pr-10 text-sm text-stone-900 shadow-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/25 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100"
+                  />
+                  <button type="submit" tabIndex={isSearchOpen ? 0 : -1} className="absolute inset-y-0 right-0 inline-flex w-10 items-center justify-center rounded-r-lg text-stone-500 hover:text-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-500 dark:text-stone-400 dark:hover:text-amber-400" aria-label="Submit search">
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                  </button>
+                </div>
+              </form>
+              <button
+                ref={searchButtonRef}
+                type="button"
+                data-nav-item={item.id}
+                aria-expanded={isSearchOpen}
+                aria-controls="header-search-panel"
+                onClick={() => {
+                  closeSportsMenu();
+                  closeUserMenu();
+                  setIsSearchOpen((open) => !open);
+                }}
+                className={`flex shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap py-2 transition-colors ${isActive('/search') || isSearchOpen ? 'font-semibold text-amber-700 dark:text-amber-400' : 'text-stone-700 hover:text-stone-950 dark:text-stone-300 dark:hover:text-white'}`}
+              >
+                <svg className="h-4 w-4 text-stone-500 dark:text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                {item.label}
+              </button>
+            </div>
             ) : (
             <SiteLink
               key={item.id}
@@ -233,24 +309,19 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
               newTab={item.newTab}
               data-nav-item={item.id}
               onClick={() => setIsSportsMenuOpen(false)}
-              className={`transition-colors py-2 cursor-pointer ${item.icon === 'search' ? 'flex items-center gap-1.5 ' : ''}${
+              className={`transition-colors py-2 cursor-pointer ${
                 item.href.startsWith('/') && isActive(item.href.replace(/\/$/, '') || '/')
                   ? 'text-amber-700 dark:text-amber-400 font-semibold'
                   : 'text-stone-700 dark:text-stone-300 hover:text-stone-950 dark:hover:text-white'
               }`}
             >
-              {item.icon === 'search' && (
-                <svg className="w-4 h-4 text-stone-500 dark:text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-              )}
               {item.label}
             </SiteLink>
             ))}
           </nav>
 
           {/* ZONE 3: 1-2 primary actions */}
-          <div className="flex items-center gap-3">
+          <div className="site-header-actions flex items-center gap-3">
             {/* Theme: Light → Dark → System (PHASE R UI/UX; System follows the OS live) */}
             {(() => {
               const next = themePreference === 'light' ? 'dark' : themePreference === 'dark' ? 'system' : 'light';
@@ -276,14 +347,14 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
               );
             })()}
 
-            {/* Staff Login / Account Menu (PHASE 1: real authentication, not a role simulator) */}
+            {/* Sign-in / Account Menu (PHASE 1: real authentication, not a role simulator) */}
             <div className="relative" ref={userMenuRef}>
               <button
                 ref={userButtonRef}
                 type="button"
                 aria-expanded={isUserMenuOpen}
                 aria-haspopup="true"
-                onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+                onClick={() => { closeSearchMenu(); setIsUserMenuOpen(!isUserMenuOpen); }}
                 className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full border border-stone-200 dark:border-stone-800 hover:bg-stone-50 dark:hover:bg-stone-900 transition-colors cursor-pointer text-xs"
               >
                 {isAuthenticated ? (
@@ -292,7 +363,7 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
                     <span className="font-medium text-stone-800 dark:text-stone-200 hidden sm:inline">{currentUser.role}</span>
                   </>
                 ) : (
-                  <span className="font-medium text-stone-800 dark:text-stone-200">Staff Login</span>
+                  <span className="font-medium text-stone-800 dark:text-stone-200">Sign in</span>
                 )}
                 <span aria-hidden="true" className="text-[10px] text-stone-500 dark:text-stone-400">▼</span>
               </button>
@@ -333,7 +404,7 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
                     </>
                   ) : (
                     <form onSubmit={handleLogin} className="p-2 space-y-2">
-                      <p className="px-1 text-[11px] text-stone-500 dark:text-stone-400">Staff login for the Editorial CMS.</p>
+                      <p className="px-1 text-[11px] text-stone-500 dark:text-stone-400">{features.readerAccounts ? 'Sign in to your account.' : 'Staff login for the Editorial CMS.'}</p>
                       <input
                         type="email"
                         required
@@ -357,6 +428,14 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
                         {totpRequired ? 'Verify' : 'Log In'}
                       </Button>
                       <a href="/reset-password/" className="block text-center text-[11px] font-semibold text-amber-700 hover:underline dark:text-amber-400">Forgot password?</a>
+                      {/* PHASE U: public readers need a visible way to register. Shown only
+                          when reader accounts are enabled; the /register page is flag-gated too. */}
+                      {features.readerAccounts && (
+                        <div className="mt-1 border-t border-stone-100 pt-2 text-center dark:border-stone-800">
+                          <span className="text-[11px] text-stone-500 dark:text-stone-400">New to SportingSpy? </span>
+                          <a href="/register" className="text-[11px] font-semibold text-amber-700 hover:underline dark:text-amber-400">Create a free account</a>
+                        </div>
+                      )}
                     </form>
                   )}
                 </div>
@@ -365,8 +444,8 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
 
             {/* Mobile Hamburger Button */}
             <button
-              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="md:hidden p-2 text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 rounded-lg cursor-pointer"
+              onClick={() => { closeSearchMenu(); setIsMobileMenuOpen(!isMobileMenuOpen); }}
+              className="site-header-mobile-toggle md:hidden p-2 text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 rounded-lg cursor-pointer"
               aria-label="Toggle Navigation Menu"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -382,7 +461,7 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
 
         {/* Mobile Navigation Drawer */}
         {isMobileMenuOpen && (
-          <nav aria-label="Mobile" className="md:hidden py-4 border-t border-stone-200 dark:border-stone-800 space-y-2">
+          <nav aria-label="Mobile" className="site-header-mobile-nav md:hidden py-4 border-t border-stone-200 dark:border-stone-800 space-y-2">
             {navigation.filter((item) => item.mobile).map((item) => item.kind === 'sportsMenu' ? (
               <div key={item.id}>
                 <Link
@@ -433,6 +512,25 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
                   ))}
                 </ul>
               </div>
+            ) : item.icon === 'search' ? (
+              <form key={item.id} role="search" aria-label="Mobile search" onSubmit={submitSearch} className="px-3 py-2">
+                <label htmlFor="mobile-header-search-query" className="sr-only">Search articles, sports and events</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="mobile-header-search-query"
+                    type="search"
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder="Search articles, sports and events"
+                    autoComplete="off"
+                    required
+                    className="min-w-0 flex-1 rounded-lg border border-stone-300 bg-stone-50 px-3 py-2.5 text-sm text-stone-900 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/25 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-100"
+                  />
+                  <button type="submit" className="rounded-lg bg-amber-700 px-3 py-2.5 text-sm font-semibold text-white hover:bg-amber-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500">
+                    Search
+                  </button>
+                </div>
+              </form>
             ) : (
               <SiteLink
                 key={item.id}

@@ -92,6 +92,39 @@ try {
           await page.getByPlaceholder('Password', { exact: true }).fill(password);
           await page.getByRole('button', { name: 'Sign In', exact: true }).click();
           await page.getByRole('heading', { name: 'Content Management System' }).waitFor();
+          const header = await page.evaluate(`(() => {
+            const rect = (selector) => {
+              const element = document.querySelector(selector);
+              if (!element) return null;
+              const value = element.getBoundingClientRect();
+              return { top: value.top, right: value.right, bottom: value.bottom, left: value.left, width: value.width, height: value.height };
+            };
+            const links = rect('.cms-console-links');
+            const actions = rect('.site-header-actions');
+            const overlaps = !!links && !!actions
+              && links.left < actions.right && links.right > actions.left
+              && links.top < actions.bottom && links.bottom > actions.top;
+            return {
+              links,
+              actions,
+              overlaps,
+              publicBrandDisplay: getComputedStyle(document.querySelector('.site-header-brand')).display,
+              publicNavDisplay: getComputedStyle(document.querySelector('.site-header-nav')).display,
+              publicHeaderHeight: rect('.site-header')?.height,
+              consoleBrand: document.querySelector('h1[aria-label="Content Management System"]')?.textContent?.trim(),
+            };
+          })()`) as {
+            links: { top: number; right: number; bottom: number; left: number; width: number; height: number } | null;
+            actions: { top: number; right: number; bottom: number; left: number; width: number; height: number } | null;
+            overlaps: boolean;
+            publicBrandDisplay: string;
+            publicNavDisplay: string;
+            publicHeaderHeight?: number;
+            consoleBrand?: string;
+          };
+          if (header.overlaps) findings.push(`CMS-OVERLAP ${scheme} ${width}px console links ${JSON.stringify(header.links)} intersect theme/staff controls ${JSON.stringify(header.actions)}`);
+          if (header.publicBrandDisplay !== 'none' || header.publicNavDisplay !== 'none' || (header.publicHeaderHeight ?? 1) > 1) findings.push(`CMS-PUBLIC-HEADER ${scheme} ${width}px ${JSON.stringify(header)}`);
+          if (header.consoleBrand !== 'SportingSpy') findings.push(`CMS-BRAND ${scheme} ${width}px expected SportingSpy, found ${JSON.stringify(header.consoleBrand)}`);
           const nav = page.locator('aside nav button, nav[aria-label] button').filter({ hasText: /\S/ });
           // First line only: some items carry a count badge (e.g. "URL Redirects (301/302)" + newline + "3").
           const labels = width < 768 ? [] : (await nav.allInnerTexts()).map((t) => t.trim().split(String.fromCharCode(10))[0].trim()).filter(Boolean);

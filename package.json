@@ -16,6 +16,7 @@
     "test:phase4": "tsx server/scripts/verify-phase4.ts",
     "test:production": "tsx server/scripts/verify-production.ts",
     "test:phase-a": "tsx server/scripts/verify-phase-a.ts",
+    "test:phase-u": "tsx server/scripts/verify-phase-u.ts",
     "db:generate": "prisma generate",
     "db:migrate": "tsx server/scripts/guard-local-db.ts && prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",

@@ -49,7 +49,7 @@ export interface SiteContextType {
   authUser: SafeUser | null;
   isAuthenticated: boolean;
   authLoading: boolean;
-  login: (email: string, password: string, totpCode?: string) => Promise<{ success: boolean; error?: string; totpRequired?: boolean }>;
+  login: (email: string, password: string, totpCode?: string) => Promise<{ success: boolean; user?: SafeUser; error?: string; totpRequired?: boolean }>;
   logout: () => Promise<boolean>;
   apiCall: ApiCall;
   updateAccountIdentity: (user: SafeUser) => void;
@@ -194,7 +194,7 @@ export const SiteProvider: React.FC<{ features: FeatureFlags; children: React.Re
       clearPrivateData();
       setAuthUser(res.data.user);
       showNotification(`Welcome back, ${res.data.user.name}.`, 'success');
-      return { success: true };
+      return { success: true, user: res.data.user };
     }
     return { success: false, error: res.error || 'Login failed.', totpRequired: res.details?.totpRequired === true };
   };

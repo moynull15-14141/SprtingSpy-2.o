@@ -6,9 +6,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   PanelLeftClose, PanelLeftOpen, LayoutDashboard, FileText, Trophy, CalendarDays, UserSquare2, ShieldCheck,
-  MessageSquare, Image, Megaphone, SearchCheck, ArrowLeftRight, ScrollText, Settings, PanelsTopLeft, HelpCircle, Files, Inbox, Tags, ChartNoAxesCombined, Route, type LucideIcon,
+  MessageSquare, Image, Megaphone, SearchCheck, ArrowLeftRight, ScrollText, Settings, PanelsTopLeft, HelpCircle, Files, Inbox, Tags, ChartNoAxesCombined, Route, Users, type LucideIcon,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { BRANDING } from '../../config/branding';
 import { requestOpenDraft } from '../../lib/autosave/api';
 import { DESK_FOR_KIND, deskFromHash, readOpenEditor } from '../../lib/admin/workspace';
 
@@ -19,6 +20,7 @@ export type AdminTab =
   | 'events'
   | 'authors'
   | 'users'
+  | 'readers'
   | 'comments'
   | 'media'
   | 'ads'
@@ -34,7 +36,7 @@ export type AdminTab =
   | 'migration'
   | 'settings';
 
-const ALL_TABS: readonly AdminTab[] = ['dashboard', 'articles', 'sports', 'events', 'authors', 'users', 'comments', 'media', 'ads', 'seo', 'redirects', 'audit', 'site', 'faq', 'pages', 'inbox', 'types', 'insights', 'migration', 'settings'];
+const ALL_TABS: readonly AdminTab[] = ['dashboard', 'articles', 'sports', 'events', 'authors', 'users', 'readers', 'comments', 'media', 'ads', 'seo', 'redirects', 'audit', 'site', 'faq', 'pages', 'inbox', 'types', 'insights', 'migration', 'settings'];
 const tabFromUrl = (): AdminTab => (typeof window === 'undefined' ? null : deskFromHash(window.location.hash, ALL_TABS) as AdminTab | null) ?? 'dashboard';
 
 interface AdminLayoutProps {
@@ -108,6 +110,9 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
     { id: 'events', label: 'Events & Editions', icon: CalendarDays },
     { id: 'authors', label: 'Authors / Beats', icon: UserSquare2 },
     { id: 'users', label: 'User Roles & RBAC', icon: ShieldCheck },
+    // PHASE U: public reader management (Admin only, shown when reader accounts
+    // are enabled). Separate from the staff Users desk above.
+    ...((currentUser.role === 'Admin' && features.readerAccounts) ? [{ id: 'readers' as AdminTab, label: 'Readers', icon: Users }] : []),
     ...(features.comments ? [{ id: 'comments' as AdminTab, label: 'Comments', badge: pendingCommentsCount, icon: MessageSquare }] : []),
     { id: 'media', label: 'Media Library', icon: Image },
     { id: 'ads', label: 'Ad Placements', icon: Megaphone },
@@ -137,8 +142,11 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
             <span aria-hidden="true" className="text-stone-300 dark:text-stone-700">·</span>
             <span className="text-[11px] text-stone-500 dark:text-stone-400">Role: {currentUser.role}</span>
           </div>
-          <h1 className="font-serif text-xl font-bold text-stone-900 dark:text-stone-100 sm:text-2xl">
-            Content Management System
+          <h1
+            aria-label="Content Management System"
+            className="font-display text-2xl font-bold tracking-tight text-stone-900 dark:text-stone-100"
+          >
+            {BRANDING.shortName}<span aria-hidden="true" className="ml-2 inline-block h-1.5 w-1.5 rounded-full bg-amber-700 align-middle dark:bg-amber-500" />
           </h1>
         </div>
 

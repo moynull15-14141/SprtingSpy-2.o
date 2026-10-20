@@ -18,14 +18,28 @@ interface CommentsSectionProps {
 }
 
 export const CommentsSection: React.FC<CommentsSectionProps> = ({ articleId, initialComments }) => {
-  const { currentUser, isAuthenticated, apiCall, showNotification } = useSite();
+  const { currentUser, isAuthenticated, apiCall, showNotification, features } = useSite();
   // The visitor's own submissions this visit, shown with their moderation state.
   const [ownComments, setOwnComments] = useState<Comment[]>([]);
   const [content, setContent] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [resendMessage, setResendMessage] = useState<string | null>(null);
+  const [isResending, setIsResending] = useState(false);
 
   const articleComments = [...ownComments.filter((c) => c.userId === currentUser.id), ...initialComments];
+
+  // PHASE U: only verified, active readers may comment; staff always may. An
+  // unverified reader is shown a "confirm your e-mail" prompt instead.
+  const needsVerification = isAuthenticated && currentUser.role === 'Reader' && !currentUser.emailVerifiedAt;
+  const canComment = isAuthenticated && !needsVerification;
+
+  const resendVerification = async () => {
+    setIsResending(true);
+    const res = await apiCall<{ message: string }>('/api/auth/verify-email/resend', { method: 'POST', body: {} });
+    setIsResending(false);
+    if (res.data) { setResendMessage(res.data.message); showNotification(res.data.message, 'success'); }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,11 +77,10 @@ export const CommentsSection: React.FC<CommentsSectionProps> = ({ articleId, ini
         </div>
       )}
 
-      {/* Submission Form — requires a real logged-in session (Phase 1); there
-          is no public reader registration yet, so only staff accounts can
-          currently comment. See server.ts's /api/comments comment block for
-          the STAFF vs PUBLIC USER AUTHENTICATION distinction. */}
-      {isAuthenticated ? (
+      {/* PHASE U: a comment needs a verified, active account. Readers register
+          and confirm their e-mail; staff comment with their CMS credentials.
+          The server enforces all of this on POST /api/comments regardless. */}
+      {canComment ? (
         <form onSubmit={handleSubmit} className="mb-8 p-4 rounded-xl bg-stone-50 dark:bg-stone-900/60 border border-stone-200 dark:border-stone-800">
           <div className="flex items-center gap-3 mb-3">
             <Avatar src={currentUser.avatar} name={currentUser.name} className="w-7 h-7 rounded-full object-cover" />
@@ -95,10 +108,24 @@ export const CommentsSection: React.FC<CommentsSectionProps> = ({ articleId, ini
             </Button>
           </div>
         </form>
+      ) : needsVerification ? (
+        <div className="mb-8 p-4 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/60 text-xs text-amber-800 dark:text-amber-300">
+          Please confirm your e-mail address before commenting.{' '}
+          {resendMessage ? (
+            <span className="font-medium">{resendMessage}</span>
+          ) : (
+            <button type="button" onClick={resendVerification} disabled={isResending} className="font-semibold underline underline-offset-2 disabled:opacity-60">
+              {isResending ? 'Sending…' : 'Resend the confirmation e-mail'}
+            </button>
+          )}
+        </div>
       ) : (
         <div className="mb-8 p-4 rounded-xl bg-stone-50 dark:bg-stone-900/60 border border-stone-200 dark:border-stone-800 text-xs text-stone-600 dark:text-stone-400">
-          Log in via the staff account menu in the top bar to join the discussion. Public reader accounts are not
-          yet available (see PROJECT_BRAIN.md Phase 1).
+          {features.readerAccounts ? (
+            <>Join the discussion — <a href="/register" className="font-semibold text-amber-700 hover:underline dark:text-amber-400">create a free reader account</a>, or sign in from the account menu in the top bar.</>
+          ) : (
+            <>Log in via the account menu in the top bar to join the discussion.</>
+          )}
         </div>
       )}
 
