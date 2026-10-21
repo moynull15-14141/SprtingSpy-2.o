@@ -10,7 +10,7 @@
 import type { Prisma } from '../../generated/prisma/client';
 import {
   _db as db, _listArticles as listArticles, _countArticles as countArticles, _summarize as summarize, _summarySelect as summarySelect,
-  _publishedArticleWhere as publishedArticleWhere, _summarizeEvents as summarizeEvents, _visibleEventWhere as visibleEventWhere,
+  _publishedArticleWhere as publishedArticleWhere, _disciplineArticleScope as disciplineArticleScope, _summarizeEvents as summarizeEvents, _visibleEventWhere as visibleEventWhere,
   _toSport as toSport, _toEdition as toEdition, editionTimingWhere, editionTimingOrder, type ArticleSummary, type EventSummary,
 } from './content';
 import { editionPath } from '../../../src/lib/paths';
@@ -53,8 +53,12 @@ export type SiteLayout = Awaited<ReturnType<typeof getSiteLayout>>;
 
 export const blocksFor = (layout: SiteLayout, placement: BlockPlacement) => layout.blocks.filter((b) => b.placements.includes(placement));
 
-function autoWhere(auto: AutoSource): Prisma.ArticleWhereInput {
-  if (auto.kind === 'sport') return { sportSlug: auto.value };
+async function autoWhere(auto: AutoSource): Promise<Prisma.ArticleWhereInput> {
+  if (auto.kind === 'sport') {
+    // "<sport>/<group>" = one group of the sport (same membership as the group page).
+    const [sportSlug, groupSlug] = auto.value.split('/');
+    return groupSlug ? disciplineArticleScope(sportSlug, groupSlug) : { sportSlug };
+  }
   if (auto.kind === 'event') { const [sportSlug, eventSlug] = auto.value.split('/'); return { sportSlug, eventSlug }; }
   if (auto.kind === 'type') return { articleType: auto.value };
   return {};
@@ -88,8 +92,8 @@ export async function getHomepageSections(docs: SiteExperienceDocs, layout: Site
     has('featuredEvents') ? prisma.sportEvent.findMany({ where: visibleEventWhere({ featured: true }) }) : Promise.resolve([]),
     has('sportsGrid') || has('upcomingEditions') ? prisma.sport.findMany({ where: { isVisible: true }, orderBy: { order: 'asc' } }) : Promise.resolve([]),
     has('upcomingEditions') ? prisma.eventEdition.findMany({ where: { AND: [{ event: visibleEventWhere() }, editionTimingWhere('upcoming')] }, orderBy: editionTimingOrder('upcoming'), take: 12 }) : Promise.resolve([]),
-    Promise.all(sources.map((auto) => prisma.article.findMany({ where: { AND: [publicWhere, autoWhere(auto)] }, select: summarySelect, orderBy: [{ publishedAt: 'desc' }, { id: 'asc' }], take }))),
-    Promise.all(sources.map((auto) => articleSections.some((s) => s.type === 'articles' && s.moreLink && sourceKey(s.source.auto) === sourceKey(auto)) ? prisma.article.count({ where: { AND: [publicWhere, autoWhere(auto)] } }) : Promise.resolve(0))),
+    Promise.all(sources.map(async (auto) => prisma.article.findMany({ where: { AND: [publicWhere, await autoWhere(auto)] }, select: summarySelect, orderBy: [{ publishedAt: 'desc' }, { id: 'asc' }], take }))),
+    Promise.all(sources.map(async (auto) => articleSections.some((s) => s.type === 'articles' && s.moreLink && sourceKey(s.source.auto) === sourceKey(auto)) ? prisma.article.count({ where: { AND: [publicWhere, await autoWhere(auto)] } }) : 0)),
   ]);
   // Resolve names/media once for all sources, rather than repeating joins for every section.
   const summaries = new Map((await summarize([...new Map(sourceRows.flat().map((a) => [a.id, a])).values()])).map((a) => [a.id, a]));

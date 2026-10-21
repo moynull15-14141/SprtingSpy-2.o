@@ -98,7 +98,7 @@ function autoSource(v: unknown, path: string): AutoSource {
   if (kind === 'latest') { obj(v, path, ['kind']); return { kind }; }
   const o = obj(v, path, ['kind', 'value']);
   const value = text(o.value, `${path}.value`, 120, true);
-  if (kind === 'sport' && !SLUG.test(value)) fail(`${path}.value`, 'must be a sport slug');
+  if (kind === 'sport' && !(SLUG.test(value) || /^[a-z0-9-]+\/[a-z0-9-]+$/.test(value))) fail(`${path}.value`, 'must be a sport slug or "<sport>/<group>"');
   if (kind === 'event' && !/^[a-z0-9-]+\/[a-z0-9-]+$/.test(value)) fail(`${path}.value`, 'must be "<sport>/<event>"');
   // PHASE R: Article Types are database-backed; the server route checks the name exists.
   if (kind === 'type' && !/^[\p{L}\p{N}][\p{L}\p{N} &'’/().,-]{0,58}[\p{L}\p{N})]$/u.test(value)) fail(`${path}.value`, 'must be an article category name');

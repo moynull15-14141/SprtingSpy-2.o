@@ -7,6 +7,7 @@ import { Plus } from 'lucide-react';
 import { useApp } from '../../../context/AppContext';
 import { pagePath } from '../../../lib/pages';
 import { IntroAppearanceEditor } from './IntroAppearanceEditor';
+import { SportGroupPicker } from '../SportGroupPicker';
 import {
   BLOCK_PLACEMENTS, SOCIAL_PLATFORMS,
   type AnnouncementsConfig, type ArticleSource, type AutoSource, type BlocksConfig, type FooterConfig, type GlobalBlock,
@@ -22,7 +23,7 @@ const SECTION_LABEL: Record<HomeSection['type'], string> = {
   intro: 'Intro banner', featured: 'Hero / top stories', articles: 'Article list', featuredEvents: 'Featured events',
   sportsGrid: 'Explore by sport', upcomingEditions: 'Upcoming editions', block: 'Global block', adSlot: 'Ad placement',
 };
-const autoLabel = (a: AutoSource) => (a.kind === 'latest' ? 'Latest articles' : `${a.kind === 'type' ? 'Category' : a.kind === 'sport' ? 'Sport' : 'Event'}: ${a.value}`);
+const autoLabel = (a: AutoSource) => (a.kind === 'latest' ? 'Latest articles' : `${a.kind === 'type' ? 'Category' : a.kind === 'sport' ? (a.value.includes('/') ? 'Group' : 'Sport') : 'Event'}: ${a.value}`);
 
 function newSection(type: HomeSection['type']): HomeSection {
   const id = newId(type.toLowerCase());
@@ -40,7 +41,7 @@ function newSection(type: HomeSection['type']): HomeSection {
 }
 
 function SourceEditor({ value, onChange, max }: { value: ArticleSource; onChange: (v: ArticleSource) => void; max: number }) {
-  const { sports, events, articleTypes } = useApp();
+  const { sports, events, articleTypes, disciplines } = useApp();
   const auto = value.auto;
   // PHASE R: categories come from the database-backed Article Types.
   const ARTICLE_TYPES = articleTypes.filter((t) => t.isActive || (auto.kind === 'type' && t.name === auto.value)).map((t) => t.name);
@@ -50,8 +51,14 @@ function SourceEditor({ value, onChange, max }: { value: ArticleSource; onChange
       <Select label="Content source" value={value.mode} onChange={(mode) => onChange({ ...value, mode })} options={[['auto', 'Automatic'], ['manual', 'Manual — chosen articles only'], ['mixed', 'Mixed — chosen first, then automatic']]} />
       {value.mode !== 'auto' && <ArticlePicker label="Chosen articles" value={value.articleIds} max={max} onChange={(articleIds) => onChange({ ...value, articleIds })} />}
       <div className="grid gap-2 sm:grid-cols-2">
-        <Select label={value.mode === 'manual' ? 'Fallback if a chosen article is unavailable' : 'Automatic source'} value={auto.kind} onChange={setAuto} options={[['latest', 'Latest articles'], ['sport', 'Latest from a sport'], ['event', 'Latest from an event'], ['type', 'Latest in a category']]} />
-        {auto.kind === 'sport' && <Select label="Sport" value={auto.value} onChange={(v) => onChange({ ...value, auto: { kind: 'sport', value: v } })} options={sports.map((s) => [s.slug, s.name])} />}
+        <Select label={value.mode === 'manual' ? 'Fallback if a chosen article is unavailable' : 'Automatic source'} value={auto.kind} onChange={setAuto} options={[['latest', 'Latest articles'], ['sport', 'Latest from a sport or group'], ['event', 'Latest from an event'], ['type', 'Latest in a category']]} />
+        {auto.kind === 'sport' && (
+          <div className={labelClass}>Sport / Group
+            <SportGroupPicker className="mt-1 font-normal" label="Sport or group" sports={sports} groups={disciplines}
+              sportSlug={auto.value.split('/')[0]} groupSlug={auto.value.split('/')[1] ?? ''}
+              onChange={(sport, group) => onChange({ ...value, auto: { kind: 'sport', value: group ? `${sport}/${group}` : sport } })} />
+          </div>
+        )}
         {auto.kind === 'event' && <Select label="Event" value={auto.value} onChange={(v) => onChange({ ...value, auto: { kind: 'event', value: v } })} options={events.map((e) => [`${e.sportSlug}/${e.slug}`, e.name])} />}
         {auto.kind === 'type' && <Select label="Category" value={auto.value} onChange={(v) => onChange({ ...value, auto: { kind: 'type', value: v } })} options={ARTICLE_TYPES.map((t) => [t, t])} />}
       </div>

@@ -105,7 +105,7 @@ export function searchRouter(getAuthLookup: () => AuthLookup) {
     const author = p.author ? await prisma.author.findUnique({ where: { slug: p.author }, select: { id: true } }) : null;
     const ctx = req.authContext!;
     const found = await searchArticleIds({
-      scope: p.publicOnly ? 'public' : 'staff', q: p.q, sport: p.sport || undefined, type: p.type || undefined, status: p.status || undefined,
+      scope: p.publicOnly ? 'public' : 'staff', q: p.q, sport: p.sport || undefined, group: p.sport ? p.group : undefined, type: p.type || undefined, status: p.status || undefined,
       authorId: p.author ? author?.id ?? '__none__' : undefined, from: p.from, to: p.to, sort: p.sort,
       ownerUserId: ctx.role === 'Author' && !p.publicOnly ? ctx.userId : undefined,
       reviewStatus: p.publicOnly ? undefined : p.reviewStatus,

@@ -10,7 +10,8 @@
  * preview, archived) are never deleted:
  *   - event   → they lose the event (and edition): general articles of the sport
  *   - edition → they lose the edition: articles of the event
- *   - sport   → they move to another sport (`moveTo`), losing event, edition and group
+ *   - sport   → they move to another sport, or one group of it (`moveTo`: "sport" or
+ *               "sport/group"), losing event and edition
  *   - group   → they lose the group (their URL does not change)
  * Published and scheduled articles need a choice when their URL changes:
  * "unpublish" (kept as a draft, as above) or "delete". Events, editions,
@@ -128,7 +129,7 @@ export async function buildDeletePlan(db: Db, kind: Kind, id: string): Promise<D
       ],
       detached: [],
       articles,
-      keptNote: 'They move to the sport you choose below and lose their event, edition and group.',
+      keptNote: 'They move to the sport (or one of its groups) you choose below and lose their event and edition.',
       moveTargets,
     };
   }
@@ -156,7 +157,7 @@ function parseBody(body: unknown) {
   if (!expect || typeof expect !== 'object' || Array.isArray(expect) || !Object.values(expect).every(okIds)) throw new PlanError(400, 'expect must be the list sent with the delete plan.');
   const actions = b.publishedActions ?? {};
   if (typeof actions !== 'object' || Array.isArray(actions) || Object.values(actions).some((v) => v !== 'unpublish' && v !== 'delete')) throw new PlanError(400, 'publishedActions must map article IDs to "unpublish" or "delete".');
-  if (b.moveTo !== undefined && (typeof b.moveTo !== 'string' || b.moveTo.length > 120)) throw new PlanError(400, 'moveTo must be a sport slug.');
+  if (b.moveTo !== undefined && (typeof b.moveTo !== 'string' || b.moveTo.length > 120)) throw new PlanError(400, 'moveTo must be a sport slug or "sport/group".');
   return { expect: expect as Record<string, string[]>, actions: actions as Record<string, PublishedAction>, moveTo: b.moveTo as string | undefined };
 }
 const sameSet = (a: string[], b: string[]) => a.length === b.length && [...a].sort().join('\n') === [...b].sort().join('\n');
@@ -177,13 +178,22 @@ export async function executeDeletePlan(kind: Kind, id: string, body: unknown, a
     const toDelete = plan.articles.filter((a) => actions[a.id] === 'delete');
 
     let target: { slug: string; name: string } | null = null;
+    let targetGroup: { slug: string; name: string } | null = null;
     if (kind === 'sport') {
       if (moveTo !== undefined && !kept.length) throw new PlanError(400, 'No article is kept, so there is nothing to move.');
       if (kept.length) {
         if (!moveTo) throw new PlanError(400, `Choose the sport that keeps ${n(kept.length, 'article')}.`);
-        if (moveTo === plan.path.slice(1, -1)) throw new PlanError(400, 'Choose another sport than the one being deleted.');
-        target = await tx.sport.findUnique({ where: { slug: moveTo }, select: { slug: true, name: true } });
+        const [moveSport, moveGroup, ...extra] = moveTo.split('/');
+        if (extra.length || !moveSport || moveGroup === '') throw new PlanError(400, 'moveTo must be a sport slug or "sport/group".');
+        if (moveSport === plan.path.slice(1, -1)) throw new PlanError(400, 'Choose another sport than the one being deleted.');
+        target = await tx.sport.findUnique({ where: { slug: moveSport }, select: { slug: true, name: true } });
         if (!target) throw new PlanError(400, 'The sport chosen for the kept articles does not exist.');
+        if (moveGroup !== undefined) {
+          const group = await tx.discipline.findUnique({ where: { sportSlug_slug: { sportSlug: moveSport, slug: moveGroup } }, select: { slug: true, name: true, isActive: true } });
+          if (!group) throw new PlanError(400, `The group chosen for the kept articles does not exist in ${target.name}.`);
+          if (!group.isActive) throw new PlanError(400, `The group "${group.name}" is retired and cannot be given to more content.`);
+          targetGroup = { slug: group.slug, name: group.name };
+        }
       }
     } else if (moveTo !== undefined) throw new PlanError(400, `moveTo is only used when deleting a sport.`);
 
@@ -203,11 +213,11 @@ export async function executeDeletePlan(kind: Kind, id: string, body: unknown, a
       const link: Prisma.ArticleUncheckedUpdateInput =
         kind === 'event' ? { eventSlug: null, editionYear: null }
         : kind === 'edition' ? { editionYear: null }
-        : kind === 'sport' ? { sportSlug: target!.slug, eventSlug: null, editionYear: null, disciplineSlug: null }
+        : kind === 'sport' ? { sportSlug: target!.slug, eventSlug: null, editionYear: null, disciplineSlug: targetGroup?.slug ?? null }
         : { disciplineSlug: null };
       await tx.article.update({ where: { id: a.id }, data: { ...link, reviewVersion: { increment: 1 }, ...(unpublish ? { status: 'draft' as const, scheduledFor: null } : {}) } });
       if (unpublish && a.status === 'published') goneFromSite.push(a.path);
-      const where = kind === 'sport' ? `moved to ${target!.name}` : `detached from ${subject}`;
+      const where = kind === 'sport' ? `moved to ${target!.name}${targetGroup ? ` › ${targetGroup.name}` : ''}` : `detached from ${subject}`;
       await recordAudit(tx, { ...actor, action: 'Updated Article', entityType: 'Article', entityId: a.id, details: `Admin ${actor.userName} ${unpublish ? 'unpublished and ' : ''}${where} "${a.title}" while deleting ${subject}.` });
     }
 
@@ -217,7 +227,7 @@ export async function executeDeletePlan(kind: Kind, id: string, body: unknown, a
       await recordAudit(tx, { ...actor, action: 'Deleted FAQ Entries', entityType: 'Faq', entityId: id, details: `Admin ${actor.userName} deleted ${n(faqIds.length, 'FAQ entry', 'FAQ entries')} of ${subject}: ${(plan.removed.find((r) => r.key === 'faqs')?.items ?? []).map((f) => `"${f.label}"`).join(', ').slice(0, 1500)}.` });
     }
 
-    const summary = `${n(kept.length, 'article')} kept${kind === 'sport' && target ? ` (moved to ${target.name})` : ''}, ${n(toDelete.length, 'article')} deleted, ${n(faqIds.length, 'FAQ entry', 'FAQ entries')} deleted`;
+    const summary = `${n(kept.length, 'article')} kept${kind === 'sport' && target ? ` (moved to ${target.name}${targetGroup ? ` › ${targetGroup.name}` : ''})` : ''}, ${n(toDelete.length, 'article')} deleted, ${n(faqIds.length, 'FAQ entry', 'FAQ entries')} deleted`;
     if (kind === 'event' || kind === 'edition') {
       const { event, edition } = await loadEventTarget(tx, kind, id);
       if (kind === 'event') {
@@ -273,7 +283,7 @@ export async function executeDeletePlan(kind: Kind, id: string, body: unknown, a
       deleted: toDelete.length,
       faqsDeleted: faqIds.length,
       removed: Object.fromEntries(plan.removed.filter((r) => r.key !== 'faqs').map((r) => [r.key, r.items.length])),
-      movedTo: target?.name ?? null,
+      movedTo: target ? `${target.name}${targetGroup ? ` › ${targetGroup.name}` : ''}` : null,
       goneFromSite,
       // Event/edition clients read these names.
       detached: kept.length - Object.values(actions).filter((v) => v === 'unpublish').length,

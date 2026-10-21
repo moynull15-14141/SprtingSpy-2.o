@@ -26,6 +26,8 @@ export interface SearchQuery {
   /** PHASE M: '' (all), 'article' or 'event'. Public search only. */
   kind: SearchKind | '';
   sport: string;
+  /** CMS search only: a group (discipline) slug of `sport`. */
+  group?: string;
   type: string;
   author: string;
   date: DateRange | '';
@@ -93,6 +95,10 @@ export function parseSearchQuery(raw: Raw, options: { strict: boolean; defaultLi
         break;
       case 'sport':
         if (SLUG.test(input) && input.length <= 120) value.sport = input; else error = 'sport must be a sport slug.';
+        break;
+      case 'group':
+        if (options.allowStatus && SLUG.test(input) && input.length <= 120) value.group = input;
+        else error = 'group must be a group slug and is available only in CMS search.';
         break;
       case 'type':
         // PHASE R: database-backed types — validate the shape; an unknown type matches nothing.

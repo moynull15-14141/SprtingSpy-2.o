@@ -36,6 +36,7 @@ const RichTextEditor = dynamic(() => import('./editor/RichTextEditor'), {
 const EMPTY_DOC: RichDoc = { type: 'doc', content: [{ type: 'paragraph' }] };
 import { useApp } from '../../context/AppContext';
 import { selectableDisciplines } from './DisciplineManager';
+import { SportGroupPicker } from './SportGroupPicker';
 import { Article, ArticleType, SeoMetadata } from '../../types';
 import { Button } from '../ui/Button';
 import { useArticleSearch } from './useArticleSearch';
@@ -899,26 +900,34 @@ export const AdminArticles: React.FC = () => {
           {/* WORKFLOW STEP 1: SPORT */}
           <div className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2">
             <div>
-              <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-                1. Select Sport *
+              <label htmlFor="article-sport" className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
+                1. Select Sport / Group *
               </label>
-              <select
-                value={sportSlug}
-                onChange={(e) => {
-                  setSportSlug(e.target.value);
-                  // A discipline belongs to one sport: the choice is cleared, never carried to another sport.
-                  setDisciplineSlug('');
-                  setEventSlug('');
-                  setEditionYear(undefined);
+              <SportGroupPicker
+                id="article-sport"
+                label="Sport and group"
+                sports={sports}
+                groups={disciplines}
+                sportSlug={sportSlug}
+                groupSlug={inheritedDiscipline || disciplineSlug}
+                lockedGroupSlug={inheritedDiscipline || undefined}
+                onChange={(nextSport, nextGroup) => {
+                  if (nextSport !== sportSlug) {
+                    setSportSlug(nextSport);
+                    setEventSlug('');
+                    setEditionYear(undefined);
+                  }
+                  // A group belongs to one sport: a sport change always comes with that sport's group (or none).
+                  setDisciplineSlug(nextGroup);
                 }}
-                className="w-full text-xs p-2 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"
-              >
-                {sports.map((s) => (
-                  <option key={s.id} value={s.slug}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
+              />
+              {disciplineOptions.length > 0 && (inheritedDiscipline ? (
+                <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400" data-testid="article-discipline-inherited">
+                  Group follows the selected event.{disciplineSlug && disciplineSlug !== inheritedDiscipline ? ' The group this article had on its own will be cleared when you save.' : ''}
+                </p>
+              ) : (
+                <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400">Choose a group under the sport, or the sport alone if the article covers the whole sport.</p>
+              ))}
             </div>
 
             {/* WORKFLOW STEP 2: IS IT ABOUT AN EVENT? */}
@@ -952,34 +961,6 @@ export const AdminArticles: React.FC = () => {
               </div>
             </div>
           </div>
-
-          {/* DISCIPLINE (only for sports that have disciplines) */}
-          {disciplineOptions.length > 0 && (
-            <div className="min-w-0 md:w-1/2 md:pr-2">
-              <label htmlFor="article-discipline" className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-                Group (optional)
-              </label>
-              <select
-                id="article-discipline"
-                value={inheritedDiscipline || disciplineSlug}
-                disabled={!!inheritedDiscipline}
-                onChange={(e) => setDisciplineSlug(e.target.value)}
-                className="w-full text-xs p-2 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950 disabled:opacity-70"
-              >
-                <option value="">None</option>
-                {disciplineOptions.map((d) => (
-                  <option key={d.id} value={d.slug}>{d.name}{d.isActive ? '' : ' (retired)'}</option>
-                ))}
-              </select>
-              {inheritedDiscipline ? (
-                <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400" data-testid="article-discipline-inherited">
-                  Follows the selected event.{disciplineSlug && disciplineSlug !== inheritedDiscipline ? ' The group this article had on its own will be cleared when you save.' : ''}
-                </p>
-              ) : (
-                <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400">Leave empty if the article covers the whole sport.</p>
-              )}
-            </div>
-          )}
 
           {/* WORKFLOW STEP 3 & 4: EVENT & EDITION (IF APPLICABLE) */}
           {isAboutEvent && (
@@ -1374,17 +1355,18 @@ function ArticleRepository({ reloadKey, sports, authors, onView, onEdit, onRevie
   unsavedIds?: Set<string>;
 }) {
   const [q, setQ] = useState('');
-  const { currentUser, articleTypes } = useApp();
+  const { currentUser, articleTypes, disciplines } = useApp();
   const [queue, setQueue] = useState('');
   const [status, setStatus] = useState('');
   const [sport, setSport] = useState('');
+  const [group, setGroup] = useState('');
   const [type, setType] = useState('');
   const [author, setAuthor] = useState('');
   const [date, setDate] = useState('');
   const [origin, setOrigin] = useState('');
   const [sort, setSort] = useState('relevance');
   const [page, setPage] = useState(1);
-  const { data, loading, error } = useArticleSearch({ q, status, sport, type, author, date, origin, sort, page, limit: 25, reviewStatus: ['in_review','changes_requested','approved'].includes(queue) ? queue : undefined, myDrafts: queue === 'my_drafts' ? true : undefined }, { reloadKey });
+  const { data, loading, error } = useArticleSearch({ q, status, sport, group, type, author, date, origin, sort, page, limit: 25, reviewStatus: ['in_review','changes_requested','approved'].includes(queue) ? queue : undefined, myDrafts: queue === 'my_drafts' ? true : undefined }, { reloadKey });
   const set = (setter: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => { setter(e.target.value); setPage(1); };
   const filtered = !!(q || status || sport || type || author || date || origin);
 
@@ -1403,12 +1385,19 @@ function ArticleRepository({ reloadKey, sports, authors, onView, onEdit, onRevie
             {['draft', 'preview', 'scheduled', 'published', 'archived'].map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </label>
-        <label className="text-[11px] font-semibold text-stone-500 dark:text-stone-400">Sport
-          <select value={sport} onChange={set(setSport)} className={`mt-1 block ${filterClass}`}>
-            <option value="">All sports</option>
-            {sports.map((s) => <option key={s.id} value={s.slug}>{s.name}</option>)}
-          </select>
-        </label>
+        <div className="min-w-44 text-[11px] font-semibold text-stone-500 dark:text-stone-400">
+          <span id="article-filter-sport-label">Sport / Group</span>
+          <SportGroupPicker
+            className="mt-1 font-normal"
+            label="Filter by sport or group"
+            sports={sports}
+            groups={disciplines}
+            sportSlug={sport}
+            groupSlug={group}
+            emptyLabel="All sports"
+            onChange={(nextSport, nextGroup) => { setSport(nextSport); setGroup(nextGroup); setPage(1); }}
+          />
+        </div>
         <label className="text-[11px] font-semibold text-stone-500 dark:text-stone-400">Type
           <select value={type} onChange={set(setType)} className={`mt-1 block ${filterClass}`}>
             <option value="">All types</option>
@@ -1440,7 +1429,7 @@ function ArticleRepository({ reloadKey, sports, authors, onView, onEdit, onRevie
             <option value="oldest">Oldest</option>
           </select>
         </label>
-        {filtered && <button type="button" onClick={() => { setQ(''); setStatus(''); setSport(''); setType(''); setAuthor(''); setDate(''); setOrigin(''); setSort('relevance'); setPage(1); }} className="pb-2 text-xs font-semibold text-amber-700 hover:underline dark:text-amber-500">Clear</button>}
+        {filtered && <button type="button" onClick={() => { setQ(''); setStatus(''); setSport(''); setGroup(''); setType(''); setAuthor(''); setDate(''); setOrigin(''); setSort('relevance'); setPage(1); }} className="pb-2 text-xs font-semibold text-amber-700 hover:underline dark:text-amber-500">Clear</button>}
       </div>
 
       <p className="text-[11px] text-stone-500 dark:text-stone-400" aria-live="polite">

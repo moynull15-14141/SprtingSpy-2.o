@@ -39,6 +39,8 @@ export interface CmsArticleSearchParams {
   q?: string;
   status?: string;
   sport?: string;
+  /** A group of `sport`. */
+  group?: string;
   type?: string;
   author?: string;
   date?: string;

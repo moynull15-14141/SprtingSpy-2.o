@@ -242,7 +242,8 @@ try {
   const sportDialog = p.getByTestId('delete-dialog'); await sportDialog.getByText(`${fx} s3-live`).waitFor();
   await sportDialog.getByLabel('Unpublish and keep as draft').check();
   assert(await sportDialog.getByTestId('dd-confirm').isDisabled(), 'Delete waits for the target sport');
-  await sportDialog.getByTestId('dd-move-to').selectOption(S);
+  await sportDialog.locator('#dd-move-to').click();
+  await sportDialog.locator(`#dd-move-to-tree [data-value="${S}"]`).click();
   await sportDialog.getByText(`→ /${S}/s3-draft/`).waitFor();
   await sportDialog.getByTestId('dd-confirm').click();
   await p.getByText(new RegExp(`Deleted sport "${fx} UI Sport"`)).waitFor();

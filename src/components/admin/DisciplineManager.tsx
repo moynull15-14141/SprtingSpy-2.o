@@ -6,8 +6,9 @@
  * part of the sport's own Save).
  *
  * Two levels only: Sport → Group. A group belongs directly to one sport and
- * cannot contain another group; it is never a sport and does not appear in
- * the sports list or the site navigation. "Group" is the word shown to
+ * cannot contain another group; it is never a sport (the sports list shows it
+ * beneath its sport, as a group row) and does not appear in the site
+ * navigation. "Group" is the word shown to
  * people; the model, API and fields keep their earlier name (discipline).
  */
 import React, { useState } from 'react';

@@ -12,7 +12,7 @@ export type SiteArea = (typeof SITE_AREAS)[number];
 // ── Homepage ──
 export type AutoSource =
   | { kind: 'latest' }
-  | { kind: 'sport'; value: string }
+  | { kind: 'sport'; value: string } // "<sportSlug>" or "<sportSlug>/<groupSlug>" (one group of the sport)
   | { kind: 'event'; value: string } // "<sportSlug>/<eventSlug>"
   | { kind: 'type'; value: string }; // article type (category)
 

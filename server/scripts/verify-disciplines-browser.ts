@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
-import { chromium, type Browser, type Page } from 'playwright-core';
+import { chromium, type Browser, type Locator, type Page } from 'playwright-core';
 import { prisma } from '../db';
 import { checkDatabaseUrlIsLocalDev } from '../dbSafety';
 import { hashPassword } from '../password';
@@ -39,6 +39,8 @@ const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
 child.stdout.on('data', (c) => { output += c; }); child.stderr.on('data', (c) => { output += c; });
 let checks = 0; const pass = (m: string) => { checks++; console.log(`PASS ${m}`); };
 /** Waits until the database shows what the screen just saved. */
+/** Values of the groups listed under one sport in an open Sport / Group picker. */
+const groupsUnder = (tree: Locator, sport: string) => tree.locator(`[data-value^="${sport}/"]`).evaluateAll((els) => els.map((e) => e.getAttribute('data-value')));
 async function until<T>(read: () => Promise<T>, ok: (value: T) => boolean, what: string): Promise<T> {
   for (let i = 0; i < 60; i++) { const value = await read(); if (ok(value)) return value; await new Promise((r) => setTimeout(r, 250)); }
   throw new Error(`Timed out waiting for: ${what}`);
@@ -70,7 +72,7 @@ try {
     await page.goto(`${base}/admin/#${desk}`);
     await page.getByRole('textbox', { name: 'Email' }).fill(`${userId}@example.test`);
     await page.getByRole('textbox', { name: 'Password' }).fill(password);
-    await page.getByRole('button', { name: 'Sign In' }).click();
+    await page.getByRole('button', { name: 'Sign In', exact: true }).click();
     return page;
   };
 
@@ -168,24 +170,37 @@ try {
   assert.deepEqual((await disciplinesOfA()).map((d) => [d.slug, d.name, d.isVisible, d.isActive]), [['running', 'Running', true, true], ['throwing', 'Throwing', true, false]]);
   const actions = (await prisma.auditLog.findMany({ where: { userId: adminId }, select: { action: true } })).map((l) => l.action);
   for (const action of ['Created Group', 'Updated Group', 'Deleted Group']) assert(actions.includes(action), `${action} is in the audit log`);
-  assert.equal(await cms.locator('tbody tr', { hasText: 'Running' }).count(), 0, 'a discipline is not listed as a sport');
+  assert.equal(await cms.locator('tbody tr[data-sport-row]', { hasText: 'Running' }).count(), 0, 'a discipline is not listed as a sport');
+  // The sports list shows the groups beneath their sport as tree rows; they fold away and open the group editor.
+  const groupRows = cms.locator(`tbody tr[data-group-row^="${A}/"]`);
+  assert.deepEqual(await groupRows.evaluateAll((rows) => rows.map((r) => r.getAttribute('data-group-row'))), [`${A}/running`, `${A}/throwing`]);
+  assert.equal(await groupRows.first().getByText('Group', { exact: true }).count(), 1, 'a group row is marked as a group');
+  await cms.getByRole('button', { name: `Hide the groups of ${fx} Athletics` }).click();
+  assert.equal(await groupRows.count(), 0);
+  await cms.getByRole('button', { name: `Show the groups of ${fx} Athletics` }).click();
+  await groupRows.first().getByRole('button', { name: 'Edit Running' }).click();
+  await cms.getByTestId('group-editor').waitFor();
+  await cms.getByTestId('group-editor').getByRole('button', { name: `Back to ${fx} Athletics` }).last().click();
+  await manager.locator('[data-discipline="running"]').waitFor();
   assert.equal(await prisma.sport.count({ where: { slug: { in: ['running', 'throwing', 'high-jump'] } } }), 0);
   assert(!/discipline/i.test(await manager.innerText()), 'the section says Group everywhere');
   assert.equal(await manager.locator('[data-discipline] [data-discipline], [data-discipline] input[id^="new-"]').count(), 0, 'a group row offers no way to add a group inside it');
   pass('Admin reorders, renames (name and slug), hides/shows, retires/reactivates and deletes an unused group; each change is audited; a group never becomes a sport');
 
-  // ── Event form: optional selector, active disciplines of the event's sport ──
+  // ── Event form: one Sport / Group tree picker; the sport's active groups open beneath it ──
   await cms.goto(`${base}/admin/#events`);
   await cms.locator('tr', { hasText: `${fx} Open` }).getByRole('button', { name: 'Edit', exact: true }).first().click();
-  const eventSelect = cms.locator('#event-discipline');
-  await eventSelect.waitFor();
-  assert.deepEqual(await eventSelect.locator('option').allTextContents(), ['None (whole sport, or several groups)', 'Running'], 'only active disciplines of this sport are offered');
-  assert.equal(await eventSelect.inputValue(), '');
-  assert.equal((await cms.locator('label[for="event-discipline"]').innerText()).trim(), 'Group (optional)');
-  await eventSelect.selectOption('running');
+  const eventPicker = cms.locator('#event-editor-field-3');
+  await eventPicker.waitFor();
+  assert.equal((await cms.locator('label[for="event-editor-field-3"]').innerText()).trim(), 'Sport / Group *');
+  assert.equal(await eventPicker.getAttribute('data-value'), A, 'the event has no group yet');
+  await eventPicker.click();
+  assert.deepEqual(await groupsUnder(cms.locator('#event-editor-field-3-tree'), A), [`${A}/running`], 'only active disciplines of this sport are offered');
+  await cms.locator(`#event-editor-field-3-tree [data-value="${A}/running"]`).click();
+  assert.equal(await eventPicker.getAttribute('data-value'), `${A}/running`);
   await cms.getByRole('button', { name: 'Save Updates' }).click();
   await until(() => prisma.sportEvent.findUniqueOrThrow({ where: { id: `${fx}-event` } }), (e) => e.disciplineSlug === 'running', 'the event got its discipline');
-  pass('Event form: the selector offers "None" and the active groups of the event\'s sport (a retired one is not offered); the choice is saved');
+  pass('Event form: the Sport / Group picker offers the active groups under the event\'s sport (a retired one is not offered); the choice is saved');
 
   // ── Sport form again: a group in use opens the guided Delete dialog, which lists what loses it; Cancel keeps everything ──
   await cms.goto(`${base}/admin/#sports`);
@@ -213,28 +228,36 @@ try {
   // ── Article form (the one existing editor): optional selector; follows the event; cleared with the sport ──
   await cms.goto(`${base}/admin/#articles`);
   await cms.locator('tr', { hasText: `${fx} training guide` }).getByRole('button', { name: 'Edit', exact: true }).click();
-  const articleSelect = cms.locator('#article-discipline');
-  await articleSelect.waitFor();
-  assert.deepEqual(await articleSelect.locator('option').allTextContents(), ['None', 'Running']);
-  assert.equal((await cms.locator('label[for="article-discipline"]').innerText()).trim(), 'Group (optional)');
-  assert.equal(await articleSelect.inputValue(), '', 'an existing article has no discipline until someone chooses one');
-  assert.equal(await articleSelect.isDisabled(), false);
-  // Inside the event that now has "Running" the article follows it and the selector is locked.
+  const articlePicker = cms.locator('#article-sport');
+  const articleTree = cms.locator('#article-sport-tree');
+  await articlePicker.waitFor();
+  assert.equal((await cms.locator('label[for="article-sport"]').innerText()).trim(), '1. Select Sport / Group *');
+  assert.equal(await articlePicker.getAttribute('data-value'), A, 'an existing article has no discipline until someone chooses one');
+  await articlePicker.click();
+  assert.deepEqual(await groupsUnder(articleTree, A), [`${A}/running`]);
+  await cms.keyboard.press('Escape');
+  // Inside the event that now has "Running" the article follows it; the sport's other groups are locked.
   await cms.getByRole('radio', { name: 'Specific Championship / Event' }).check();
   await cms.locator('select', { has: cms.locator('option', { hasText: '-- Choose Event --' }) }).selectOption(`${fx}-open`);
   await cms.getByTestId('article-discipline-inherited').waitFor();
-  assert.equal(await articleSelect.isDisabled(), true); assert.equal(await articleSelect.inputValue(), 'running');
+  assert.equal(await articlePicker.getAttribute('data-value'), `${A}/running`);
   // Back to a general article: free choice again; saved with the article.
   await cms.getByRole('radio', { name: /General Sport Guide/ }).check();
-  assert.equal(await articleSelect.isDisabled(), false); assert.equal(await articleSelect.inputValue(), '');
-  await articleSelect.selectOption('running');
+  assert.equal(await articlePicker.getAttribute('data-value'), A);
+  await articlePicker.click();
+  await articleTree.locator(`[data-value="${A}/running"]`).click();
+  assert.equal(await articlePicker.getAttribute('data-value'), `${A}/running`);
   await cms.getByRole('button', { name: 'Save draft' }).click();
   const saved = await until(() => prisma.article.findUniqueOrThrow({ where: { id: `${fx}-article` } }), (a) => a.disciplineSlug === 'running', 'the article got its discipline');
   assert.deepEqual([saved.status, saved.sportSlug, saved.eventSlug, saved.slug], ['draft', A, null, `${fx}-guide`], 'status, sport and URL parts are unchanged');
   // Another sport: the choice is cleared, and that sport has no disciplines to offer.
-  await cms.locator('select', { has: cms.locator('option', { hasText: `${fx} Cycling` }) }).first().selectOption(B);
-  await articleSelect.waitFor({ state: 'detached' });
-  pass('Article form: optional selector with the sport\'s active groups; locked to the event\'s group inside an event; saved with a draft without changing its status or URL; cleared when the sport changes');
+  await articlePicker.click();
+  await articleTree.locator(`[data-value="${B}"]`).click();
+  assert.equal(await articlePicker.getAttribute('data-value'), B);
+  await articlePicker.click();
+  assert.deepEqual(await groupsUnder(articleTree, B), []);
+  await cms.keyboard.press('Escape');
+  pass('Article form: Sport / Group picker with the sport\'s active groups; follows the event\'s group inside an event; saved with a draft without changing its status or URL; cleared when the sport changes');
 
   // ── An Editor sees the list but cannot manage it ──
   const editorPage = await signIn(editorId, 'sports');

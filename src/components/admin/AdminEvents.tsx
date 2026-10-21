@@ -12,6 +12,7 @@ import { findRecoverable, forgetLocal, loadNewDraft, type Recoverable } from '..
 import { AutosaveStatus, DraftRecoveryBanner, StaleSaveWarning } from './autosave/AutosaveUI';
 import { useApp } from '../../context/AppContext';
 import { selectableDisciplines } from './DisciplineManager';
+import { SportGroupPicker } from './SportGroupPicker';
 import { Button } from '../ui/Button';
 import { EDITION_STATUSES, EditionStatus, EventEdition, SportEvent, type SeoMetadata, type SportEventFieldDefinition, type SportEventFieldValues } from '../../types';
 import { EMPTY_SEO_DRAFT, RecordList, SeoFields, cleanRecords, draftToSeo, seoToDraft, type RecordField, type SeoDraft } from './EntityFields';
@@ -339,12 +340,12 @@ export const AdminEvents: React.FC = () => {
     setEventRecovery(null);
   };
 
-  const changeEventSport = (slug: string) => {
-    if (slug === eventSportSlug) return;
+  const changeEventSport = (slug: string, group = '') => {
+    if (slug === eventSportSlug) { setEventDiscipline(group); return; }
     if (Object.keys(eventValues).length && !window.confirm('Changing Sport clears this Event’s sport-specific values. Continue?')) return;
     setEventSportSlug(slug);
     // A discipline belongs to one sport: the choice is cleared, never carried to another sport.
-    setEventDiscipline('');
+    setEventDiscipline(group);
     setEventValues({});
     setEventValuesDirty(true);
   };
@@ -714,35 +715,20 @@ export const AdminEvents: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label htmlFor="event-editor-field-3" className="block font-semibold mb-1">Sport *</label>
-                  <select id="event-editor-field-3"
-                    value={eventSportSlug}
-                    onChange={(e) => changeEventSport(e.target.value)}
-                    className="w-full p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"
-                  >
-                    {sports.map((s) => (
-                      <option key={s.id} value={s.slug}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
+                  <label htmlFor="event-editor-field-3" className="block font-semibold mb-1">Sport / Group *</label>
+                  <SportGroupPicker
+                    id="event-editor-field-3"
+                    label="Sport and group"
+                    sports={sports}
+                    groups={disciplines}
+                    sportSlug={eventSportSlug}
+                    groupSlug={eventDiscipline}
+                    onChange={changeEventSport}
+                  />
+                  {eventDisciplineOptions.length > 0 && (
+                    <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400">Choose a group under the sport, or the sport alone (whole sport, or several groups). The event&apos;s articles follow this choice.</p>
+                  )}
                 </div>
-                {eventDisciplineOptions.length > 0 && (
-                  <div>
-                    <label htmlFor="event-discipline" className="block font-semibold mb-1">Group (optional)</label>
-                    <select id="event-discipline"
-                      value={eventDiscipline}
-                      onChange={(e) => setEventDiscipline(e.target.value)}
-                      className="w-full p-2 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950"
-                    >
-                      <option value="">None (whole sport, or several groups)</option>
-                      {eventDisciplineOptions.map((d) => (
-                        <option key={d.id} value={d.slug}>{d.name}{d.isActive ? '' : ' (retired)'}</option>
-                      ))}
-                    </select>
-                    <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400">The event&apos;s articles follow this choice.</p>
-                  </div>
-                )}
               </div>
 
               {editingEventId && (

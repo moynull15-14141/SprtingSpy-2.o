@@ -40,6 +40,8 @@ export interface ArticleSearchParams {
   /** `public` enforces publication visibility; `staff` is for authorized CMS callers only. */
   scope: SearchScope;
   sport?: string;
+  /** A group of `sport`: the article's own group, or (when it has none) its event's group. */
+  group?: string;
   type?: string;
   authorId?: string;
   ownerUserId?: string;
@@ -118,6 +120,9 @@ function filters(p: ArticleSearchParams): Prisma.Sql[] {
     where.push(Prisma.sql`a."status"::text = ${p.status}`);
   }
   if (p.sport) where.push(Prisma.sql`a."sportSlug" = ${p.sport}`);
+  // Same membership rule as the public group page (disciplineArticleScope in services/public/content.ts).
+  if (p.sport && p.group) where.push(Prisma.sql`(a."disciplineSlug" = ${p.group} OR (a."disciplineSlug" IS NULL AND EXISTS (
+      SELECT 1 FROM "SportEvent" ge WHERE ge."sportSlug" = a."sportSlug" AND ge."slug" = a."eventSlug" AND ge."disciplineSlug" = ${p.group})))`);
   if (p.type) where.push(Prisma.sql`a."articleType" = ${p.type}`);
   if (p.authorId) where.push(Prisma.sql`a."authorId" = ${p.authorId}`);
   if (p.ownerUserId) where.push(Prisma.sql`EXISTS (SELECT 1 FROM "Author" own WHERE own."id" = a."authorId" AND own."userId" = ${p.ownerUserId})`);

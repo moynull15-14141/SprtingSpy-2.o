@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { Button } from '../ui/Button';
+import { SportGroupPicker } from './SportGroupPicker';
 
 export type DeleteKind = 'event' | 'edition' | 'sport' | 'group';
 type Action = 'unpublish' | 'delete';
@@ -31,7 +32,7 @@ const openLink = (id: string) => <a href={`/admin/preview/${id}/`} target="_blan
  * published and scheduled ones need a choice when their address changes.
  */
 export function DeleteDependentsDialog({ kind, id, onClose, onDeleted }: { kind: DeleteKind; id: string; onClose: () => void; onDeleted: (message: string) => void }) {
-  const { apiCall, refreshData } = useApp();
+  const { apiCall, refreshData, disciplines } = useApp();
   const [plan, setPlan] = useState<Plan | null>(null);
   const [loadError, setLoadError] = useState('');
   const [error, setError] = useState('');
@@ -65,7 +66,7 @@ export function DeleteDependentsDialog({ kind, id, onClose, onDeleted }: { kind:
   const missingTarget = needsTarget && !moveTo;
   const noTarget = kind === 'sport' && !!plan && !plan.moveTargets?.length && keptCount > 0;
   const setAll = (action: Action) => setActions(Object.fromEntries(published.map((a) => [a.id, action])));
-  const newPath = (a: Plan['articles'][number]) => a.newPath ?? (moveTo ? `/${moveTo}/${a.slug}/` : null);
+  const newPath = (a: Plan['articles'][number]) => a.newPath ?? (moveTo ? `/${moveTo.split('/')[0]}/${a.slug}/` : null);
 
   async function confirm() {
     if (!plan || busy || missingChoice || missingTarget) return;
@@ -123,13 +124,16 @@ export function DeleteDependentsDialog({ kind, id, onClose, onDeleted }: { kind:
 
           {needsTarget && <section className={section} aria-labelledby="dd-move"><label id="dd-move" htmlFor="dd-move-to" className="font-semibold">Move the {plural(keptCount, 'kept article')} to *</label>
             {noTarget ? <p role="alert" className="mt-2 text-xs text-rose-700 dark:text-rose-400">There is no other sport to keep them in. Create one first, or choose Delete for every published article and delete the drafts separately.</p>
-              : <select id="dd-move-to" value={moveTo} onChange={(e) => setMoveTo(e.target.value)} className="mt-2 w-full rounded border border-stone-300 bg-white p-2 text-xs dark:border-stone-700 dark:bg-stone-900" data-testid="dd-move-to"><option value="">Choose a sport</option>{plan.moveTargets!.map((s) => <option key={s.slug} value={s.slug}>{s.name}{s.isVisible ? '' : ' (hidden)'}</option>)}</select>}
+              : <SportGroupPicker id="dd-move-to" className="mt-2" label="Sport or group that keeps the articles" emptyLabel="Choose a sport or group"
+                  sports={plan.moveTargets!.map((s) => ({ id: s.slug, slug: s.slug, name: `${s.name}${s.isVisible ? '' : ' (hidden)'}` }))} groups={disciplines}
+                  sportSlug={moveTo.split('/')[0] ?? ''} groupSlug={moveTo.split('/')[1] ?? ''}
+                  onChange={(sport, group) => setMoveTo(group ? `${sport}/${group}` : sport)} />}
             <p className="mt-1 text-xs text-stone-500">{plan.keptNote}</p></section>}
 
           {error && <div role="alert" className="mt-4 rounded border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200">{error}{/changed/i.test(error) && <button type="button" className="ml-2 font-semibold underline" onClick={() => setReloadKey((k) => k + 1)}>Reload list</button>}</div>}
         </>}
         <div className="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-stone-200 pt-4 dark:border-stone-800">
-          {(missingChoice || missingTarget) && <p className="mr-auto text-xs text-amber-700 dark:text-amber-400">{missingChoice ? 'Choose an option for every published article.' : 'Choose the sport that keeps the articles.'}</p>}
+          {(missingChoice || missingTarget) && <p className="mr-auto text-xs text-amber-700 dark:text-amber-400">{missingChoice ? 'Choose an option for every published article.' : 'Choose the sport or group that keeps the articles.'}</p>}
           <Button type="button" variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
           <Button type="button" variant="danger" onClick={() => void confirm()} disabled={!plan || missingChoice || missingTarget || busy} isLoading={busy} data-testid="dd-confirm">Delete {kind}</Button>
         </div>

@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
-import { chromium } from 'playwright-core';
+import { chromium, type Page } from 'playwright-core';
 import { prisma } from '../db';
 import { checkDatabaseUrlIsLocalDev } from '../dbSafety';
 import { hashPassword } from '../password';
@@ -17,6 +17,8 @@ const fixture = `e3-${crypto.randomUUID()}`;
 const secondSlug = `${fixture}-other`;
 const password = `Test-${crypto.randomUUID()}`;
 const adminId = `${fixture}-admin`, editorId = `${fixture}-editor`;
+/** The Sport / Group picker (a tree dropdown): opens it and chooses the entry with this value ("sport" or "sport/group"). */
+const choosePicker = async (page: Page, id: string, value: string) => { await page.locator(`#${id}`).click(); await page.locator(`#${id}-tree [data-value="${value}"]`).click(); };
 const hash = (rows: unknown) => crypto.createHash('sha256').update(JSON.stringify(rows)).digest('hex');
 const snapshot = async () => ({
   sports: hash(await prisma.sport.findMany({ orderBy: { id: 'asc' } })),
@@ -75,7 +77,7 @@ try {
 
     await page.getByRole('button', { name: 'Events & Editions', exact: true }).click();
     await page.getByRole('button', { name: '+ New Permanent Event' }).click();
-    await page.locator('#event-editor-field-3').selectOption(secondSlug);
+    await choosePicker(page, 'event-editor-field-3', secondSlug);
     await page.locator('#event-editor-field-1').fill('E3 Generic Event');
     await page.locator('#event-editor-field-2').fill(`${secondSlug}-event`);
     assert.equal(await page.getByText('Sport-specific Event details').count(), 0);
@@ -130,7 +132,7 @@ try {
 
     await page.getByRole('button', { name: 'Events & Editions', exact: true }).click();
     await page.getByRole('button', { name: '+ New Permanent Event' }).click();
-    await page.locator('#event-editor-field-3').selectOption(fixture);
+    await choosePicker(page, 'event-editor-field-3', fixture);
     await page.locator('#event-dynamic-surface').waitFor();
     await page.locator('#event-editor-field-1').fill('E3 Fixture Event');
     await page.locator('#event-editor-field-2').fill(`${fixture}-event`);
@@ -161,11 +163,11 @@ try {
 
     await page.getByRole('row').filter({ hasText: 'E3 Fixture Event' }).getByRole('button', { name: 'Edit', exact: true }).click();
     page.once('dialog', (dialog) => dialog.dismiss());
-    await page.locator('#event-editor-field-3').selectOption(secondSlug);
-    assert.equal(await page.locator('#event-editor-field-3').inputValue(), fixture);
+    await choosePicker(page, 'event-editor-field-3', secondSlug);
+    assert.equal(await page.locator('#event-editor-field-3').getAttribute('data-value'), fixture);
     page.once('dialog', (dialog) => dialog.accept());
-    await page.locator('#event-editor-field-3').selectOption(secondSlug);
-    assert.equal(await page.locator('#event-editor-field-3').inputValue(), secondSlug);
+    await choosePicker(page, 'event-editor-field-3', secondSlug);
+    assert.equal(await page.locator('#event-editor-field-3').getAttribute('data-value'), secondSlug);
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     pass('Sport switch warns; dismissal preserves values and acceptance clears incompatible draft values');
 

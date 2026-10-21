@@ -124,14 +124,33 @@ the existing event and article audit entries.
   action is saved at once and audited; it is not part of the sport's own Save.
   The list shows how many events and articles use each group, and Delete
   is disabled while any do. Editors and Authors see the list only. A
-  group never appears in the sports list or the site navigation.
-- **Events → event form → Group (optional).** Shown when the event's
-  sport has groups. Offers "None" and the active groups of that
-  sport, plus the event's own one if it was retired since. Changing the sport
-  clears the choice.
-- **Articles → the article editor → Group (optional).** Same options.
-  Inside an event that has a group the selector is locked to it
-  ("Follows the selected event"). Changing the sport clears the choice.
+  group never appears in the site navigation.
+- **Sports list.** Each sport's groups are shown beneath it as tree rows
+  (├ / └, order `sport.group`, a "Group" mark), never as sports. The sport's
+  "N groups" button folds them away. A group row has its visibility toggle
+  and View, Edit (opens the group editor in front of the sport form),
+  Retire/Reactivate and Delete (the guided dialog), Admin only like the
+  Groups section. Adding and reordering stay in the sport form.
+- **Sport / Group picker** (`src/components/admin/SportGroupPicker.tsx`).
+  Wherever the CMS asks for a sport, one tree-shaped dropdown lists the
+  sports; a sport's groups open beneath it when the pointer moves onto it,
+  with its ▸ toggle (touch) or the → key. Choosing the sport means the whole
+  sport (no group); choosing a group means that sport and that group. It
+  offers the active groups of each sport, plus the current one if it was
+  retired since. Changing the sport always clears the old sport's group.
+- **Events → event form → Sport / Group.**
+- **Articles → the article editor → 1. Select Sport / Group.** Inside an
+  event that has a group the article follows it ("Group follows the
+  selected event") and the sport's other groups are locked.
+- **Articles → list filter → Sport / Group.** A group filter matches the
+  articles that name the group plus the articles of its events that name
+  none (the group page's rule); CMS search parameter `group`, with `sport`.
+- **Site Experience → homepage section → Latest from a sport or group.**
+  Stored as `{ kind: 'sport', value: '<sport>' | '<sport>/<group>' }`;
+  a group uses the group page's rule.
+- **Sport delete dialog → Move the kept articles to.** A sport or one of
+  its active groups (`moveTo: '<sport>' | '<sport>/<group>'`); the moved
+  articles get that group.
 - A save sends the field only when it changed, so opening and saving existing
   content never touches a stored group, and content of sports without
   groups never sees the field.

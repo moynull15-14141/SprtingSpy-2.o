@@ -760,4 +760,4 @@ export async function getApprovedComments(articleId: string): Promise<Comment[]>
   }));
 }
 
-export { listArticles as _listArticles, countArticles as _countArticles, summarize as _summarize, summarySelect as _summarySelect, summarizeEvents as _summarizeEvents, publishedArticleWhere as _publishedArticleWhere, visibleEventWhere as _visibleEventWhere, toSport as _toSport, toEdition as _toEdition, db as _db };
+export { listArticles as _listArticles, countArticles as _countArticles, summarize as _summarize, summarySelect as _summarySelect, summarizeEvents as _summarizeEvents, publishedArticleWhere as _publishedArticleWhere, visibleEventWhere as _visibleEventWhere, disciplineArticleScope as _disciplineArticleScope, toSport as _toSport, toEdition as _toEdition, db as _db };

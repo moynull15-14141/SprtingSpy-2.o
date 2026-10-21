@@ -17,7 +17,9 @@ import { SportIconPicker } from './SportIconPicker';
 import { SportIcon } from '../ui/SportIcon';
 import { suggestSportIcons } from '../../config/sportIcons';
 import { useApp } from '../../context/AppContext';
-import { Sport } from '../../types';
+import { Sport, type Discipline } from '../../types';
+import { disciplinePath } from '../../lib/paths';
+import { stableJson } from '../../lib/drafts';
 import { Button } from '../ui/Button';
 import { EventConfigurationEditor } from './EventConfigurationEditor';
 import { DisciplineManager } from './DisciplineManager';
@@ -27,7 +29,13 @@ import { MediaImageField } from './media/MediaShared';
 import { SeoFields, seoToDraft, draftToSeo, EMPTY_SEO_DRAFT, type SeoDraft } from './EntityFields';
 
 export const AdminSports: React.FC = () => {
-  const { sports, events, mediaItems, disciplines, addSport, updateSport, navigate } = useApp();
+  const { sports, events, mediaItems, disciplines, addSport, updateSport, navigate, apiCall, refreshData, currentUser } = useApp();
+  const canManageGroups = currentUser.role === 'Admin';
+  // The list shows each sport's groups beneath it as a tree; a sport's group button folds them away.
+  const [foldedSports, setFoldedSports] = useState<Set<string>>(new Set());
+  const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null);
+  const [groupBusy, setGroupBusy] = useState(false);
+  const groupsOf = (sportSlug: string) => disciplines.filter((d) => d.sportSlug === sportSlug).sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
   const [isCreating, setIsCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [configurationSportSlug, setConfigurationSportSlug] = useState<string | null>(null);
@@ -96,7 +104,8 @@ export const AdminSports: React.FC = () => {
   });
   const storedSportValues = (s: Sport): Record<string, unknown> => ({ name: s.name, slug: s.slug, tagline: s.tagline, description: s.description, order: s.order, isVisible: s.isVisible, icon: s.icon ?? null, heroImage: s.heroImage || null, featuredEventIds: s.featuredEventIds, faqSchemaEnabled: !!s.faqSchemaEnabled, seo: s.seo });
   // Typed but not yet saved in the sport form (an untouched icon is not a change: it is only suggested).
-  const sportDirty = !!editingSport && Object.entries(sportFormValues()).some(([k, v]) => (k !== 'icon' || icon !== null) && JSON.stringify(v) !== JSON.stringify(storedSportValues(editingSport)[k]));
+  // Compared by content, not key order: stored JSON (jsonb) comes back with its keys in another order than the form builds them.
+  const sportDirty = !!editingSport && Object.entries(sportFormValues()).some(([k, v]) => (k !== 'icon' || icon !== null) && stableJson(v) !== stableJson(storedSportValues(editingSport)[k]));
   const [groupDirty, setGroupDirty] = useState(false);
   const unsaved = (isCreating && sportDirty) || (!!editingGroup && groupDirty);
   // Unsaved sport or group edits are never dropped silently: the browser asks before the tab closes or
@@ -123,7 +132,7 @@ export const AdminSports: React.FC = () => {
     if (editingId && editingSport) {
       // Only the fields that changed: an ordinary save never overwrites stored values with defaults.
       const before = storedSportValues(editingSport);
-      const changes = Object.fromEntries(Object.entries(full).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(before[k])));
+      const changes = Object.fromEntries(Object.entries(full).filter(([k, v]) => stableJson(v) !== stableJson(before[k])));
       if (changes.slug && !confirm(`Change the URL from /${editingSport.slug}/ to /${slug}/? Every page under this sport moves; old URLs will redirect (301) to the new ones.`)) return;
       if (Object.keys(changes).length) updateSport(editingId, changes as Partial<Sport>);
       setFeedback(Object.keys(changes).length ? `Sport "${name}" updated.` : 'No changes to save.');
@@ -152,6 +161,24 @@ export const AdminSports: React.FC = () => {
     setFeaturedEventIds(s.featuredEventIds || []);
     setFaqSchemaEnabled(!!s.faqSchemaEnabled);
   };
+  /** Opens the sport form with this group's full editor in front of it (the same screen as Edit in the sport's Groups list). */
+  const editGroupFromList = (sport: Sport, group: Discipline) => {
+    if (unsaved && !window.confirm('You have unsaved changes on this screen. Leave without saving them?')) return;
+    startEdit(sport);
+    setGroupDirty(false);
+    setEditingGroupId(group.id);
+    // The CMS scrolls inside its own panel, so bring the editor (rendered above the list) into view once it exists.
+    setTimeout(() => document.querySelector('[data-testid="group-editor"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  };
+  /** One saved-at-once change of a group (visibility, retire/reactivate), as in the sport's Groups list. */
+  const updateGroupFromList = async (group: Discipline, body: Record<string, unknown>, done: string) => {
+    setGroupBusy(true);
+    const result = await apiCall<Discipline>(`/api/disciplines/${group.id}`, { method: 'PUT', body });
+    await refreshData();
+    setGroupBusy(false);
+    if (result.data) { setFeedback(done); setTimeout(() => setFeedback(null), 5000); }
+  };
+  const toggleFold = (slug: string) => setFoldedSports((prev) => { const next = new Set(prev); if (next.has(slug)) next.delete(slug); else next.add(slug); return next; });
   const sportEvents = events.filter((e) => e.sportSlug === (editingSport?.slug ?? slug));
   const toggleFeatured = (id: string) => setFeaturedEventIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : ids.length >= 12 ? ids : [...ids, id]));
   const moveFeatured = (id: string, dir: -1 | 1) => setFeaturedEventIds((ids) => {
@@ -162,6 +189,7 @@ export const AdminSports: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {deletingGroupId && <DeleteDependentsDialog kind="group" id={deletingGroupId} onClose={() => setDeletingGroupId(null)} onDeleted={(message) => { setDeletingGroupId(null); setFeedback(message); setTimeout(() => setFeedback(null), 8000); }} />}
       {deletingSportId && <DeleteDependentsDialog kind="sport" id={deletingSportId} onClose={() => setDeletingSportId(null)} onDeleted={(message) => { setDeletingSportId(null); if (editingId === deletingSportId) resetForm(); setFeedback(message); setTimeout(() => setFeedback(null), 8000); }} />}
       <div className="flex items-center justify-between pb-4 border-b border-stone-200 dark:border-stone-800">
         <div>
@@ -169,7 +197,7 @@ export const AdminSports: React.FC = () => {
             Sports ({sports.length})
           </h2>
           <p className="text-xs text-stone-500 mt-1 dark:text-stone-400">
-            Catalog of sports hubs. A sport can have its own groups (edit the sport to manage them).
+            Catalog of sports hubs. Each sport's groups are listed beneath it; add or reorder groups by editing the sport.
           </p>
         </div>
         {!isCreating && (
@@ -344,13 +372,23 @@ export const AdminSports: React.FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-100 dark:divide-stone-800">
-            {sports.map((sport) => (
-              <tr key={sport.id} className="hover:bg-stone-50 dark:hover:bg-stone-900/40">
+            {sports.map((sport) => {
+              const groups = groupsOf(sport.slug);
+              const folded = foldedSports.has(sport.slug);
+              return (
+              <React.Fragment key={sport.id}>
+              <tr className="hover:bg-stone-50 dark:hover:bg-stone-900/40" data-sport-row={sport.slug}>
                 <td className="p-3 font-mono tabular-nums">{sport.order}</td>
                 <td className="p-3">
                   <span className="mr-2 inline-flex align-middle"><SportIcon slug={sport.slug} name={sport.name} icon={sport.icon} size="sm" /></span>
                   <span className="font-semibold text-stone-900 dark:text-stone-100 mr-2">{sport.name}</span>
                   <span className="text-stone-500 font-mono text-[11px] dark:text-stone-400">/{sport.slug}</span>
+                  {groups.length > 0 && (
+                    <button type="button" onClick={() => toggleFold(sport.slug)} aria-expanded={!folded} aria-label={`${folded ? 'Show' : 'Hide'} the groups of ${sport.name}`}
+                      className="ml-2 inline-flex items-center gap-1 rounded border border-stone-300 px-1.5 py-0.5 text-[10px] font-semibold text-stone-600 hover:bg-stone-100 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800">
+                      {groups.length} {groups.length === 1 ? 'group' : 'groups'} <span aria-hidden="true">{folded ? '▸' : '▾'}</span>
+                    </button>
+                  )}
                 </td>
                 <td className="p-3 text-stone-500 max-w-xs truncate dark:text-stone-400">{sport.tagline}</td>
                 <td className="p-3">
@@ -387,7 +425,45 @@ export const AdminSports: React.FC = () => {
                   </button>
                 </td>
               </tr>
-            ))}
+              {!folded && groups.map((group, i) => (
+                <tr key={group.id} className="bg-stone-50/60 hover:bg-stone-50 dark:bg-stone-900/20 dark:hover:bg-stone-900/40" data-group-row={`${sport.slug}/${group.slug}`}>
+                  <td className="p-3 pl-5 font-mono tabular-nums text-stone-400 dark:text-stone-500">{sport.order}.{i + 1}</td>
+                  <td className="p-3 pl-6">
+                    <span aria-hidden="true" className="mr-2 font-mono text-stone-400 dark:text-stone-500">{i === groups.length - 1 ? '└' : '├'}</span>
+                    {group.icon && <span aria-hidden="true" className="mr-1.5">{group.icon}</span>}
+                    <span className="mr-2 font-semibold text-stone-800 dark:text-stone-200">{group.name}</span>
+                    <span className="font-mono text-[11px] text-stone-500 dark:text-stone-400">/{sport.slug}/{group.slug}</span>
+                    <span className="ml-2 rounded bg-stone-200 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-stone-600 dark:bg-stone-800 dark:text-stone-300">Group</span>
+                    {!group.isActive && <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-amber-800 dark:bg-amber-950 dark:text-amber-300">Retired</span>}
+                  </td>
+                  <td className="p-3 text-stone-500 max-w-xs truncate dark:text-stone-400">{group.tagline}</td>
+                  <td className="p-3">
+                    <button type="button" disabled={!canManageGroups || groupBusy}
+                      onClick={() => void updateGroupFromList(group, { isVisible: !group.isVisible }, `"${group.name}" is now ${group.isVisible ? 'hidden' : 'visible'}.`)}
+                      aria-label={`${group.isVisible ? 'Hide' : 'Show'} ${group.name}`}
+                      className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded cursor-pointer disabled:cursor-default ${group.isVisible ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300' : 'bg-stone-200 dark:bg-stone-800 text-stone-600'}`}>
+                      {group.isVisible ? 'Visible' : 'Hidden'}
+                    </button>
+                  </td>
+                  <td className="p-3 text-right space-x-2">
+                    {group.isVisible && sport.isVisible && (
+                      <button type="button" onClick={() => navigate(disciplinePath(sport.slug, group.slug))} aria-label={`View ${group.name}`} className="text-stone-600 hover:text-amber-600 dark:text-stone-400 font-semibold">View</button>
+                    )}
+                    {canManageGroups && (
+                      <>
+                        <button type="button" onClick={() => editGroupFromList(sport, group)} aria-label={`Edit ${group.name}`} className="text-amber-700 dark:text-amber-400 font-semibold hover:underline">Edit</button>
+                        <button type="button" disabled={groupBusy}
+                          onClick={() => { if (group.isActive && !window.confirm(`Retire "${group.name}"? It stays on the content that already has it, but can no longer be chosen for other events or articles.`)) return; void updateGroupFromList(group, { isActive: !group.isActive }, `"${group.name}" ${group.isActive ? 'retired' : 'reactivated'}.`); }}
+                          aria-label={`${group.isActive ? 'Retire' : 'Reactivate'} ${group.name}`} className="text-stone-600 hover:underline disabled:opacity-50 dark:text-stone-300">{group.isActive ? 'Retire' : 'Reactivate'}</button>
+                        <button type="button" onClick={() => setDeletingGroupId(group.id)} aria-label={`Delete ${group.name}`} className="text-rose-600 dark:text-rose-400 hover:underline">Delete</button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              </React.Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>

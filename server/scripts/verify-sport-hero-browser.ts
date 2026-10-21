@@ -99,7 +99,7 @@ try {
   await cms.goto(`${base}/admin/#sports`);
   await cms.getByRole('textbox', { name: 'Email' }).fill(`${adminId}@example.test`);
   await cms.getByRole('textbox', { name: 'Password' }).fill(password);
-  await cms.getByRole('button', { name: 'Sign In' }).click();
+  await cms.getByRole('button', { name: 'Sign In', exact: true }).click();
   await cms.locator('tr', { hasText: `${fx} Plain` }).getByRole('button', { name: 'Edit', exact: true }).click();
   await cms.getByTestId('sport-hero-image-pick').click();
   await cms.getByRole('dialog', { name: 'Choose an image' }).getByRole('button', { name: new RegExp(`${fx} tennis court`) }).click();
