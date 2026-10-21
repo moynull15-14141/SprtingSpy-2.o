@@ -69,7 +69,8 @@ export async function effectiveDocuments(options: { preview?: boolean } = {}): P
 /** Article ids a document depends on (must be public when published). */
 export function referencedArticleIds(area: SiteArea, doc: unknown): string[] {
   const d = doc as SiteExperienceDocs[SiteArea];
-  if (area === 'homepage') return (d as SiteExperienceDocs['homepage']).sections.flatMap((s) => ('source' in s ? s.source.articleIds : []));
+  // An automatic section keeps its earlier chosen ids (for switching back) but never shows them, as the public renderer does.
+  if (area === 'homepage') return (d as SiteExperienceDocs['homepage']).sections.flatMap((s) => ('source' in s && s.source.mode !== 'auto' ? s.source.articleIds : []));
   if (area === 'announcements') return (d as SiteExperienceDocs['announcements']).items.map((a) => a.articleId).filter(Boolean);
   if (area === 'blocks') return (d as SiteExperienceDocs['blocks']).items.map((b) => b.articleId).filter(Boolean);
   return [];

@@ -127,7 +127,7 @@ function SectionFields({ s, set, blocks }: { s: HomeSection; set: (s: HomeSectio
 }
 
 function sectionSummary(s: HomeSection): string {
-  if ('source' in s) return `${s.source.mode} · ${autoLabel(s.source.auto)}${s.source.articleIds.length ? ` · ${s.source.articleIds.length} chosen` : ''} · ${s.count}`;
+  if ('source' in s) return `${s.source.mode} · ${autoLabel(s.source.auto)}${s.source.mode !== 'auto' && s.source.articleIds.length ? ` · ${s.source.articleIds.length} chosen` : ''} · ${s.count}`;
   if (s.type === 'adSlot') return s.slot;
   if (s.type === 'block') return s.blockId || 'no block chosen';
   return 'title' in s ? s.title : '';
