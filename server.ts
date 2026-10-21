@@ -948,6 +948,20 @@ async function startServer() {
 
       // A discipline belongs to one sport: it is checked against the sport the article will have.
       const articleSportAfter = updates.sportSlug ?? existing.sportSlug;
+      // An event belongs to one sport and an edition to one event: a move to another sport (or event)
+      // that does not name the new ones clears them, instead of keeping a sport/event/edition
+      // combination that does not exist (the database refuses it).
+      if (articleSportAfter !== existing.sportSlug && !('eventSlug' in updates)) updates.eventSlug = null;
+      const articleEventAfter: string | null = 'eventSlug' in updates ? updates.eventSlug || null : existing.eventSlug;
+      if ((articleSportAfter !== existing.sportSlug || articleEventAfter !== existing.eventSlug) && !('editionYear' in updates)) updates.editionYear = null;
+      const articleEditionAfter: number | null = 'editionYear' in updates ? updates.editionYear ?? null : existing.editionYear;
+      if (articleEditionAfter !== null && !articleEventAfter) return res.status(400).json({ error: 'An edition can only be chosen together with its event.' });
+      if (articleEventAfter && (articleSportAfter !== existing.sportSlug || articleEventAfter !== existing.eventSlug || articleEditionAfter !== existing.editionYear)) {
+        const target = articleEditionAfter !== null
+          ? await prisma.eventEdition.findUnique({ where: { sportSlug_eventSlug_year: { sportSlug: articleSportAfter, eventSlug: articleEventAfter, year: articleEditionAfter } }, select: { id: true } })
+          : await prisma.sportEvent.findUnique({ where: { sportSlug_slug: { sportSlug: articleSportAfter, slug: articleEventAfter } }, select: { id: true } });
+        if (!target) return res.status(400).json({ error: articleEditionAfter !== null ? `There is no ${articleEditionAfter} edition of event "${articleEventAfter}" in sport "${articleSportAfter}".` : `There is no event "${articleEventAfter}" in sport "${articleSportAfter}".` });
+      }
       if ('disciplineSlug' in updates || articleSportAfter !== existing.sportSlug) {
         // Never carried over silently: another sport may have a discipline with the same slug.
         if (articleSportAfter !== existing.sportSlug && existing.disciplineSlug && !('disciplineSlug' in updates)) return res.status(400).json({ error: 'Clear the group (disciplineSlug: null) or choose one of the new sport when moving this article to another sport.' });

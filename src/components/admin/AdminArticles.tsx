@@ -443,8 +443,9 @@ export const AdminArticles: React.FC = () => {
       ...(editingArticle
         ? (ownDiscipline !== (editingArticle.disciplineSlug || '') || sportSlug !== editingArticle.sportSlug ? { disciplineSlug: ownDiscipline || null } : {})
         : (ownDiscipline ? { disciplineSlug: ownDiscipline } : {})),
-      eventSlug: isAboutEvent && eventSlug ? eventSlug : undefined,
-      editionYear: isAboutEvent && eventSlug && editionYear ? editionYear : undefined,
+      // An existing article sends null when it has no event/edition, so a cleared one is really cleared.
+      eventSlug: isAboutEvent && eventSlug ? eventSlug : editingArticle ? null : undefined,
+      editionYear: isAboutEvent && eventSlug && editionYear ? editionYear : editingArticle ? null : undefined,
       articleType,
       excerpt,
       body: bodyDoc,
