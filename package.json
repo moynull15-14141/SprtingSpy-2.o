@@ -98,6 +98,7 @@
     "test:allowed-origins": "tsx server/scripts/verify-allowed-origins.ts",
     "test:sport-hero-browser": "tsx server/scripts/verify-sport-hero-browser.ts",
     "media:copy-to-r2": "tsx server/scripts/media-local-to-r2.ts",
+    "media:backup:live": "tsx server/scripts/backup-media-live.ts",
     "perf:seed": "tsx server/scripts/perf-seed.ts",
     "perf:scale": "tsx server/scripts/perf-scale.ts",
     "verify:render-staging": "tsx server/scripts/verify-render-staging.ts"
