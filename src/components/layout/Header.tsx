@@ -14,7 +14,7 @@ import { useSite } from '../../context/SiteContext';
 import { BRANDING } from '../../config/branding';
 import { Button } from '../ui/Button';
 import { Avatar } from '../ui/Avatar';
-import { SportIcon } from '../ui/SportIcon';
+import { SportIcon, GroupGlyph } from '../ui/SportIcon';
 import { SiteLink } from '../site/SiteLink';
 import type { NavItem } from '../../lib/siteExperience/types';
 
@@ -23,7 +23,7 @@ const STAFF_ROLES = ['Admin', 'Editor', 'Author'];
 
 interface HeaderProps {
   /** Visible sports for the navigation menus, loaded on the server. */
-  sports: { id: string; slug: string; name: string; icon?: string | null; iconImage?: string | null; groups?: { slug: string; name: string; icon?: string | null }[] }[];
+  sports: { id: string; slug: string; name: string; icon?: string | null; iconImage?: string | null; groups?: { slug: string; name: string; icon?: string | null; iconImage?: string | null }[] }[];
   /** PHASE F.1: navigation items from the Site Experience (published, or draft in preview). */
   navigation: NavItem[];
   /** PHASE H: site name from Admin → Settings (defaults to the built-in brand). */
@@ -241,7 +241,7 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
                                   onClick={() => setIsSportsMenuOpen(false)}
                                   className="block rounded px-2 py-1 text-xs text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-950 dark:hover:text-white"
                                 >
-                                  {group.icon && <span aria-hidden="true" className="mr-1">{group.icon}</span>}{group.name}
+                                  <GroupGlyph icon={group.icon} iconImage={group.iconImage} className="mr-1" />{group.name}
                                 </Link>
                               </li>
                             ))}
@@ -504,7 +504,7 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
                           {sp.groups.map((group) => (
                             <li key={group.slug} data-group={group.slug}>
                               <Link href={`/${sp.slug}/${group.slug}/`} onClick={() => setIsMobileMenuOpen(false)} className="block py-1.5 px-2 text-xs text-stone-600 dark:text-stone-400 hover:text-amber-600">
-                                {group.icon && <span aria-hidden="true" className="mr-1">{group.icon}</span>}{group.name}
+                                <GroupGlyph icon={group.icon} iconImage={group.iconImage} className="mr-1" />{group.name}
                               </Link>
                             </li>
                           ))}

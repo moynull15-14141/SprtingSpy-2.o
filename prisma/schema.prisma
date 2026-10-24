@@ -200,6 +200,8 @@ model Discipline {
   tagline          String   @default("")
   // Icon from the curated set in src/config/sportIcons.ts; null = none shown.
   icon             String?
+  // Optional custom icon image (Media Library item, category "icon"); replaces the emoji.
+  iconMediaId      String?
   // Header image: a Media Library item (heroImage keeps the resolved URL).
   heroImage        String?
   heroMediaId      String?
@@ -208,12 +210,14 @@ model Discipline {
 
   sport     Sport        @relation(fields: [sportSlug], references: [slug])
   heroMedia MediaItem?   @relation("DisciplineHeroMedia", fields: [heroMediaId], references: [id], onDelete: Restrict)
+  iconMedia MediaItem?   @relation("DisciplineIconMedia", fields: [iconMediaId], references: [id], onDelete: Restrict)
   events    SportEvent[]
   articles  Article[]
 
   @@unique([sportSlug, slug])
   @@index([sportSlug, order])
   @@index([heroMediaId])
+  @@index([iconMediaId])
 }
 
 model SportEvent {
@@ -616,6 +620,7 @@ model MediaItem {
   sportHeroes    Sport[]        @relation("SportHeroMedia")
   sportIcons     Sport[]        @relation("SportIconMedia")
   groupHeroes    Discipline[]   @relation("DisciplineHeroMedia")
+  groupIcons     Discipline[]   @relation("DisciplineIconMedia")
   eventImages    SportEvent[]   @relation("EventFeaturedMedia")
   editionImages  EventEdition[] @relation("EditionFeaturedMedia")
   pageOgImages   Page[]         @relation("PageOgMedia")

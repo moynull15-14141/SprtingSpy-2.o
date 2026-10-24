@@ -16,3 +16,13 @@ export function SportIcon({ slug, name, icon, iconImage, size = 'md' }: { slug: 
     </span>
   );
 }
+
+/**
+ * A group's small inline icon (no badge): a custom image when set, otherwise its
+ * chosen emoji, otherwise nothing (groups may have no icon).
+ */
+export function GroupGlyph({ icon, iconImage, className = '' }: { icon?: string | null; iconImage?: string | null; className?: string }) {
+  if (iconImage) return <img src={iconImage} alt="" className={`inline-block h-4 w-4 rounded object-contain align-[-2px] ${className}`} loading="lazy" />;
+  if (icon) return <span aria-hidden="true" className={className}>{icon}</span>;
+  return null;
+}

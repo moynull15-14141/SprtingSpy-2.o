@@ -151,6 +151,9 @@ export interface Discipline {
   /** The group's own landing-page settings (same meaning as on Sport). */
   tagline: string;
   icon?: string | null;
+  /** Optional custom icon image (Media Library item, category "icon"); replaces the emoji. */
+  iconMediaId?: string | null;
+  iconImage?: string | null;
   heroImage?: string | null;
   heroMediaId?: string | null;
   featuredEventIds: string[];

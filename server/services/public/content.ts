@@ -258,9 +258,9 @@ export async function getNavSports() {
   const prisma = await db();
   const [sports, groups] = await Promise.all([
     prisma.sport.findMany({ where: { isVisible: true }, orderBy: { order: 'asc' }, select: { id: true, slug: true, name: true, icon: true, iconMediaId: true, iconMedia: { select: { url: true, variants: true } } } }),
-    prisma.discipline.findMany({ where: { isVisible: true, isActive: true, sport: { isVisible: true } }, orderBy: [{ order: 'asc' }, { name: 'asc' }], select: { sportSlug: true, slug: true, name: true, icon: true } }),
+    prisma.discipline.findMany({ where: { isVisible: true, isActive: true, sport: { isVisible: true } }, orderBy: [{ order: 'asc' }, { name: 'asc' }], select: { sportSlug: true, slug: true, name: true, icon: true, iconMedia: { select: { url: true, variants: true } } } }),
   ]);
-  return sports.map(({ iconMedia, ...sport }) => ({ ...sport, iconImage: iconImageFrom(iconMedia), groups: groups.filter((g) => g.sportSlug === sport.slug).map(({ slug, name, icon }) => ({ slug, name, icon })) }));
+  return sports.map(({ iconMedia, ...sport }) => ({ ...sport, iconImage: iconImageFrom(iconMedia), groups: groups.filter((g) => g.sportSlug === sport.slug).map((g) => ({ slug: g.slug, name: g.name, icon: g.icon, iconImage: iconImageFrom(g.iconMedia) })) }));
 }
 
 export async function getAdSlots(): Promise<AdSlotConfig[]> {
@@ -348,12 +348,13 @@ function mergeUnique(lists: ArticleSummary[][], exclude: Set<string>, limit: num
 }
 
 /** What a discipline page needs to know about its discipline (no internal fields). */
-export interface PublicDiscipline { id: string; slug: string; name: string; tagline: string; description: string; isActive: boolean; icon: string | null; heroImage: string | null; heroMediaId: string | null; featuredEventIds: string[]; seo: Sport['seo'] }
+export interface PublicDiscipline { id: string; slug: string; name: string; tagline: string; description: string; isActive: boolean; icon: string | null; iconMediaId: string | null; iconImage: string | null; heroImage: string | null; heroMediaId: string | null; featuredEventIds: string[]; seo: Sport['seo'] }
 
 /** The disciplines a visitor can browse: visible and active, of a visible sport, in display order. */
-export async function getPublicDisciplines(sportSlug: string): Promise<{ slug: string; name: string; icon: string | null }[]> {
+export async function getPublicDisciplines(sportSlug: string): Promise<{ slug: string; name: string; icon: string | null; iconImage?: string }[]> {
   const prisma = await db();
-  return prisma.discipline.findMany({ where: { sportSlug, isVisible: true, isActive: true, sport: { isVisible: true } }, orderBy: [{ order: 'asc' }, { name: 'asc' }], select: { slug: true, name: true, icon: true } });
+  const rows = await prisma.discipline.findMany({ where: { sportSlug, isVisible: true, isActive: true, sport: { isVisible: true } }, orderBy: [{ order: 'asc' }, { name: 'asc' }], select: { slug: true, name: true, icon: true, iconMedia: { select: { url: true, variants: true } } } });
+  return rows.map(({ iconMedia, ...d }) => ({ ...d, iconImage: iconImageFrom(iconMedia) }));
 }
 
 /**
@@ -381,10 +382,10 @@ export async function getDisciplineHub(sportSlug: string, disciplineSlug: string
   const sport = await getSport(sportSlug);
   if (!sport) return null;
   const prisma = await db();
-  const row = await prisma.discipline.findUnique({ where: { sportSlug_slug: { sportSlug, slug: disciplineSlug } } });
+  const row = await prisma.discipline.findUnique({ where: { sportSlug_slug: { sportSlug, slug: disciplineSlug } }, include: { iconMedia: { select: { url: true, variants: true } } } });
   if (!row || !row.isVisible) return null;
   // Only the group's own settings: nothing here is taken from the sport.
-  return buildHub(sport, { id: row.id, slug: row.slug, name: row.name, tagline: row.tagline, description: row.description, isActive: row.isActive, icon: row.icon, heroImage: row.heroImage, heroMediaId: row.heroMediaId, featuredEventIds: row.featuredEventIds, seo: row.seo as Sport['seo'] });
+  return buildHub(sport, { id: row.id, slug: row.slug, name: row.name, tagline: row.tagline, description: row.description, isActive: row.isActive, icon: row.icon, iconMediaId: row.iconMediaId, iconImage: iconImageFrom(row.iconMedia) ?? null, heroImage: row.heroImage, heroMediaId: row.heroMediaId, featuredEventIds: row.featuredEventIds, seo: row.seo as Sport['seo'] });
 }
 
 async function buildHub(sport: Sport, discipline: PublicDiscipline | null) {

@@ -29,7 +29,7 @@ import { absoluteUrl, disciplinePath, sportPath } from '../lib/paths';
 import type { getSportHub } from '../../server/services/public/content';
 import { PlacedBlocks } from '../components/site/GlobalBlocks';
 import { ResponsiveImage } from '../components/editorial/ResponsiveImage';
-import { SportIcon } from '../components/ui/SportIcon';
+import { SportIcon, GroupGlyph } from '../components/ui/SportIcon';
 
 type SportHubData = NonNullable<Awaited<ReturnType<typeof getSportHub>>>;
 
@@ -76,7 +76,7 @@ export const SportPage: React.FC<{ data: SportHubData }> = ({ data }) => {
         </li>}
         {disciplines.map((d) => (
           <li key={d.slug}>
-            <Link href={disciplinePath(sport.slug, d.slug)} aria-current={discipline?.slug === d.slug ? 'page' : undefined} className={`inline-block rounded-full border px-3 py-1 font-semibold ${discipline?.slug === d.slug ? 'border-amber-600 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300' : 'border-stone-300 text-stone-700 hover:border-amber-500 dark:border-stone-700 dark:text-stone-300'}`}>{d.icon && <span aria-hidden="true" className="mr-1">{d.icon}</span>}{d.name}</Link>
+            <Link href={disciplinePath(sport.slug, d.slug)} aria-current={discipline?.slug === d.slug ? 'page' : undefined} className={`inline-block rounded-full border px-3 py-1 font-semibold ${discipline?.slug === d.slug ? 'border-amber-600 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300' : 'border-stone-300 text-stone-700 hover:border-amber-500 dark:border-stone-700 dark:text-stone-300'}`}><GroupGlyph icon={d.icon} iconImage={d.iconImage} className="mr-1" />{d.name}</Link>
           </li>
         ))}
       </ol>
@@ -98,7 +98,7 @@ export const SportPage: React.FC<{ data: SportHubData }> = ({ data }) => {
         hero={
           <div className="max-w-3xl">
             <div className="text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-500 mb-2">
-              {discipline ? <>{discipline.icon && <span aria-hidden="true" className="mr-1.5 text-base">{discipline.icon}</span>}<Link href={sportPath(sport.slug)} className="hover:underline">{sport.name}</Link> · Group</> : <span className="inline-flex items-center gap-1.5"><SportIcon slug={sport.slug} name={sport.name} icon={sport.icon} iconImage={sport.iconImage} size="sm" />Sport hub</span>}
+              {discipline ? <><GroupGlyph icon={discipline.icon} iconImage={discipline.iconImage} className="mr-1.5 text-base" /><Link href={sportPath(sport.slug)} className="hover:underline">{sport.name}</Link> · Group</> : <span className="inline-flex items-center gap-1.5"><SportIcon slug={sport.slug} name={sport.name} icon={sport.icon} iconImage={sport.iconImage} size="sm" />Sport hub</span>}
             </div>
             <h1 className="font-serif text-3xl sm:text-4xl lg:text-5xl font-bold text-stone-900 dark:text-stone-100 leading-tight">
               {label}

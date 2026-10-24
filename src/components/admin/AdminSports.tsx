@@ -14,7 +14,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { SportIconPicker } from './SportIconPicker';
-import { SportIcon } from '../ui/SportIcon';
+import { SportIcon, GroupGlyph } from '../ui/SportIcon';
 import { suggestSportIcons } from '../../config/sportIcons';
 import { useApp } from '../../context/AppContext';
 import { Sport, type Discipline } from '../../types';
@@ -460,7 +460,7 @@ export const AdminSports: React.FC = () => {
                   <td className="p-3 pl-5 font-mono tabular-nums text-stone-400 dark:text-stone-500">{sport.order}.{i + 1}</td>
                   <td className="p-3 pl-6">
                     <span aria-hidden="true" className="mr-2 font-mono text-stone-400 dark:text-stone-500">{i === groups.length - 1 ? '└' : '├'}</span>
-                    {group.icon && <span aria-hidden="true" className="mr-1.5">{group.icon}</span>}
+                    <GroupGlyph icon={group.icon} iconImage={group.iconMediaId ? (() => { const m = mediaItems.find((mi) => mi.id === group.iconMediaId); return m ? thumbnailUrl(m) : undefined; })() : undefined} className="mr-1.5" />
                     <span className="mr-2 font-semibold text-stone-800 dark:text-stone-200">{group.name}</span>
                     <span className="font-mono text-[11px] text-stone-500 dark:text-stone-400">/{sport.slug}/{group.slug}</span>
                     <span className="ml-2 rounded bg-stone-200 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-stone-600 dark:bg-stone-800 dark:text-stone-300">Group</span>

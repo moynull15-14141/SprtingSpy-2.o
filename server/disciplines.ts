@@ -32,8 +32,8 @@ import { disciplinePath } from '../src/lib/paths';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
-const DISCIPLINE_AUDIT_FIELDS = ['sportSlug', 'slug', 'name', 'tagline', 'description', 'order', 'isVisible', 'isActive', 'icon', 'heroImage', 'heroMediaId', 'featuredEventIds', 'seo'] as const;
-const EDITABLE = ['slug', 'name', 'tagline', 'description', 'order', 'isVisible', 'isActive', 'icon', 'heroImage', 'featuredEventIds', 'seo'] as const;
+const DISCIPLINE_AUDIT_FIELDS = ['sportSlug', 'slug', 'name', 'tagline', 'description', 'order', 'isVisible', 'isActive', 'icon', 'iconMediaId', 'heroImage', 'heroMediaId', 'featuredEventIds', 'seo'] as const;
+const EDITABLE = ['slug', 'name', 'tagline', 'description', 'order', 'isVisible', 'isActive', 'icon', 'iconMediaId', 'heroImage', 'featuredEventIds', 'seo'] as const;
 
 /** The Sport editor's own rules for an icon and a Media Library image, passed in so both forms share them. */
 export interface SportFormRules {
@@ -43,6 +43,16 @@ export interface SportFormRules {
 }
 
 const flag = (value: unknown, name: string) => (value === undefined || typeof value === 'boolean' ? { valid: true } : { valid: false, error: `${name} must be true or false.` });
+
+/** A custom icon must reference a Media Library item of category "icon" (or be cleared). */
+async function iconMediaError(iconMediaId: unknown): Promise<string | null> {
+  if (iconMediaId === undefined || iconMediaId === null || iconMediaId === '') return null;
+  if (typeof iconMediaId !== 'string') return 'iconMediaId must be a Media Library id.';
+  const media = await prisma.mediaItem.findUnique({ where: { id: iconMediaId }, select: { category: true } });
+  if (!media) return 'iconMediaId must reference a Media Library item.';
+  if (media.category !== 'icon') return 'The chosen image is not a custom icon. Upload it through the icon picker.';
+  return null;
+}
 
 function payloadError(body: Record<string, unknown>, creating: boolean, rules: SportFormRules): string | null {
   return firstError(
@@ -119,6 +129,8 @@ export function disciplineRouter(getLookup: () => AuthLookup, rules: SportFormRu
     if (Object.keys(body).some((key) => key !== 'sportSlug' && !(EDITABLE as readonly string[]).includes(key))) return res.status(400).json({ error: 'Unsupported group field.' });
     const error = firstError(validateSlug(body.sportSlug, 'sportSlug')) || payloadError(body, true, rules);
     if (error) return res.status(400).json({ error });
+    const createIconErr = await iconMediaError(body.iconMediaId);
+    if (createIconErr) return res.status(400).json({ error: createIconErr });
     if (Array.isArray(body.featuredEventIds) && body.featuredEventIds.length) return res.status(400).json({ error: 'Create the group first, then choose its featured events.' });
     if (!(await rules.imageIsManaged(body.heroImage))) return res.status(400).json({ error: 'heroImage must reference a Media Library item.' });
     const sport = await prisma.sport.findUnique({ where: { slug: body.sportSlug }, select: { slug: true, name: true } });
@@ -135,6 +147,7 @@ export function disciplineRouter(getLookup: () => AuthLookup, rules: SportFormRu
         name: body.name.trim(),
         tagline: typeof body.tagline === 'string' ? body.tagline.trim() : '',
         icon: body.icon || null,
+        iconMediaId: typeof body.iconMediaId === 'string' && body.iconMediaId.trim() ? body.iconMediaId.trim() : null,
         ...(await heroOf(body.heroImage)),
         description: typeof body.description === 'string' ? body.description.trim() : '',
         order: body.order ?? (await tx.discipline.count({ where: { sportSlug: sport.slug } })) + 1,
@@ -157,11 +170,14 @@ export function disciplineRouter(getLookup: () => AuthLookup, rules: SportFormRu
     const updates = req.body as Record<string, any>;
     const error = payloadError(updates, false, rules);
     if (error) return res.status(400).json({ error });
+    const updateIconErr = await iconMediaError(updates.iconMediaId);
+    if (updateIconErr) return res.status(400).json({ error: updateIconErr });
     const data: Record<string, unknown> = {};
     for (const key of EDITABLE) if (key in updates) data[key] = updates[key];
     if (typeof data.name === 'string') data.name = data.name.trim();
     if ('tagline' in data) data.tagline = typeof data.tagline === 'string' ? data.tagline.trim() : '';
     if ('icon' in data && !data.icon) data.icon = null;
+    if ('iconMediaId' in data && !data.iconMediaId) data.iconMediaId = null;
     // The image must be a Media Library item, so its rights, alt text and sizes are tracked (as for a sport).
     if ('heroImage' in updates) {
       if (!(await rules.imageIsManaged(updates.heroImage))) return res.status(400).json({ error: 'heroImage must reference a Media Library item.' });

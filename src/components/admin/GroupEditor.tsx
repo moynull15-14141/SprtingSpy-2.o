@@ -20,7 +20,7 @@ import type { Discipline } from '../../types';
 import { suggestSportIcons } from '../../config/sportIcons';
 import { Button } from '../ui/Button';
 import { SportIconPicker } from './SportIconPicker';
-import { MediaImageField } from './media/MediaShared';
+import { MediaImageField, MediaPicker } from './media/MediaShared';
 import { SeoFields, seoToDraft, draftToSeo, type SeoDraft } from './EntityFields';
 
 const inputClass = 'w-full text-xs p-2.5 rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950';
@@ -31,6 +31,8 @@ export function GroupEditor({ group, sportName, onClose, sportHasUnsavedChanges 
   const [name, setName] = useState(group.name);
   const [slug, setSlug] = useState(group.slug);
   const [icon, setIcon] = useState<string | null>(group.icon ?? null);
+  const [iconMediaId, setIconMediaId] = useState<string | null>(group.iconMediaId ?? null);
+  const [pickingIcon, setPickingIcon] = useState(false);
   const [tagline, setTagline] = useState(group.tagline || '');
   const [description, setDescription] = useState(group.description || '');
   const [order, setOrder] = useState<number>(group.order);
@@ -54,11 +56,11 @@ export function GroupEditor({ group, sportName, onClose, sportHasUnsavedChanges 
   const pendingChanges = (): Record<string, unknown> => {
     const full: Record<string, unknown> = {
       name: name.trim(), slug: slug.trim(), tagline: tagline.trim(), description: description.trim(), order: Number(order), isVisible,
-      icon, heroImage: heroImage || null, featuredEventIds,
+      icon, iconMediaId, heroImage: heroImage || null, featuredEventIds,
       // Blank SEO fields mean "automatic default"; canonical/noindex and other stored keys are kept.
       seo: draftToSeo(seoDraft, group.seo),
     };
-    const before: Record<string, unknown> = { name: group.name, slug: group.slug, tagline: group.tagline || '', description: group.description || '', order: group.order, isVisible: group.isVisible, icon: group.icon ?? null, heroImage: group.heroImage || null, featuredEventIds: group.featuredEventIds || [], seo: group.seo };
+    const before: Record<string, unknown> = { name: group.name, slug: group.slug, tagline: group.tagline || '', description: group.description || '', order: group.order, isVisible: group.isVisible, icon: group.icon ?? null, iconMediaId: group.iconMediaId ?? null, heroImage: group.heroImage || null, featuredEventIds: group.featuredEventIds || [], seo: group.seo };
     return Object.fromEntries(Object.entries(full).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(before[k])));
   };
   const dirty = Object.keys(pendingChanges()).length > 0;
@@ -113,18 +115,20 @@ export function GroupEditor({ group, sportName, onClose, sportHasUnsavedChanges 
         </div>
       </div>
 
-      {icon === null ? (
+      {icon === null && !iconMediaId ? (
         <div className="text-xs">
           <span className={labelClass}>Group icon</span>
           <button type="button" onClick={() => setIcon(suggestSportIcons(name, slug, 1)[0]?.emoji ?? '🏅')} className="font-semibold text-amber-700 hover:underline dark:text-amber-400">+ Add an icon</button>
+          <button type="button" onClick={() => setPickingIcon(true)} className="ml-3 font-semibold text-amber-700 hover:underline dark:text-amber-400">Upload custom icon</button>
           <span className="ml-2 text-stone-500 dark:text-stone-400">No icon is shown for this group.</span>
         </div>
       ) : (
         <div>
-          <SportIconPicker name={name} slug={slug} value={icon} onChange={(emoji) => setIcon(emoji ?? suggestSportIcons(name, slug, 1)[0]?.emoji ?? icon)} />
-          <button type="button" onClick={() => setIcon(null)} className="mt-1 text-[11px] font-semibold text-rose-600 hover:underline dark:text-rose-400">Remove icon</button>
+          <SportIconPicker name={name} slug={slug} value={icon} onChange={(emoji) => setIcon(emoji ?? suggestSportIcons(name, slug, 1)[0]?.emoji ?? icon)} iconMediaId={iconMediaId} onIconMediaChange={setIconMediaId} />
+          <button type="button" onClick={() => { setIcon(null); setIconMediaId(null); }} className="mt-1 text-[11px] font-semibold text-rose-600 hover:underline dark:text-rose-400">Remove icon</button>
         </div>
       )}
+      {pickingIcon && <MediaPicker category="icon" onSelect={(m) => { setIconMediaId(m.id); setIcon(null); setPickingIcon(false); }} onClose={() => setPickingIcon(false)} />}
 
       <div>
         <label htmlFor="group-tagline" className={labelClass}>Tagline / Focus</label>
