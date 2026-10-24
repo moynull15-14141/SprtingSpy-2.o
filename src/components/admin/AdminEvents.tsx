@@ -819,7 +819,7 @@ export const AdminEvents: React.FC = () => {
                 <div className="rounded-lg border border-stone-300 bg-white dark:border-stone-700 dark:bg-stone-950" aria-labelledby="event-overview-label">
                   <RichTextEditor key={eventDescKey} initialDoc={eventDescDoc} inputId="event-editor-field-9" ariaLabel="Event Overview / Scope" allowMedia={false} onChange={(doc) => { setEventDescDoc(doc); setEventDesc(docToPlainText(doc)); }} />
                 </div>
-                {eventDesc.length > 5000 && <p className="mt-1 font-semibold text-rose-700 dark:text-rose-400">The overview is limited to 5,000 characters of text ({eventDesc.length.toLocaleString()} now).</p>}
+                {eventDesc.length > 20000 && <p className="mt-1 font-semibold text-rose-700 dark:text-rose-400">The overview is limited to 20,000 characters of text ({eventDesc.length.toLocaleString()} now).</p>}
               </div>
 
               {dynamicLoading && <p role="status" className="text-xs">Loading Sport-specific fields…</p>}
@@ -1030,7 +1030,7 @@ export const AdminEvents: React.FC = () => {
                 <div className="rounded-lg border border-stone-300 bg-white dark:border-stone-700 dark:bg-stone-950" aria-labelledby="edition-description-label">
                   <RichTextEditor key={editionDescKey} initialDoc={editionDescDoc} inputId="edition-description" ariaLabel="Short edition description" allowMedia={false} onChange={(doc) => { setEditionDescDoc(doc); setEditionDesc(docToPlainText(doc)); }} />
                 </div>
-                {editionDesc.length > 5000 && <p className="mt-1 font-semibold text-rose-700 dark:text-rose-400">The description is limited to 5,000 characters of text ({editionDesc.length.toLocaleString()} now).</p>}
+                {editionDesc.length > 20000 && <p className="mt-1 font-semibold text-rose-700 dark:text-rose-400">The description is limited to 20,000 characters of text ({editionDesc.length.toLocaleString()} now).</p>}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_12rem] gap-3 text-xs">

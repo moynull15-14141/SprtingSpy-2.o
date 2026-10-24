@@ -119,7 +119,7 @@ export async function syncBodyMedia(db: Db, articleId: string, mediaIds: string[
  * Returns the stored document (null when empty) and its plain-text projection, which stays in
  * `description` for search, cards, meta descriptions and FAQ checks.
  */
-export async function prepareRichDescription(input: unknown, imageField: 'Event' | 'Edition', maxText = 5000): Promise<{ error: string } | { doc: RichDoc | null; text: string }> {
+export async function prepareRichDescription(input: unknown, imageField: 'Event' | 'Edition', maxText = 20000): Promise<{ error: string } | { doc: RichDoc | null; text: string }> {
   if (input === null) return { doc: null, text: '' };
   const prepared = await prepareRichBody(input, '', true);
   if ('error' in prepared) return { error: `description: ${prepared.error}` };
