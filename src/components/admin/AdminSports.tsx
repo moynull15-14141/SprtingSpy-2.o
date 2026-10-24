@@ -191,6 +191,24 @@ export const AdminSports: React.FC = () => {
     const next = [...ids]; [next[i], next[j]] = [next[j], next[i]]; return next;
   });
 
+  // Reorder sports from the list: swap this sport's order value with its neighbour's.
+  const [reorderBusy, setReorderBusy] = useState(false);
+  const orderedSports = [...sports].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+  const moveSport = async (index: number, dir: -1 | 1) => {
+    const a = orderedSports[index];
+    const b = orderedSports[index + dir];
+    if (!a || !b || reorderBusy) return;
+    setReorderBusy(true);
+    try {
+      await updateSport(a.id, { order: b.order });
+      await updateSport(b.id, { order: a.order });
+      setFeedback(`Moved "${a.name}" ${dir === -1 ? 'up' : 'down'}.`);
+      setTimeout(() => setFeedback(null), 3000);
+    } finally {
+      setReorderBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {deletingGroupId && <DeleteDependentsDialog kind="group" id={deletingGroupId} onClose={() => setDeletingGroupId(null)} onDeleted={(message) => { setDeletingGroupId(null); setFeedback(message); setTimeout(() => setFeedback(null), 8000); }} />}
@@ -376,13 +394,21 @@ export const AdminSports: React.FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-100 dark:divide-stone-800">
-            {sports.map((sport) => {
+            {orderedSports.map((sport, index) => {
               const groups = groupsOf(sport.slug);
               const folded = foldedSports.has(sport.slug);
               return (
               <React.Fragment key={sport.id}>
               <tr className="hover:bg-stone-50 dark:hover:bg-stone-900/40" data-sport-row={sport.slug}>
-                <td className="p-3 font-mono tabular-nums">{sport.order}</td>
+                <td className="p-3 font-mono tabular-nums">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex flex-col leading-none text-[11px]">
+                      <button type="button" disabled={index === 0 || reorderBusy} onClick={() => moveSport(index, -1)} aria-label={`Move ${sport.name} up`} title="Move up" className="px-1 text-stone-500 hover:text-amber-600 disabled:opacity-25 disabled:cursor-default dark:text-stone-400">▲</button>
+                      <button type="button" disabled={index === orderedSports.length - 1 || reorderBusy} onClick={() => moveSport(index, 1)} aria-label={`Move ${sport.name} down`} title="Move down" className="px-1 text-stone-500 hover:text-amber-600 disabled:opacity-25 disabled:cursor-default dark:text-stone-400">▼</button>
+                    </span>
+                    <span>{sport.order}</span>
+                  </div>
+                </td>
                 <td className="p-3">
                   <span className="mr-2 inline-flex align-middle"><SportIcon slug={sport.slug} name={sport.name} icon={sport.icon} iconImage={sport.iconMediaId ? (() => { const m = mediaItems.find((mi) => mi.id === sport.iconMediaId); return m ? thumbnailUrl(m) : undefined; })() : undefined} size="sm" /></span>
                   <span className="font-semibold text-stone-900 dark:text-stone-100 mr-2">{sport.name}</span>
