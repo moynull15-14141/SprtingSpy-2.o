@@ -29,6 +29,7 @@ import { absoluteUrl, disciplinePath, sportPath } from '../lib/paths';
 import type { getSportHub } from '../../server/services/public/content';
 import { PlacedBlocks } from '../components/site/GlobalBlocks';
 import { ResponsiveImage } from '../components/editorial/ResponsiveImage';
+import { SportIcon } from '../components/ui/SportIcon';
 
 type SportHubData = NonNullable<Awaited<ReturnType<typeof getSportHub>>>;
 
@@ -97,7 +98,7 @@ export const SportPage: React.FC<{ data: SportHubData }> = ({ data }) => {
         hero={
           <div className="max-w-3xl">
             <div className="text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-500 mb-2">
-              {discipline ? <>{discipline.icon && <span aria-hidden="true" className="mr-1.5 text-base">{discipline.icon}</span>}<Link href={sportPath(sport.slug)} className="hover:underline">{sport.name}</Link> · Group</> : 'Sport hub'}
+              {discipline ? <>{discipline.icon && <span aria-hidden="true" className="mr-1.5 text-base">{discipline.icon}</span>}<Link href={sportPath(sport.slug)} className="hover:underline">{sport.name}</Link> · Group</> : <span className="inline-flex items-center gap-1.5"><SportIcon slug={sport.slug} name={sport.name} icon={sport.icon} iconImage={sport.iconImage} size="sm" />Sport hub</span>}
             </div>
             <h1 className="font-serif text-3xl sm:text-4xl lg:text-5xl font-bold text-stone-900 dark:text-stone-100 leading-tight">
               {label}

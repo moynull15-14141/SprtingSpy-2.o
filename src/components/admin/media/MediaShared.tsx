@@ -36,7 +36,7 @@ export function ReviewBadge({ state }: { state: CopyrightReview }) {
 }
 
 /** Upload form: file + Spec §16 metadata. Validation is repeated on the server. */
-export function MediaUploadForm({ onUploaded, onCancel }: { onUploaded: (item: MediaItem) => void; onCancel?: () => void }) {
+export function MediaUploadForm({ onUploaded, onCancel, category }: { onUploaded: (item: MediaItem) => void; onCancel?: () => void; category?: 'image' | 'icon' }) {
   const { uploadMedia } = useApp();
   const fileInput = useRef<HTMLInputElement>(null);
   const fileInputId = useId();
@@ -60,7 +60,7 @@ export function MediaUploadForm({ onUploaded, onCancel }: { onUploaded: (item: M
     e.stopPropagation();
     if (!file || !title.trim() || !altText.trim()) return;
     setBusy(true);
-    const item = await uploadMedia(file, { title, altText, caption, credit, source, license, creationType, aiTool: aiInvolved ? aiTool : '', humanEditing });
+    const item = await uploadMedia(file, { title, altText, caption, credit, source, license, creationType, aiTool: aiInvolved ? aiTool : '', humanEditing, ...(category ? { category } : {}) });
     setBusy(false);
     if (item) onUploaded(item);
   };
@@ -116,12 +116,12 @@ export function MediaUploadForm({ onUploaded, onCancel }: { onUploaded: (item: M
 }
 
 /** Modal to choose an image from the library (or upload one) for an article. */
-export function MediaPicker({ onSelect, onClose }: { onSelect: (item: MediaItem) => void; onClose: () => void }) {
+export function MediaPicker({ onSelect, onClose, category }: { onSelect: (item: MediaItem) => void; onClose: () => void; category?: 'image' | 'icon' }) {
   const { mediaItems } = useApp();
   const [query, setQuery] = useState('');
   const [uploading, setUploading] = useState(false);
   const q = query.trim().toLowerCase();
-  const items = mediaItems.filter((m) => !q || [m.title, m.altText, m.filename, m.credit].some((v) => v?.toLowerCase().includes(q)));
+  const items = mediaItems.filter((m) => (!category || (m.category ?? 'image') === category) && (!q || [m.title, m.altText, m.filename, m.credit].some((v) => v?.toLowerCase().includes(q))));
 
   // Rendered at <body>: the picker is opened from inside editor <form>s, and its upload <form>
   // must not be nested in them (a nested form submit reloaded the whole CMS page).
@@ -136,7 +136,7 @@ export function MediaPicker({ onSelect, onClose }: { onSelect: (item: MediaItem)
           </div>
         </div>
         {uploading ? (
-          <MediaUploadForm onUploaded={(item) => { setUploading(false); onSelect(item); }} onCancel={() => setUploading(false)} />
+          <MediaUploadForm category={category} onUploaded={(item) => { setUploading(false); onSelect(item); }} onCancel={() => setUploading(false)} />
         ) : (
           <>
             <input className={inputClass} placeholder="Search title, alt text, filename, credit…" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search media" />

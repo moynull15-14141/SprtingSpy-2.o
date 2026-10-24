@@ -40,7 +40,7 @@ export const SportsDirectoryPage: React.FC<{ sports: SportsDirectoryData }> = ({
             >
               <div>
                 <div className="flex items-center justify-between text-xs text-stone-500 mb-3 dark:text-stone-400">
-                  <SportIcon slug={sport.slug} name={sport.name} icon={sport.icon} size="lg" />
+                  <SportIcon slug={sport.slug} name={sport.name} icon={sport.icon} iconImage={sport.iconImage} size="lg" />
                   <span className="tabular-nums font-mono text-[11px] text-stone-600 dark:text-stone-300 bg-stone-100 dark:bg-stone-800 px-2 py-0.5 rounded">
                     {sport.eventCount} {sport.eventCount === 1 ? 'Event' : 'Events'}
                   </span>

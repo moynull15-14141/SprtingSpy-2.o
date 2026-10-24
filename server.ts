@@ -108,7 +108,7 @@ import { searchConsoleRouter, runScheduledSearchSync } from './server/searchCons
 import { totpRouter } from './server/totp';
 import { documentImportRouter } from './server/documentImport/routes';
 
-const SPORT_AUDIT_FIELDS = ['name', 'slug', 'tagline', 'description', 'order', 'isVisible', 'featuredEventIds', 'heroImage', 'heroMediaId', 'icon', 'seo', 'faqSchemaEnabled'] as const;
+const SPORT_AUDIT_FIELDS = ['name', 'slug', 'tagline', 'description', 'order', 'isVisible', 'featuredEventIds', 'heroImage', 'heroMediaId', 'icon', 'iconMediaId', 'seo', 'faqSchemaEnabled'] as const;
 const EVENT_AUDIT_FIELDS = ['name', 'slug', 'sportSlug', 'disciplineSlug', 'shortName', 'alternativeNames', 'description', 'descriptionBody', 'history', 'frequency', 'defaultVenue', 'defaultLocation', 'currentEditionYear', 'featured', 'isVisible', 'featuredImage', 'featuredMediaId', 'officialSourceUrl', 'eventType', 'seo', 'sportSpecificValues', 'faqSchemaEnabled'] as const;
 const EDITION_AUDIT_FIELDS = ['title', 'descriptionBody', 'startDate', 'endDate', 'venue', 'location', 'status', 'quickFacts', 'prizeMoneyTotal', 'defendingChampions', 'qualificationInfo', 'participantsCount', 'officialSourceUrl', 'description', 'featuredImage', 'featuredMediaId', 'seo', 'faqSchemaEnabled'] as const;
 // PHASE R.1: audit field lists. Secrets (passwordHash, totpSecret, tokens) are never listed.
@@ -1112,6 +1112,12 @@ async function startServer() {
       }
     }
     if ('heroImage' in body && !(await imageIsManaged(body.heroImage))) return 'heroImage must reference a Media Library item.';
+    if ('iconMediaId' in body && body.iconMediaId !== null && body.iconMediaId !== '' && body.iconMediaId !== undefined) {
+      if (typeof body.iconMediaId !== 'string') return 'iconMediaId must be a Media Library id.';
+      const iconMedia = await prisma.mediaItem.findUnique({ where: { id: body.iconMediaId }, select: { category: true } });
+      if (!iconMedia) return 'iconMediaId must reference a Media Library item.';
+      if (iconMedia.category !== 'icon') return 'The chosen image is not a custom icon. Upload it through the icon picker.';
+    }
     if (Array.isArray(body.featuredEventIds) && body.featuredEventIds.length) {
       const found = sportSlug ? await prisma.sportEvent.count({ where: { id: { in: body.featuredEventIds }, sportSlug } }) : 0;
       if (found !== body.featuredEventIds.length) return 'featuredEventIds must be Events of this sport.';
@@ -1155,6 +1161,7 @@ async function startServer() {
             heroImage,
             heroMediaId,
             icon: body.icon || null,
+            iconMediaId: typeof body.iconMediaId === 'string' && body.iconMediaId.trim() ? body.iconMediaId.trim() : null,
             faqSchemaEnabled: body.faqSchemaEnabled === true,
             seo: body.seo || { metaTitle: `${body.name} Coverage | SportingSpy`, metaDescription: body.description },
           },
@@ -1189,6 +1196,7 @@ async function startServer() {
         data.heroImage = typeof sportUpdates.heroImage === 'string' && sportUpdates.heroImage.trim() ? sportUpdates.heroImage.trim() : null;
         data.heroMediaId = await mediaIdForUrl(data.heroImage);
       }
+      if ('iconMediaId' in sportUpdates) data.iconMediaId = typeof sportUpdates.iconMediaId === 'string' && sportUpdates.iconMediaId.trim() ? sportUpdates.iconMediaId.trim() : null;
       // SEO/social metadata is merged so a form that edits some fields never wipes the others.
       if ('seo' in sportUpdates) data.seo = { ...((existing.seo as Record<string, unknown>) || {}), ...(sportUpdates.seo || {}) };
       const slugChanging = typeof data.slug === 'string' && data.slug !== existing.slug;

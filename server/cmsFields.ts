@@ -4,7 +4,7 @@ import type { Request, Response, NextFunction } from 'express';
 // existing editor fields, not relation names or immutable primary keys.
 const fields: Record<string, string[]> = {
   articles: ['slug', 'title', 'subtitle', 'sportSlug', 'eventSlug', 'editionYear', 'articleType', 'excerpt', 'content', 'body', 'featuredImage', 'featuredMediaId', 'authorId', 'publishedAt', 'updatedAt', 'scheduledFor', 'status', 'readingTimeMinutes', 'featured', 'tables', 'references', 'seo', 'faqSchemaEnabled', 'disciplineSlug'],
-  sports: ['slug', 'name', 'tagline', 'description', 'order', 'isVisible', 'featuredEventIds', 'colorTheme', 'heroImage', 'seo', 'icon', 'faqSchemaEnabled'],
+  sports: ['slug', 'name', 'tagline', 'description', 'order', 'isVisible', 'featuredEventIds', 'colorTheme', 'heroImage', 'seo', 'icon', 'iconMediaId', 'faqSchemaEnabled'],
   events: ['sportSlug', 'slug', 'name', 'shortName', 'description', 'descriptionBody', 'history', 'frequency', 'defaultVenue', 'defaultLocation', 'currentEditionYear', 'allEditionYears', 'featured', 'isVisible', 'featuredImage', 'officialSourceUrl', 'eventType', 'seo', 'sportSpecificValues', 'alternativeNames', 'faqSchemaEnabled', 'disciplineSlug'],
   // A discipline never moves to another sport: sportSlug is not editable.
   disciplines: ['slug', 'name', 'tagline', 'description', 'order', 'isVisible', 'isActive', 'icon', 'heroImage', 'featuredEventIds', 'seo'],

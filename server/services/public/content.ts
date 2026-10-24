@@ -13,7 +13,7 @@
 import type { Prisma } from '../../generated/prisma/client';
 import type { Article, Author, EventEdition, Sport, SportEvent, AdSlotConfig, Comment } from '../../../src/types';
 import { articlePath, editionPath, eventPath } from '../../../src/lib/paths';
-import { toMediaAsset, type MediaAsset } from '../../../src/lib/media';
+import { mediaUrl, toMediaAsset, type MediaAsset, type MediaVariant } from '../../../src/lib/media';
 import { legacyToDoc, type RichDoc } from '../../../src/lib/richText';
 import { publicSportEventValues, resolveSportEventConfiguration } from '../../sportEventConfiguration';
 import { utcToday, type EditionTiming } from '../../../src/lib/eventTiming';
@@ -44,10 +44,19 @@ export type DiscoveryEdition = EditionSummary & { eventName: string; eventUrl: s
 type ArticleRow = Prisma.ArticleGetPayload<object>;
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : undefined);
 
-function toSport(row: Prisma.SportGetPayload<object>): Sport {
-  const { eventConfiguration, ...common } = row;
+/** The small-badge URL for a custom sport icon: its smallest WebP variant, else the original. */
+export function iconImageFrom(iconMedia?: { url: string; variants: unknown } | null): string | undefined {
+  if (!iconMedia) return undefined;
+  const variants = Array.isArray(iconMedia.variants) ? (iconMedia.variants as MediaVariant[]) : [];
+  const small = variants.filter((v) => v.format === 'webp').sort((a, b) => a.width - b.width)[0];
+  return small ? mediaUrl(small.key) : iconMedia.url;
+}
+
+type SportRow = Prisma.SportGetPayload<object> & { iconMedia?: { url: string; variants: unknown } | null };
+function toSport(row: SportRow): Sport {
+  const { eventConfiguration, iconMedia, ...common } = row;
   void eventConfiguration;
-  return { ...common, colorTheme: row.colorTheme ?? undefined, heroImage: row.heroImage ?? undefined, seo: row.seo as Sport['seo'] };
+  return { ...common, colorTheme: row.colorTheme ?? undefined, heroImage: row.heroImage ?? undefined, iconMediaId: row.iconMediaId ?? undefined, iconImage: iconImageFrom(iconMedia), seo: row.seo as Sport['seo'] };
 }
 
 function toEvent(row: Prisma.SportEventGetPayload<object>): SportEvent {
@@ -248,10 +257,10 @@ async function summarizeEvents(rows: Prisma.SportEventGetPayload<object>[]): Pro
 export async function getNavSports() {
   const prisma = await db();
   const [sports, groups] = await Promise.all([
-    prisma.sport.findMany({ where: { isVisible: true }, orderBy: { order: 'asc' }, select: { id: true, slug: true, name: true, icon: true } }),
+    prisma.sport.findMany({ where: { isVisible: true }, orderBy: { order: 'asc' }, select: { id: true, slug: true, name: true, icon: true, iconMediaId: true, iconMedia: { select: { url: true, variants: true } } } }),
     prisma.discipline.findMany({ where: { isVisible: true, isActive: true, sport: { isVisible: true } }, orderBy: [{ order: 'asc' }, { name: 'asc' }], select: { sportSlug: true, slug: true, name: true, icon: true } }),
   ]);
-  return sports.map((sport) => ({ ...sport, groups: groups.filter((g) => g.sportSlug === sport.slug).map(({ slug, name, icon }) => ({ slug, name, icon })) }));
+  return sports.map(({ iconMedia, ...sport }) => ({ ...sport, iconImage: iconImageFrom(iconMedia), groups: groups.filter((g) => g.sportSlug === sport.slug).map(({ slug, name, icon }) => ({ slug, name, icon })) }));
 }
 
 export async function getAdSlots(): Promise<AdSlotConfig[]> {
@@ -273,7 +282,7 @@ export async function getHomeData() {
     listArticles({}, { take: 8 }),
     countArticles(),
     prisma.sportEvent.findMany({ where: visibleEventWhere({ featured: true }) }),
-    prisma.sport.findMany({ where: { isVisible: true }, orderBy: { order: 'asc' } }),
+    prisma.sport.findMany({ where: { isVisible: true }, orderBy: { order: 'asc' }, include: { iconMedia: { select: { url: true, variants: true } } } }),
     prisma.eventEdition.findMany({ where: { AND: [{ event: visibleEventWhere() }, editionTimingWhere('upcoming')] }, orderBy: editionTimingOrder('upcoming'), take: 3 }),
   ]);
   const [articleCounts, eventCounts, featuredEvents] = await Promise.all([
@@ -300,7 +309,7 @@ export async function getHomeData() {
 export async function getSportsDirectory() {
   const prisma = await db();
   const [sports, articleCounts, eventCounts] = await Promise.all([
-    prisma.sport.findMany({ where: { isVisible: true }, orderBy: { order: 'asc' } }),
+    prisma.sport.findMany({ where: { isVisible: true }, orderBy: { order: 'asc' }, include: { iconMedia: { select: { url: true, variants: true } } } }),
     prisma.article.groupBy({ by: ['sportSlug'], where: await publishedArticleWhere(), _count: { _all: true } }),
     prisma.sportEvent.groupBy({ by: ['sportSlug'], where: visibleEventWhere(), _count: { _all: true } }),
   ]);
@@ -311,7 +320,7 @@ export async function getSportsDirectory() {
 
 export async function getSport(slug: string): Promise<Sport | null> {
   const prisma = await db();
-  const row = await prisma.sport.findFirst({ where: { slug, isVisible: true } });
+  const row = await prisma.sport.findFirst({ where: { slug, isVisible: true }, include: { iconMedia: { select: { url: true, variants: true } } } });
   return row ? toSport(row) : null;
 }
 

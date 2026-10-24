@@ -143,7 +143,7 @@ function Section({ section, firstHeading }: { section: ResolvedSection; firstHea
               <Link key={sp.id} href={`/${sp.slug}/`} className="group p-5 rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-[#121417] hover:border-amber-500/60 dark:hover:border-amber-500/60 hover:shadow-md transition-all cursor-pointer flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between text-xs text-stone-500 mb-2 dark:text-stone-400">
-                    <SportIcon slug={sp.slug} name={sp.name} icon={sp.icon} size="lg" />
+                    <SportIcon slug={sp.slug} name={sp.name} icon={sp.icon} iconImage={sp.iconImage} size="lg" />
                     <span className="tabular-nums font-mono text-[11px]">{sp.eventCount} {sp.eventCount === 1 ? 'Event' : 'Events'}</span>
                   </div>
                   <h3 className="font-serif text-lg font-bold text-stone-900 dark:text-stone-100 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">{sp.name}</h3>

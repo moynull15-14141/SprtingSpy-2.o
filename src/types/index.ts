@@ -125,6 +125,10 @@ export interface Sport {
   eventConfiguration?: SportEventConfiguration | null;
   /** Chosen from src/config/sportIcons.ts; null/undefined = suggested from the name. */
   icon?: string | null;
+  /** Optional custom icon image (Media Library item, category "icon"); replaces the emoji badge. */
+  iconMediaId?: string | null;
+  /** Resolved small-badge URL for iconMediaId (server-provided for public rendering). */
+  iconImage?: string | null;
   /** PHASE R: Media Library item behind heroImage. */
   heroMediaId?: string | null;
   /** PHASE R: FAQPage structured data for this sport's FAQ (opt-in). */
@@ -385,6 +389,8 @@ export interface MediaItem {
   aiTool?: string | null;
   humanEditing?: string | null;
   copyrightReview: CopyrightReview;
+  /** "image" (default) or "icon": custom sport icons are kept separate from photos. */
+  category?: 'image' | 'icon';
   updatedAt?: string | null;
 }
 

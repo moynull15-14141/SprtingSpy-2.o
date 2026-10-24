@@ -25,7 +25,7 @@ import { EventConfigurationEditor } from './EventConfigurationEditor';
 import { DisciplineManager } from './DisciplineManager';
 import { GroupEditor } from './GroupEditor';
 import { DeleteDependentsDialog } from './DeleteDependentsDialog';
-import { MediaImageField } from './media/MediaShared';
+import { MediaImageField, thumbnailUrl } from './media/MediaShared';
 import { SeoFields, seoToDraft, draftToSeo, EMPTY_SEO_DRAFT, type SeoDraft } from './EntityFields';
 
 export const AdminSports: React.FC = () => {
@@ -49,6 +49,7 @@ export const AdminSports: React.FC = () => {
   const [isVisible, setIsVisible] = useState(true);
   // null = use the top suggestion for the name.
   const [icon, setIcon] = useState<string | null>(null);
+  const [iconMediaId, setIconMediaId] = useState<string | null>(null);
   const [seoDraft, setSeoDraft] = useState<SeoDraft>(EMPTY_SEO_DRAFT);
   const [heroImage, setHeroImage] = useState('');
   const [featuredEventIds, setFeaturedEventIds] = useState<string[]>([]);
@@ -69,6 +70,7 @@ export const AdminSports: React.FC = () => {
     setOrder(sports.length + 1);
     setIsVisible(true);
     setIcon(null);
+    setIconMediaId(null);
     setSeoDraft(EMPTY_SEO_DRAFT);
     setHeroImage('');
     setFeaturedEventIds([]);
@@ -96,13 +98,14 @@ export const AdminSports: React.FC = () => {
     isVisible,
     // Store the concrete icon (chosen, or the current top suggestion) so it never changes by itself.
     icon: icon ?? suggestSportIcons(name, slug, 1)[0]?.emoji ?? null,
+    iconMediaId: iconMediaId,
     heroImage: heroImage || null,
     featuredEventIds,
     faqSchemaEnabled,
     // Blank SEO fields mean "automatic default"; canonical/noindex and other stored keys are kept.
     seo: draftToSeo(seoDraft, editingSport?.seo),
   });
-  const storedSportValues = (s: Sport): Record<string, unknown> => ({ name: s.name, slug: s.slug, tagline: s.tagline, description: s.description, order: s.order, isVisible: s.isVisible, icon: s.icon ?? null, heroImage: s.heroImage || null, featuredEventIds: s.featuredEventIds, faqSchemaEnabled: !!s.faqSchemaEnabled, seo: s.seo });
+  const storedSportValues = (s: Sport): Record<string, unknown> => ({ name: s.name, slug: s.slug, tagline: s.tagline, description: s.description, order: s.order, isVisible: s.isVisible, icon: s.icon ?? null, iconMediaId: s.iconMediaId ?? null, heroImage: s.heroImage || null, featuredEventIds: s.featuredEventIds, faqSchemaEnabled: !!s.faqSchemaEnabled, seo: s.seo });
   // Typed but not yet saved in the sport form (an untouched icon is not a change: it is only suggested).
   // Compared by content, not key order: stored JSON (jsonb) comes back with its keys in another order than the form builds them.
   const sportDirty = !!editingSport && Object.entries(sportFormValues()).some(([k, v]) => (k !== 'icon' || icon !== null) && stableJson(v) !== stableJson(storedSportValues(editingSport)[k]));
@@ -156,6 +159,7 @@ export const AdminSports: React.FC = () => {
     setOrder(s.order);
     setIsVisible(s.isVisible);
     setIcon(s.icon ?? null);
+    setIconMediaId(s.iconMediaId ?? null);
     setSeoDraft(seoToDraft(s.seo));
     setHeroImage(s.heroImage || '');
     setFeaturedEventIds(s.featuredEventIds || []);
@@ -257,7 +261,7 @@ export const AdminSports: React.FC = () => {
             </div>
           </div>
 
-          <SportIconPicker name={name} slug={slug} value={icon} onChange={setIcon} />
+          <SportIconPicker name={name} slug={slug} value={icon} onChange={setIcon} iconMediaId={iconMediaId} onIconMediaChange={setIconMediaId} />
 
           <div>
             <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
@@ -380,7 +384,7 @@ export const AdminSports: React.FC = () => {
               <tr className="hover:bg-stone-50 dark:hover:bg-stone-900/40" data-sport-row={sport.slug}>
                 <td className="p-3 font-mono tabular-nums">{sport.order}</td>
                 <td className="p-3">
-                  <span className="mr-2 inline-flex align-middle"><SportIcon slug={sport.slug} name={sport.name} icon={sport.icon} size="sm" /></span>
+                  <span className="mr-2 inline-flex align-middle"><SportIcon slug={sport.slug} name={sport.name} icon={sport.icon} iconImage={sport.iconMediaId ? (() => { const m = mediaItems.find((mi) => mi.id === sport.iconMediaId); return m ? thumbnailUrl(m) : undefined; })() : undefined} size="sm" /></span>
                   <span className="font-semibold text-stone-900 dark:text-stone-100 mr-2">{sport.name}</span>
                   <span className="text-stone-500 font-mono text-[11px] dark:text-stone-400">/{sport.slug}</span>
                   {groups.length > 0 && (

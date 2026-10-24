@@ -156,6 +156,9 @@ model Sport {
   eventConfiguration Json?
   // Icon from the curated set in src/config/sportIcons.ts; null = suggested from the name.
   icon             String?
+  // Optional custom icon image (Media Library item, category "icon"). When set it replaces
+  // the emoji in the icon badge. Separate from heroMediaId (the hub header photo).
+  iconMediaId      String?
   // PHASE R: the sport image/logo as a Media Library item (heroImage keeps the resolved URL).
   heroMediaId      String?
   // PHASE R: FAQPage structured data for this sport's FAQ is opt-in (validated before output).
@@ -165,10 +168,12 @@ model Sport {
   articles    Article[]
   disciplines Discipline[]
   heroMedia   MediaItem?   @relation("SportHeroMedia", fields: [heroMediaId], references: [id], onDelete: Restrict)
+  iconMedia   MediaItem?   @relation("SportIconMedia", fields: [iconMediaId], references: [id], onDelete: Restrict)
   faqs        FaqEntry[]
 
   @@index([isVisible])
   @@index([heroMediaId])
+  @@index([iconMediaId])
 }
 
 // A named subdivision of ONE sport (Athletics → Running). Not a sport and not
@@ -584,6 +589,8 @@ model MediaItem {
   source       String?
   license      String?
   creationType String  @default("SportingSpy Original")
+  // "image" (default) or "icon": icons are kept separate from photos in the Media Library.
+  category     String   @default("image")
   uploadedAt   DateTime
   fileSize     String?
   dimensions   String?
@@ -607,6 +614,7 @@ model MediaItem {
   featuredIn     Article[]      @relation("ArticleFeaturedMedia")
   bodyUsages     ArticleMedia[]
   sportHeroes    Sport[]        @relation("SportHeroMedia")
+  sportIcons     Sport[]        @relation("SportIconMedia")
   groupHeroes    Discipline[]   @relation("DisciplineHeroMedia")
   eventImages    SportEvent[]   @relation("EventFeaturedMedia")
   editionImages  EventEdition[] @relation("EditionFeaturedMedia")

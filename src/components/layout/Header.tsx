@@ -23,7 +23,7 @@ const STAFF_ROLES = ['Admin', 'Editor', 'Author'];
 
 interface HeaderProps {
   /** Visible sports for the navigation menus, loaded on the server. */
-  sports: { id: string; slug: string; name: string; icon?: string | null; groups?: { slug: string; name: string; icon?: string | null }[] }[];
+  sports: { id: string; slug: string; name: string; icon?: string | null; iconImage?: string | null; groups?: { slug: string; name: string; icon?: string | null }[] }[];
   /** PHASE F.1: navigation items from the Site Experience (published, or draft in preview). */
   navigation: NavItem[];
   /** PHASE H: site name from Admin → Settings (defaults to the built-in brand). */
@@ -206,7 +206,7 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
                     const move = e.key === 'ArrowDown' ? 'next' : e.key === 'ArrowUp' ? 'previous' : e.key === 'Home' ? 'first' : e.key === 'End' ? 'last' : null;
                     if (move) { e.preventDefault(); focusSportsLink(move); }
                   }}
-                  className={`absolute left-0 mt-2 ${sports.some((sp) => sp.groups?.length) ? 'w-[34rem] max-w-[calc(100vw-2rem)]' : 'w-96'} max-h-[75vh] overflow-y-auto rounded-xl bg-white dark:bg-stone-900 shadow-xl border border-stone-200 dark:border-stone-800 p-4 z-50 animate-in fade-in slide-in-from-top-2 duration-150`}
+                  className={`fixed left-1/2 -translate-x-1/2 top-[4.5rem] ${sports.some((sp) => sp.groups?.length) ? 'w-[52rem] max-w-[calc(100vw-2rem)]' : 'w-[32rem]'} max-h-[75vh] overflow-y-auto rounded-xl bg-white dark:bg-stone-900 shadow-xl border border-stone-200 dark:border-stone-800 p-4 z-50 animate-in fade-in duration-150`}
                 >
                   <div className="pb-2 mb-2 border-b border-stone-100 dark:border-stone-800 flex justify-between items-center text-xs text-stone-500 dark:text-stone-400">
                     <span className="font-semibold uppercase tracking-wider">All Active Sports</span>
@@ -227,7 +227,7 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
                           onClick={() => setIsSportsMenuOpen(false)}
                           className="text-left px-3 py-2 rounded-lg text-sm text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-950 dark:hover:text-white transition-colors cursor-pointer flex items-center gap-3"
                         >
-                          <SportIcon slug={sport.slug} name={sport.name} icon={sport.icon} />
+                          <SportIcon slug={sport.slug} name={sport.name} icon={sport.icon} iconImage={sport.iconImage} />
                           <span className="font-medium">{sport.name}</span>
                         </Link>
                         {!!sport.groups?.length && (
@@ -481,7 +481,7 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
                           onClick={() => setIsMobileMenuOpen(false)}
                           className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs py-1.5 px-2 text-stone-600 dark:text-stone-400 hover:text-amber-600"
                         >
-                          <SportIcon slug={sp.slug} name={sp.name} icon={sp.icon} size="sm" />
+                          <SportIcon slug={sp.slug} name={sp.name} icon={sp.icon} iconImage={sp.iconImage} size="sm" />
                           {sp.name}
                         </Link>
                         {!!sp.groups?.length && (

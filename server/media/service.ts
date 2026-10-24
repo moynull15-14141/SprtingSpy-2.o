@@ -25,6 +25,8 @@ export interface MediaMetadataInput {
   creationType?: string;
   aiTool?: string;
   humanEditing?: string;
+  /** "image" (default) or "icon". Icons are kept separate from photos in the library. */
+  category?: string;
 }
 
 /** Processes and stores an image, returning the storage fields for a MediaItem. */
@@ -107,6 +109,7 @@ export async function createMediaFromUpload(file: { buffer: Buffer; originalname
         aiTool: meta.aiTool || null,
         humanEditing: meta.humanEditing || null,
         copyrightReview: 'pending',
+        category: meta.category === 'icon' ? 'icon' : 'image',
         uploadedAt: new Date(),
         updatedAt: new Date(),
         filename: displayFilename(file.originalname),
@@ -134,7 +137,7 @@ export type MediaUsage = { kind: 'article' | 'event' | 'edition' | 'sport' | 'si
  * (relations), plus sport/event/edition images that reference its URL.
  */
 export async function mediaUsageMap(options: {articleWhere?: Prisma.ArticleWhereInput; publicSiteOnly?: boolean} = {}): Promise<Record<string, MediaUsage[]>> {
-  const [media, featured, body, sports, events, editions, site, pages, drafts, groups] = await Promise.all([
+  const [media, featured, body, sports, events, editions, site, pages, drafts, groups, sportIcons] = await Promise.all([
     prisma.mediaItem.findMany({ select: { id: true, url: true } }),
     prisma.article.findMany({ where: { AND: [{ featuredMediaId: { not: null } }, options.articleWhere ?? {}] }, select: { id: true, title: true, featuredMediaId: true } }),
     prisma.articleMedia.findMany({ where: { article: options.articleWhere ?? {} }, select: { mediaId: true, article: { select: { id: true, title: true } } } }),
@@ -148,6 +151,8 @@ export async function mediaUsageMap(options: {articleWhere?: Prisma.ArticleWhere
     options.publicSiteOnly ? Promise.resolve([] as { id: string; title: string; mediaIds: string[] }[]) : prisma.editorDraft.findMany({ select: { id: true, title: true, mediaIds: true } }),
     // Header images of sport groups (model Discipline).
     prisma.discipline.findMany({ where: { heroImage: { not: null } }, select: { id: true, name: true, heroImage: true, sport: { select: { name: true } } } }),
+    // Custom sport icons (Media Library items referenced by id, not URL).
+    prisma.sport.findMany({ where: { iconMediaId: { not: null } }, select: { id: true, name: true, iconMediaId: true } }),
   ]);
   const byUrl = new Map(media.map((m) => [m.url, m.id]));
   const map: Record<string, MediaUsage[]> = Object.fromEntries(media.map((m) => [m.id, []]));
@@ -158,6 +163,7 @@ export async function mediaUsageMap(options: {articleWhere?: Prisma.ArticleWhere
     if (mediaId) map[mediaId].push({ kind, id, title, role: 'image' });
   };
   sports.forEach((s) => byRef('sport', s.id, s.name, s.heroImage));
+  sportIcons.forEach((s) => map[s.iconMediaId!]?.push({ kind: 'sport', id: s.id, title: `${s.name} (icon)`, role: 'image' }));
   groups.forEach((g) => byRef('sport', g.id, `${g.sport.name} › ${g.name} (group)`, g.heroImage));
   events.forEach((e) => byRef('event', e.id, e.name, e.featuredImage));
   editions.forEach((e) => byRef('edition', e.id, e.title, e.featuredImage));

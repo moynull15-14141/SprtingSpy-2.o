@@ -64,7 +64,7 @@ export function mediaRouter(getLookup: () => AuthLookup) {
       wrap(async () => {
         if (!req.file) return res.status(400).json({ error: 'Choose an image file to upload.' });
         const body = req.body as Record<string, unknown>;
-        const error = metadataErrors(body, true);
+        const error = metadataErrors(body, true) || firstError(body.category !== undefined ? validateOneOf(body.category, 'category', ['image', 'icon'] as const) : { valid: true });
         if (error) return res.status(400).json({ error });
         try {
           const item = await createMediaFromUpload(req.file, {
@@ -77,6 +77,7 @@ export function mediaRouter(getLookup: () => AuthLookup) {
             creationType: str(body.creationType),
             aiTool: str(body.aiTool),
             humanEditing: str(body.humanEditing),
+            category: str(body.category),
           // PHASE R: the same file already in the library is reported unless the editor confirms a copy.
           }, { rejectDuplicates: str(body.allowDuplicate) !== 'true' });
           await audit(req, 'Uploaded Media Asset', item.id, `Uploaded ${item.mimeType} ${item.width}x${item.height} "${item.title}".`, null, item);

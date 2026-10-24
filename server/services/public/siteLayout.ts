@@ -90,7 +90,7 @@ export async function getHomepageSections(docs: SiteExperienceDocs, layout: Site
   const [manual, featuredEventRows, sportRows, upcomingRows, sourceRows, sourceTotals] = await Promise.all([
     publicArticles(manualIds),
     has('featuredEvents') ? prisma.sportEvent.findMany({ where: visibleEventWhere({ featured: true }) }) : Promise.resolve([]),
-    has('sportsGrid') || has('upcomingEditions') ? prisma.sport.findMany({ where: { isVisible: true }, orderBy: { order: 'asc' } }) : Promise.resolve([]),
+    has('sportsGrid') || has('upcomingEditions') ? prisma.sport.findMany({ where: { isVisible: true }, orderBy: { order: 'asc' }, include: { iconMedia: { select: { url: true, variants: true } } } }) : Promise.resolve([]),
     has('upcomingEditions') ? prisma.eventEdition.findMany({ where: { AND: [{ event: visibleEventWhere() }, editionTimingWhere('upcoming')] }, orderBy: editionTimingOrder('upcoming'), take: 12 }) : Promise.resolve([]),
     Promise.all(sources.map(async (auto) => prisma.article.findMany({ where: { AND: [publicWhere, await autoWhere(auto)] }, select: summarySelect, orderBy: [{ publishedAt: 'desc' }, { id: 'asc' }], take }))),
     Promise.all(sources.map(async (auto) => articleSections.some((s) => s.type === 'articles' && s.moreLink && sourceKey(s.source.auto) === sourceKey(auto)) ? prisma.article.count({ where: { AND: [publicWhere, await autoWhere(auto)] } }) : 0)),
