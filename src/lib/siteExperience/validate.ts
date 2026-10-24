@@ -114,7 +114,12 @@ function source(v: unknown, path: string): ArticleSource {
 }
 
 function introAppearance(v: unknown, path: string): IntroAppearance {
-  const o = obj(v, path, ['mediaId', 'style', 'focalX', 'focalY', 'mobileFocalX', 'mobileFocalY', 'zoom', 'overlay', 'height', 'textSize', 'align', 'vertical', 'width']);
+  // heightPx / mobileHeightPx are optional (added after launch): only required when present,
+  // so banners saved before this feature still validate and fall back to the `height` preset.
+  const probe = v && typeof v === 'object' && !Array.isArray(v) ? (v as Obj) : {};
+  const hasHeightPx = Object.hasOwn(probe, 'heightPx');
+  const hasMobileHeightPx = Object.hasOwn(probe, 'mobileHeightPx');
+  const o = obj(v, path, ['mediaId', 'style', 'focalX', 'focalY', 'mobileFocalX', 'mobileFocalY', 'zoom', 'overlay', 'height', 'textSize', 'align', 'vertical', 'width', ...(hasHeightPx ? ['heightPx'] : []), ...(hasMobileHeightPx ? ['mobileHeightPx'] : [])]);
   const mediaId = o.mediaId === '' ? '' : typeof o.mediaId === 'string' && ARTICLE_ID.test(o.mediaId) ? o.mediaId : fail(`${path}.mediaId`, 'must be a Media Library id');
   return {
     mediaId, style: oneOf(o.style, `${path}.style`, INTRO_STYLES),
@@ -126,6 +131,8 @@ function introAppearance(v: unknown, path: string): IntroAppearance {
     align: oneOf(o.align, `${path}.align`, ['preset', 'left', 'center', 'right']),
     vertical: oneOf(o.vertical, `${path}.vertical`, ['preset', 'top', 'center', 'bottom']),
     width: oneOf(o.width, `${path}.width`, ['narrow', 'medium', 'wide']),
+    ...(hasHeightPx ? { heightPx: int(o.heightPx, `${path}.heightPx`, 240, 800) } : {}),
+    ...(hasMobileHeightPx ? { mobileHeightPx: int(o.mobileHeightPx, `${path}.mobileHeightPx`, 200, 700) } : {}),
   };
 }
 

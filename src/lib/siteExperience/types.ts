@@ -33,6 +33,9 @@ export interface IntroAppearance {
   zoom: number;
   overlay: number;
   height: 'compact' | 'standard' | 'tall';
+  /** Exact banner height in px; overrides the `height` preset when set. Phones use mobileHeightPx. */
+  heightPx?: number;
+  mobileHeightPx?: number;
   textSize: 'compact' | 'standard' | 'large';
   align: 'preset' | 'left' | 'center' | 'right';
   vertical: 'preset' | 'top' | 'center' | 'bottom';

@@ -1,4 +1,4 @@
-.banner { position: relative; isolation: isolate; display: flex; align-items: center; min-width: 0; min-height: 420px; overflow: hidden; border-radius: 1rem; border: 1px solid #292524; padding: clamp(1.5rem, 4vw, 3rem); color: #fff; background: linear-gradient(135deg, #292524, #0c0a09 65%, #30200e); }
+.banner { position: relative; isolation: isolate; display: flex; align-items: center; min-width: 0; min-height: var(--banner-height, 420px); overflow: hidden; border-radius: 1rem; border: 1px solid #292524; padding: clamp(1.5rem, 4vw, 3rem); color: #fff; background: linear-gradient(135deg, #292524, #0c0a09 65%, #30200e); }
 .background, .scrim, .treatment { position: absolute; inset: 0; pointer-events: none; }
 .background { z-index: -3; }
 .background picture { display: block; width: 100%; height: 100%; }
@@ -17,8 +17,8 @@
 .secondary { background: rgb(28 25 23 / .9); border: 1px solid #78716c; color: #fff; }
 .secondary:hover { background: #44403c; }
 .primary:focus-visible, .secondary:focus-visible { outline: 3px solid #fbbf24; outline-offset: 4px; }
-.banner[data-height='compact'] { min-height: 300px; }
-.banner[data-height='tall'] { min-height: 580px; }
+/* Banner height comes from --banner-height / --banner-height-mobile, set in IntroBanner.tsx
+   (from appearance.heightPx / mobileHeightPx, falling back to the height preset). */
 .banner[data-width='narrow'] .content { max-width: 34rem; }
 .banner[data-width='wide'] .content { max-width: 62rem; }
 .banner[data-text-size='compact'] .heading { font-size: clamp(1.7rem, 2.6vw, 2.5rem); }
@@ -53,17 +53,13 @@
 .banner[data-vertical='top'] { align-items: flex-start; }
 .banner[data-vertical='center'] { align-items: center; }
 .banner[data-vertical='bottom'] { align-items: flex-end; }
-.banner[data-device='mobile'] { min-height: 420px; padding: 1.5rem; }
+.banner[data-device='mobile'] { min-height: var(--banner-height-mobile, 420px); padding: 1.5rem; }
 .banner[data-device='mobile'] .image { object-position: var(--mobile-focal-x) var(--mobile-focal-y); transform-origin: var(--mobile-focal-x) var(--mobile-focal-y); }
 .banner[data-device='mobile'] .heading { font-size: 1.875rem; }
 .banner[data-device='mobile'][data-text-size='large'] .heading { font-size: 2.2rem; }
-.banner[data-device='mobile'][data-height='compact'] { min-height: 320px; }
-.banner[data-device='mobile'][data-height='tall'] { min-height: 560px; }
 .banner[data-device='mobile'][data-intro-style='split'] .content { max-width: 100%; padding: 1rem; }
 @media (max-width: 640px) {
-  .banner { min-height: 420px; padding: 1.5rem; }
+  .banner { min-height: var(--banner-height-mobile, 420px); padding: 1.5rem; }
   .image { object-position: var(--mobile-focal-x) var(--mobile-focal-y); transform-origin: var(--mobile-focal-x) var(--mobile-focal-y); }
-  .banner[data-height='compact'] { min-height: 320px; }
-  .banner[data-height='tall'] { min-height: 560px; }
   .banner[data-intro-style='split'] .content { max-width: 100%; padding: 1rem; }
 }

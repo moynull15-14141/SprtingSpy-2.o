@@ -20,6 +20,12 @@ export function IntroAppearanceEditor({ section, onChange }: { section: Intro; o
   const change = (patch: Partial<IntroAppearance>) => onChange({ ...section, appearance: { ...a, ...patch } });
   const slider = (label: string, key: 'focalX' | 'focalY' | 'mobileFocalX' | 'mobileFocalY' | 'zoom' | 'overlay', min: number, max: number) =>
     <label className={labelClass}>{label} <span className="font-normal">{a[key]}%</span><input type="range" min={min} max={max} step={1} value={a[key]} onChange={(e) => change({ [key]: Number(e.target.value) })} className="mt-2 block w-full accent-amber-600" /></label>;
+  const hFallback = { compact: 300, standard: 420, tall: 580 }[a.height];
+  const mhFallback = { compact: 320, standard: 420, tall: 560 }[a.height];
+  const heightSlider = (label: string, key: 'heightPx' | 'mobileHeightPx', min: number, max: number, fallback: number) => {
+    const value = a[key] ?? fallback;
+    return <label className={labelClass}>{label} <span className="font-normal">{value}px</span><input type="range" min={min} max={max} step={10} value={value} onChange={(e) => change({ [key]: Number(e.target.value) })} className="mt-2 block w-full accent-amber-600" /></label>;
+  };
   return <fieldset className="min-w-0 space-y-4 rounded-xl border border-stone-300 p-4 dark:border-stone-700">
     <legend className="px-2 text-sm font-bold">Background image & banner style</legend>
     <div className="flex flex-wrap items-center gap-3">
@@ -52,7 +58,7 @@ export function IntroAppearanceEditor({ section, onChange }: { section: Intro; o
     </div>
     <p className="text-xs text-stone-500 dark:text-stone-400">{INTRO_PRESETS.find((p) => p.id === a.style)?.description}</p>
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      <Select label="Banner height" value={a.height} onChange={(height) => change({ height })} options={[[ 'compact', 'Compact' ], ['standard', 'Standard'], ['tall', 'Tall']]} />
+      {heightSlider('Banner height (desktop)', 'heightPx', 240, 800, hFallback)}
       <Select label="Headline size" value={a.textSize} onChange={(textSize) => change({ textSize })} options={[[ 'compact', 'Compact' ], ['standard', 'Standard'], ['large', 'Large']]} />
       <Select label="Text width" value={a.width} onChange={(width) => change({ width })} options={[[ 'narrow', 'Narrow' ], ['medium', 'Medium'], ['wide', 'Wide']]} />
       <Select label="Text alignment" value={a.align} onChange={(align) => change({ align })} options={[[ 'preset', 'Style default' ], ['left', 'Left'], ['center', 'Centre'], ['right', 'Right']]} />
@@ -61,6 +67,7 @@ export function IntroAppearanceEditor({ section, onChange }: { section: Intro; o
       {slider('Desktop crop horizontal', 'focalX', 0, 100)}{slider('Desktop crop vertical', 'focalY', 0, 100)}
       {slider('Image zoom', 'zoom', 100, 160)}
       {slider('Mobile crop horizontal', 'mobileFocalX', 0, 100)}{slider('Mobile crop vertical', 'mobileFocalY', 0, 100)}
+      {heightSlider('Banner height (mobile)', 'mobileHeightPx', 200, 700, mhFallback)}
     </div>
     <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-bold">Live banner preview · {mobile ? 'Mobile' : 'Desktop'}</p><div className="flex gap-2">
       <button type="button" aria-pressed={!mobile} onClick={() => setMobile(false)} className="rounded border border-stone-300 px-3 py-1.5 text-xs dark:border-stone-700">Desktop preview</button>

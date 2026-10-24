@@ -13,10 +13,13 @@ export function IntroBanner({ section: s, image, firstHeading = false, preview =
   const a = s.appearance ?? DEFAULT_INTRO_APPEARANCE;
   const [lead, ...rest] = s.eyebrow.split(' · ');
   const Heading = preview ? 'h3' : firstHeading ? 'h1' : 'h2';
+  const desktopHeight = a.heightPx ?? { compact: 300, standard: 420, tall: 580 }[a.height];
+  const mobileHeight = a.mobileHeightPx ?? { compact: 320, standard: 420, tall: 560 }[a.height];
   const variables = {
     '--focal-x': `${a.focalX}%`, '--focal-y': `${a.focalY}%`,
     '--mobile-focal-x': `${a.mobileFocalX}%`, '--mobile-focal-y': `${a.mobileFocalY}%`,
     '--zoom': a.zoom / 100, '--scrim': a.overlay / 100,
+    '--banner-height': `${desktopHeight}px`, '--banner-height-mobile': `${mobileHeight}px`,
   } as React.CSSProperties;
   const cta = (link: NonNullable<typeof s.primaryCta>, secondary = false) => preview
     ? <span className={secondary ? styles.secondary : styles.primary}>{link.label}</span>
