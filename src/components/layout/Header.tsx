@@ -218,10 +218,12 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
                       View Directory &rarr;
                     </Link>
                   </div>
-                  {/* Two levels: each sport, and directly under it the groups a visitor can browse. */}
-                  <ul className="grid grid-cols-2 gap-2">
+                  {/* Two levels: each sport, and directly under it the groups a visitor can browse.
+                      CSS columns (not a grid) so a sport with groups never leaves the sport beside
+                      it with empty space below — items pack tightly down each column. */}
+                  <ul className="columns-2 gap-x-6">
                     {sports.map((sport) => (
-                      <li key={sport.id} data-sport={sport.slug} className="min-w-0">
+                      <li key={sport.id} data-sport={sport.slug} className="min-w-0 mb-1 break-inside-avoid">
                         <Link
                           href={`/${sport.slug}/`}
                           onClick={() => setIsSportsMenuOpen(false)}
