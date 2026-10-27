@@ -188,11 +188,21 @@ export function RichText({ doc, media, afterSecondParagraph }: RichTextProps) {
         const Cell = node.type === 'tableHeader' ? 'th' : 'td';
         const colSpan = (node.attrs?.colspan as number) > 1 ? (node.attrs?.colspan as number) : undefined;
         const rowSpan = (node.attrs?.rowspan as number) > 1 ? (node.attrs?.rowspan as number) : undefined;
+        // The editor stores alignment on the paragraphs inside a cell. A single
+        // paragraph aligns the whole cell; several keep their own alignment and
+        // stay on separate lines. 'left' is the table default, so it adds no style.
+        const children = node.content || [];
+        const alignOf = (p: RichNode) => {
+          const align = p.type === 'paragraph' ? String(p.attrs?.textAlign || 'left') : 'left';
+          return align === 'center' || align === 'right' ? (align as React.CSSProperties['textAlign']) : undefined;
+        };
+        const single = children.length === 1 && children[0].type === 'paragraph';
         return (
           <Cell
             key={key}
             colSpan={colSpan}
             rowSpan={rowSpan}
+            style={single && alignOf(children[0]) ? { textAlign: alignOf(children[0]) } : undefined}
             scope={node.type === 'tableHeader' ? 'col' : undefined}
             className={
               node.type === 'tableHeader'
@@ -200,7 +210,12 @@ export function RichText({ doc, media, afterSecondParagraph }: RichTextProps) {
                 : 'px-4 py-3 text-stone-800 dark:text-stone-200 tabular-nums align-top'
             }
           >
-            {node.content?.map((p, i) => <React.Fragment key={i}>{renderInline(p.content)}</React.Fragment>)}
+            {single
+              ? renderInline(children[0].content)
+              : children.map((p, i) =>
+                  p.type === 'paragraph'
+                    ? <p key={i} className={i ? 'mt-2 mb-0' : 'my-0'} style={alignOf(p) ? { textAlign: alignOf(p) } : undefined}>{renderInline(p.content)}</p>
+                    : renderBlock(p, i, false))}
           </Cell>
         );
       }
