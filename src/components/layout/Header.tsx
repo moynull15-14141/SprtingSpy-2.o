@@ -206,7 +206,7 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
                     const move = e.key === 'ArrowDown' ? 'next' : e.key === 'ArrowUp' ? 'previous' : e.key === 'Home' ? 'first' : e.key === 'End' ? 'last' : null;
                     if (move) { e.preventDefault(); focusSportsLink(move); }
                   }}
-                  className={`fixed left-1/2 -translate-x-1/2 top-[4.5rem] ${sports.some((sp) => sp.groups?.length) ? 'w-[52rem] max-w-[calc(100vw-2rem)]' : 'w-[32rem]'} max-h-[75vh] overflow-y-auto rounded-xl bg-white dark:bg-stone-900 shadow-xl border border-stone-200 dark:border-stone-800 p-4 z-50 animate-in fade-in duration-150`}
+                  className={`fixed left-1/2 -translate-x-1/2 top-[4.5rem] ${sports.some((sp) => sp.groups?.length) ? 'w-[52rem] lg:w-[60rem] max-w-[calc(100vw-2rem)]' : 'w-[32rem]'} max-h-[75vh] overflow-y-auto rounded-xl bg-white dark:bg-stone-900 shadow-xl border border-stone-200 dark:border-stone-800 p-4 z-50 animate-in fade-in duration-150`}
                 >
                   <div className="pb-2 mb-2 border-b border-stone-100 dark:border-stone-800 flex justify-between items-center text-xs text-stone-500 dark:text-stone-400">
                     <span className="font-semibold uppercase tracking-wider">All Active Sports</span>
@@ -220,8 +220,9 @@ export const Header: React.FC<HeaderProps> = ({ sports, navigation, siteName }) 
                   </div>
                   {/* Two levels: each sport, and directly under it the groups a visitor can browse.
                       CSS columns (not a grid) so a sport with groups never leaves the sport beside
-                      it with empty space below — items pack tightly down each column. */}
-                  <ul className="columns-2 gap-x-6">
+                      it with empty space below — items pack tightly down each column.
+                      Three columns on wide screens keep the panel short. */}
+                  <ul className={`columns-2 gap-x-6 ${sports.some((sp) => sp.groups?.length) ? 'lg:columns-3' : ''}`}>
                     {sports.map((sport) => (
                       <li key={sport.id} data-sport={sport.slug} className="min-w-0 mb-1 break-inside-avoid">
                         <Link
