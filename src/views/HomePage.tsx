@@ -43,7 +43,7 @@ function SectionHeader({ id, eyebrow, title, link }: { id: string; eyebrow: stri
   );
 }
 
-function Section({ section, firstHeading }: { section: ResolvedSection; firstHeading: boolean }) {
+function Section({ section, firstHeading, atTop }: { section: ResolvedSection; firstHeading: boolean; atTop: boolean }) {
   switch (section.type) {
     case 'adSlot':
       return <AdSlot id={section.slot} />;
@@ -52,7 +52,7 @@ function Section({ section, firstHeading }: { section: ResolvedSection; firstHea
       return <GlobalBlock block={section.block} />;
 
     case 'intro':
-      return <IntroBanner section={section.section} image={section.image} firstHeading={firstHeading} />;
+      return <IntroBanner section={section.section} image={section.image} firstHeading={firstHeading} atTop={atTop} />;
 
     case 'featured': {
       const s = section.section as Extract<HomeSection, { type: 'featured' }>;
@@ -213,7 +213,7 @@ export const HomePage: React.FC<{ sections: ResolvedSection[]; identity?: { name
       <JsonLd data={structuredData} />
       {/* Without an intro section the page still has exactly one <h1> (Spec v1.1 §7.1 wording). */}
       {!hasH1 && <h1 className="sr-only">{HOMEPAGE_H1}</h1>}
-      {sections.map((s) => <Section key={s.id} section={s} firstHeading={s.id === firstIntro} />)}
+      {sections.map((s, i) => <Section key={s.id} section={s} firstHeading={s.id === firstIntro} atTop={i === 0} />)}
     </div>
   );
 };

@@ -6,11 +6,13 @@ import { ResponsiveImage } from '../editorial/ResponsiveImage';
 import { SiteLink } from './SiteLink';
 import styles from './IntroBanner.module.css';
 
-export function IntroBanner({ section: s, image, firstHeading = false, preview = false, mobilePreview = false }: {
+export function IntroBanner({ section: s, image, firstHeading = false, atTop = false, preview = false, mobilePreview = false }: {
   section: Extract<HomeSection, { type: 'intro' }>; image?: MediaAsset | null;
-  firstHeading?: boolean; preview?: boolean; mobilePreview?: boolean;
+  /** atTop: the first section on the page, so a full-width banner can sit flush under the header. */
+  firstHeading?: boolean; atTop?: boolean; preview?: boolean; mobilePreview?: boolean;
 }) {
   const a = s.appearance ?? DEFAULT_INTRO_APPEARANCE;
+  const full = a.bannerWidth === 'full';
   const [lead, ...rest] = s.eyebrow.split(' · ');
   const Heading = preview ? 'h3' : firstHeading ? 'h1' : 'h2';
   const desktopHeight = a.heightPx ?? { compact: 300, standard: 420, tall: 580 }[a.height];
@@ -26,8 +28,9 @@ export function IntroBanner({ section: s, image, firstHeading = false, preview =
     : <SiteLink href={link.href} className={secondary ? styles.secondary : styles.primary}>{link.label}</SiteLink>;
   return <section data-section={s.id} data-intro-style={a.style} data-height={a.height} data-text-size={a.textSize}
     data-align={a.align} data-vertical={a.vertical} data-width={a.width} data-device={mobilePreview ? 'mobile' : undefined}
+    data-banner-width={full ? 'full' : undefined} data-at-top={full && atTop && !preview ? 'true' : undefined}
     data-preview={preview ? 'true' : undefined} className={styles.banner} style={variables}>
-    {image && <div className={styles.background} aria-hidden="true"><ResponsiveImage asset={image} alt="" sizes={preview ? '(max-width: 640px) 100vw, 900px' : '(max-width: 1536px) 100vw, 1536px'} className={styles.image} priority={!preview && firstHeading} /></div>}
+    {image && <div className={styles.background} aria-hidden="true"><ResponsiveImage asset={image} alt="" sizes={preview ? '(max-width: 640px) 100vw, 900px' : full ? '100vw' : '(max-width: 1536px) 100vw, 1536px'} className={styles.image} priority={!preview && firstHeading} /></div>}
     <div className={styles.scrim} aria-hidden="true" />
     <div className={styles.treatment} aria-hidden="true" />
     <div className={styles.content}>

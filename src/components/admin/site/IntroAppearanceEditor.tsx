@@ -61,6 +61,7 @@ export function IntroAppearanceEditor({ section, onChange }: { section: Intro; o
       {heightSlider('Banner height (desktop)', 'heightPx', 240, 800, hFallback)}
       <Select label="Headline size" value={a.textSize} onChange={(textSize) => change({ textSize })} options={[[ 'compact', 'Compact' ], ['standard', 'Standard'], ['large', 'Large']]} />
       <Select label="Text width" value={a.width} onChange={(width) => change({ width })} options={[[ 'narrow', 'Narrow' ], ['medium', 'Medium'], ['wide', 'Wide']]} />
+      <Select label="Banner width" value={a.bannerWidth ?? 'contained'} onChange={(bannerWidth) => change({ bannerWidth })} options={[[ 'contained', 'Contained (site column)' ], ['full', 'Full width (edge to edge)']]} />
       <Select label="Text alignment" value={a.align} onChange={(align) => change({ align })} options={[[ 'preset', 'Style default' ], ['left', 'Left'], ['center', 'Centre'], ['right', 'Right']]} />
       <Select label="Vertical text position" value={a.vertical} onChange={(vertical) => change({ vertical })} options={[[ 'preset', 'Style default' ], ['top', 'Top'], ['center', 'Centre'], ['bottom', 'Bottom']]} />
       {slider('Overlay darkness', 'overlay', 25, 90)}

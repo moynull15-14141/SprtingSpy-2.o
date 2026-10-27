@@ -40,6 +40,8 @@ export interface IntroAppearance {
   align: 'preset' | 'left' | 'center' | 'right';
   vertical: 'preset' | 'top' | 'center' | 'bottom';
   width: 'narrow' | 'medium' | 'wide';
+  /** Banner box on the public page: inside the site column (default) or edge to edge. */
+  bannerWidth?: 'contained' | 'full';
 }
 export type HomeSection =
   | (SectionBase & { type: 'intro'; eyebrow: string; title: string; text: string; primaryCta: CtaLink | null; secondaryCta: CtaLink | null; appearance?: IntroAppearance })

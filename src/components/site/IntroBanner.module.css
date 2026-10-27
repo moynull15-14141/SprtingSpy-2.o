@@ -63,3 +63,28 @@
   .image { object-position: var(--mobile-focal-x) var(--mobile-focal-y); transform-origin: var(--mobile-focal-x) var(--mobile-focal-y); }
   .banner[data-intro-style='split'] .content { max-width: 100%; padding: 1rem; }
 }
+
+/* Full-width banner: breaks out of the site column (main: max-w-[98rem], px-4/sm:px-6/lg:px-8)
+   to the viewport edges, while the text keeps lining up with the column. --page-gutter mirrors
+   main's padding; the page clips horizontal overflow so 100vw never adds a sideways scrollbar. */
+.banner[data-banner-width='full']:not([data-preview]) {
+  --page-gutter: 1rem;
+  --inner-pad: clamp(1.5rem, 4vw, 3rem);
+  width: 100vw; max-width: none;
+  margin-left: calc(50% - 50vw); margin-right: calc(50% - 50vw);
+  border-radius: 0; border-left-width: 0; border-right-width: 0;
+  padding-left: calc(max(0px, (100vw - 98rem) / 2) + var(--page-gutter) + var(--inner-pad));
+  padding-right: calc(max(0px, (100vw - 98rem) / 2) + var(--page-gutter) + var(--inner-pad));
+}
+/* First section on the page: sit flush under the header (cancels main's py-8). */
+.banner[data-banner-width='full'][data-at-top]:not([data-preview]) { margin-top: -2rem; border-top-width: 0; }
+.banner[data-banner-width='full'][data-preview] { border-radius: 0; }
+@media (max-width: 640px) {
+  .banner[data-banner-width='full']:not([data-preview]) { --inner-pad: 1.5rem; }
+}
+@media (min-width: 640px) {
+  .banner[data-banner-width='full']:not([data-preview]) { --page-gutter: 1.5rem; }
+}
+@media (min-width: 1024px) {
+  .banner[data-banner-width='full']:not([data-preview]) { --page-gutter: 2rem; }
+}

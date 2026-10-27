@@ -114,12 +114,13 @@ function source(v: unknown, path: string): ArticleSource {
 }
 
 function introAppearance(v: unknown, path: string): IntroAppearance {
-  // heightPx / mobileHeightPx are optional (added after launch): only required when present,
-  // so banners saved before this feature still validate and fall back to the `height` preset.
+  // heightPx / mobileHeightPx / bannerWidth are optional (added after launch): only required when
+  // present, so banners saved before them still validate (height preset, contained banner).
   const probe = v && typeof v === 'object' && !Array.isArray(v) ? (v as Obj) : {};
   const hasHeightPx = Object.hasOwn(probe, 'heightPx');
   const hasMobileHeightPx = Object.hasOwn(probe, 'mobileHeightPx');
-  const o = obj(v, path, ['mediaId', 'style', 'focalX', 'focalY', 'mobileFocalX', 'mobileFocalY', 'zoom', 'overlay', 'height', 'textSize', 'align', 'vertical', 'width', ...(hasHeightPx ? ['heightPx'] : []), ...(hasMobileHeightPx ? ['mobileHeightPx'] : [])]);
+  const hasBannerWidth = Object.hasOwn(probe, 'bannerWidth');
+  const o = obj(v, path, ['mediaId', 'style', 'focalX', 'focalY', 'mobileFocalX', 'mobileFocalY', 'zoom', 'overlay', 'height', 'textSize', 'align', 'vertical', 'width', ...(hasHeightPx ? ['heightPx'] : []), ...(hasMobileHeightPx ? ['mobileHeightPx'] : []), ...(hasBannerWidth ? ['bannerWidth'] : [])]);
   const mediaId = o.mediaId === '' ? '' : typeof o.mediaId === 'string' && ARTICLE_ID.test(o.mediaId) ? o.mediaId : fail(`${path}.mediaId`, 'must be a Media Library id');
   return {
     mediaId, style: oneOf(o.style, `${path}.style`, INTRO_STYLES),
@@ -133,6 +134,7 @@ function introAppearance(v: unknown, path: string): IntroAppearance {
     width: oneOf(o.width, `${path}.width`, ['narrow', 'medium', 'wide']),
     ...(hasHeightPx ? { heightPx: int(o.heightPx, `${path}.heightPx`, 240, 800) } : {}),
     ...(hasMobileHeightPx ? { mobileHeightPx: int(o.mobileHeightPx, `${path}.mobileHeightPx`, 200, 700) } : {}),
+    ...(hasBannerWidth ? { bannerWidth: oneOf(o.bannerWidth, `${path}.bannerWidth`, ['contained', 'full'] as const) } : {}),
   };
 }
 
