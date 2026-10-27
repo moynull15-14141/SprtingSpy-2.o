@@ -37,6 +37,8 @@ import { RumPageType } from '../components/analytics/RumPageType';
 
 type ArticlePageData = NonNullable<Awaited<ReturnType<typeof getArticlePage>>>;
 
+/** Readable text measure for body copy, sources, FAQ and comments; mobile is unaffected (already narrower). */
+const READING_COLUMN = 'mx-auto w-full max-w-3xl';
 
 export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] | null; preview?: boolean; siteName?: string }> = ({ data, comments, preview = false, siteName = 'SportingSpy' }) => {
   const { article, sport, event, edition, author, related: relatedArticles, latest: latestArticles, body, media, featuredImage, faqs, faqSchemaEnabled, schemaType } = data;
@@ -193,8 +195,9 @@ export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] 
         article.featuredImage && <FeaturedImage src={article.featuredImage} alt={article.title} caption={imageCaption} credit={imageCredit} />
       )}
 
-      {/* EDITORIAL PROSE CONTAINER */}
-      <div className="prose prose-stone dark:prose-invert max-w-none text-stone-800 dark:text-stone-200 text-base sm:text-lg leading-relaxed space-y-6">
+      {/* EDITORIAL PROSE CONTAINER — a readable ~768px column (65–80 characters
+          per line); header, featured image and data tables stay wide. */}
+      <div className={`${READING_COLUMN} prose prose-stone dark:prose-invert text-stone-800 dark:text-stone-200 text-base sm:text-lg lg:text-[1.1875rem] leading-relaxed space-y-6`}>
         {/* Lead Excerpt Drop Cap intro */}
         <p className="font-serif text-lg sm:text-xl text-stone-700 dark:text-stone-300 leading-relaxed italic border-l-2 border-amber-600 pl-4 py-1">
           {article.excerpt}
@@ -217,7 +220,7 @@ export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] 
 
       {/* EXTERNAL REFERENCES & CITATIONS */}
       {article.references && article.references.length > 0 && (
-        <div className="p-4 rounded-xl bg-stone-50 dark:bg-stone-900/60 border border-stone-200 dark:border-stone-800 text-xs">
+        <div className={`${READING_COLUMN} p-4 rounded-xl bg-stone-50 dark:bg-stone-900/60 border border-stone-200 dark:border-stone-800 text-xs`}>
           <h2 className="font-semibold text-stone-900 dark:text-stone-100 uppercase tracking-wider mb-2">
             Sources &amp; references
           </h2>
@@ -240,13 +243,21 @@ export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] 
       )}
 
       {/* READER QUESTIONS (published, editor-approved; FAQPage markup only when enabled) */}
-      <ContextFaq items={faqs} heading="Frequently asked questions" schemaEnabled={faqSchemaEnabled && !preview} />
+      {faqs.length > 0 && (
+        <div className={READING_COLUMN}>
+          <ContextFaq items={faqs} heading="Frequently asked questions" schemaEnabled={faqSchemaEnabled && !preview} />
+        </div>
+      )}
 
       {!preview && <PlacedBlocks placement="article_end" />}
       <AdSlot id="ARTICLE_BOTTOM" />
 
       {/* COMMENTS (launch-disabled unless the server enables them) */}
-      {comments && <CommentsSection articleId={article.id} initialComments={comments} />}
+      {comments && (
+        <div className={READING_COLUMN}>
+          <CommentsSection articleId={article.id} initialComments={comments} />
+        </div>
+      )}
       </div>
 
       {/* RELATED ARTICLES */}
