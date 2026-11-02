@@ -39,7 +39,7 @@ export function UnsavedWorkPanel({ setActiveTab }: { setActiveTab: (tab: AdminTa
       out.push({ key: `local:${b.draftId}`, kind: b.kind, entityId: b.entityId, draftId: b.draftId, revision: b.revision, title: b.title, savedAt: b.savedAt, ownerName: null, stale: false, deviceOnly: true });
     }
     out.sort((a, b) => b.savedAt - a.savedAt);
-    setRows(out);
+    setRows(out.filter((r) => !r.stale));
   }, [currentUser.id]);
   // Load now, and once more shortly after: an editor that was just left sends its last changes as it closes.
   useEffect(() => { void load(); const t = setTimeout(() => void load(), 2000); return () => clearTimeout(t); }, [load]);

@@ -173,7 +173,8 @@ export function draftsRouter(getLookup: () => AuthLookup) {
         const allowed = await assertCanEdit(ctx, d.kind as DraftKind, d.entityId).then(() => true, () => false);
         if (!allowed) continue;
         const current = await entityVersion(d.kind as DraftKind, d.entityId);
-        visible.push({ ...view(d, false), stale: !!d.baseVersion && current !== d.baseVersion });
+        const stale = d.baseVersion ? current !== d.baseVersion : false;
+        visible.push({ ...view(d, false), stale });
       } else visible.push({ ...view(d, false), stale: false });
     }
     return res.json({ drafts: visible });
@@ -248,11 +249,11 @@ export function draftsRouter(getLookup: () => AuthLookup) {
     const d = await prisma.editorDraft.findUnique({ where: { id: req.params.id } });
     if (!d) return res.json({ success: true, alreadyGone: true });
     await assertDraftAccess(ctx, d);
-    const revision = req.query.revision === undefined ? undefined : Number(req.query.revision);
-    if (revision !== undefined && (!Number.isInteger(revision) || revision !== d.revision)) fail(409, 'This draft changed after you loaded it, so it was kept.', { code: 'stale_draft', draft: view(d, true) });
     const applied = req.query.applied === '1';
+    const revision = req.query.revision === undefined ? undefined : Number(req.query.revision);
+    if (!applied && revision !== undefined && (!Number.isInteger(revision) || revision !== d.revision)) fail(409, 'This draft changed after you loaded it, so it was kept.', { code: 'stale_draft', draft: view(d, true) });
     await prisma.$transaction(async (tx) => {
-      const removed = await tx.editorDraft.deleteMany({ where: { id: d.id, revision: d.revision } });
+      const removed = await tx.editorDraft.deleteMany({ where: { id: d.id, ...(applied ? {} : { revision: d.revision }) } });
       if (!removed.count) fail(409, 'This draft changed while it was being removed, so it was kept.', { code: 'stale_draft' });
       // Removing a working copy after its content was saved is not a discard.
       if (!applied) await audit(tx, ctx, 'Draft Discarded', d, `${ctx.userName} discarded an unsaved working copy ("${d.title}").`);
