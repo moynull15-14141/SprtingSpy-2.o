@@ -19,6 +19,7 @@ const fields: Record<string, string[]> = {
 export function rejectNestedCmsWrites(req: Request, res: Response, next: NextFunction) {
   if (req.method !== 'PUT') return next();
   const match = req.path.match(/^\/api\/([^/]+)\/[^/]+\/?$/i);
+  if (match && /^(move|folders|upload)$/i.test(req.path.split('/').pop() || '')) return next();
   const allowed = match && fields[match[1].toLowerCase()];
   if (!allowed) return next();
   if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body) || Object.keys(req.body).some(key => !allowed.includes(key))) {

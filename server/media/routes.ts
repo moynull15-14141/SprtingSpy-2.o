@@ -117,6 +117,77 @@ export function mediaRouter(getLookup: () => AuthLookup) {
     return res.status(201).json(item);
   }));
 
+  // ── Media Folders (before /:id to avoid route conflicts) ──
+
+  router.get('/folders', requireRole(getLookup, ['Admin', 'Editor', 'Author']), wrap(async (_req, res) => {
+    const folders = await prisma.mediaFolder.findMany({ orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }], select: { id: true, name: true, slug: true, parentId: true, sortOrder: true, _count: { select: { items: true } } } });
+    return res.json({ folders: folders.map((f) => ({ ...f, itemCount: f._count.items, _count: undefined })) });
+  }));
+
+  router.post('/folders', requireRole(getLookup, ['Admin', 'Editor']), wrap(async (req, res) => {
+    const body = req.body as Record<string, unknown>;
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    if (!name || name.length > 100) return res.status(400).json({ error: 'Folder name is required (max 100 characters).' });
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `folder-${Date.now()}`;
+    const existing = await prisma.mediaFolder.findUnique({ where: { slug } });
+    if (existing) return res.status(409).json({ error: `A folder named "${existing.name}" already exists.` });
+    const parentId = typeof body.parentId === 'string' && body.parentId ? body.parentId : null;
+    if (parentId) { const parent = await prisma.mediaFolder.findUnique({ where: { id: parentId } }); if (!parent) return res.status(400).json({ error: 'Parent folder not found.' }); }
+    const folder = await prisma.mediaFolder.create({ data: { name, slug, parentId } });
+    await audit(req, 'Created Media Folder', folder.id, `Created media folder "${name}".`);
+    return res.status(201).json(folder);
+  }));
+
+  router.put('/folders/:id', requireRole(getLookup, ['Admin', 'Editor']), wrap(async (req, res) => {
+    const folder = await prisma.mediaFolder.findUnique({ where: { id: req.params.id } });
+    if (!folder) return res.status(404).json({ error: 'Folder not found.' });
+    const body = req.body as Record<string, unknown>;
+    const data: Record<string, unknown> = {};
+    if (typeof body.name === 'string') {
+      const name = body.name.trim();
+      if (!name || name.length > 100) return res.status(400).json({ error: 'Folder name is required (max 100 characters).' });
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || folder.slug;
+      const collision = await prisma.mediaFolder.findFirst({ where: { slug, id: { not: folder.id } } });
+      if (collision) return res.status(409).json({ error: `A folder named "${collision.name}" already exists.` });
+      data.name = name;
+      data.slug = slug;
+    }
+    if ('parentId' in body) {
+      const parentId = typeof body.parentId === 'string' && body.parentId ? body.parentId : null;
+      if (parentId === folder.id) return res.status(400).json({ error: 'A folder cannot be its own parent.' });
+      if (parentId) { const parent = await prisma.mediaFolder.findUnique({ where: { id: parentId } }); if (!parent) return res.status(400).json({ error: 'Parent folder not found.' }); }
+      data.parentId = parentId;
+    }
+    if (typeof body.sortOrder === 'number') data.sortOrder = body.sortOrder;
+    if (!Object.keys(data).length) return res.json(folder);
+    const updated = await prisma.mediaFolder.update({ where: { id: folder.id }, data });
+    await audit(req, 'Updated Media Folder', updated.id, `Updated media folder "${updated.name}".`);
+    return res.json(updated);
+  }));
+
+  router.delete('/folders/:id', requireRole(getLookup, ['Admin']), wrap(async (req, res) => {
+    const folder = await prisma.mediaFolder.findUnique({ where: { id: req.params.id }, include: { _count: { select: { items: true, children: true } } } });
+    if (!folder) return res.status(404).json({ error: 'Folder not found.' });
+    if (folder._count.children > 0) return res.status(400).json({ error: 'Remove or move sub-folders first.' });
+    await prisma.mediaItem.updateMany({ where: { folderId: folder.id }, data: { folderId: null } });
+    await prisma.mediaFolder.delete({ where: { id: folder.id } });
+    await audit(req, 'Deleted Media Folder', folder.id, `Deleted media folder "${folder.name}". ${folder._count.items} images moved to unfiled.`);
+    return res.json({ success: true });
+  }));
+
+  router.put('/move', requireRole(getLookup, ['Admin', 'Editor']), wrap(async (req, res) => {
+    const body = req.body as Record<string, unknown>;
+    const ids = Array.isArray(body.ids) ? (body.ids as string[]).filter((id) => typeof id === 'string') : [];
+    if (!ids.length || ids.length > 200) return res.status(400).json({ error: 'Select 1–200 images to move.' });
+    const folderId = typeof body.folderId === 'string' && body.folderId ? body.folderId : null;
+    if (folderId) { const folder = await prisma.mediaFolder.findUnique({ where: { id: folderId } }); if (!folder) return res.status(400).json({ error: 'Target folder not found.' }); }
+    const result = await prisma.mediaItem.updateMany({ where: { id: { in: ids } }, data: { folderId } });
+    await audit(req, 'Moved Media Items', folderId || 'unfiled', `Moved ${result.count} media items to ${folderId ? 'folder' : 'unfiled'}.`);
+    return res.json({ success: true, moved: result.count });
+  }));
+
+  // ── Media Item CRUD (/:id after specific routes) ──
+
   router.put('/:id', requireRole(getLookup, ['Admin', 'Editor']), wrap(async (req, res) => {
     const existing = await prisma.mediaItem.findUnique({ where: { id: req.params.id } });
     if (!existing) return res.status(404).json({ error: 'Media item not found.' });
@@ -125,14 +196,12 @@ export function mediaRouter(getLookup: () => AuthLookup) {
       metadataErrors(body, false) ||
       firstError(
         body.copyrightReview !== undefined ? validateOneOf(body.copyrightReview, 'copyrightReview', COPYRIGHT_REVIEW_STATES, true) : { valid: true },
-        // A stored file's URL is derived from its storage key; only URL-only items may change it.
         body.url !== undefined ? (existing.storageKey ? { valid: false, error: 'The URL of an uploaded file cannot be changed.' } : validateSafeUrl(body.url, 'url')) : { valid: true }
       );
     if (error) return res.status(400).json({ error });
     const editable = ['title', 'url', 'altText', 'caption', 'credit', 'source', 'license', 'creationType', 'aiTool', 'humanEditing', 'copyrightReview'] as const;
     const data: Record<string, string | null> = {};
     for (const field of editable) if (body[field] !== undefined) data[field] = str(body[field]) || (field === 'altText' ? '' : field === 'title' ? existing.title : null);
-    // A save that changes nothing leaves the row (and its updatedAt) untouched.
     const changedFields = Object.keys(data).filter((field) => data[field] !== (existing as Record<string, unknown>)[field]);
     if (!changedFields.length) return res.json(existing);
     for (const field of Object.keys(data)) if (!changedFields.includes(field)) delete data[field];

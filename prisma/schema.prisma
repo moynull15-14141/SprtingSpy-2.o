@@ -615,6 +615,9 @@ model MediaItem {
   // PHASE R: SHA-256 of the uploaded original, for duplicate detection.
   contentHash     String?
 
+  folderId       String?
+  folder         MediaFolder?   @relation(fields: [folderId], references: [id], onDelete: SetNull)
+
   featuredIn     Article[]      @relation("ArticleFeaturedMedia")
   bodyUsages     ArticleMedia[]
   sportHeroes    Sport[]        @relation("SportHeroMedia")
@@ -626,6 +629,20 @@ model MediaItem {
   pageOgImages   Page[]         @relation("PageOgMedia")
 
   @@index([contentHash])
+  @@index([folderId])
+}
+
+model MediaFolder {
+  id        String    @id @default(uuid())
+  name      String
+  slug      String    @unique
+  parentId  String?
+  parent    MediaFolder?  @relation("FolderTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children  MediaFolder[] @relation("FolderTree")
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  items     MediaItem[]
 }
 
 model AdSlotConfig {

@@ -395,6 +395,16 @@ export interface MediaItem {
   /** "image" (default) or "icon": custom sport icons are kept separate from photos. */
   category?: 'image' | 'icon';
   updatedAt?: string | null;
+  folderId?: string | null;
+}
+
+export interface MediaFolder {
+  id: string;
+  name: string;
+  slug: string;
+  parentId: string | null;
+  sortOrder: number;
+  itemCount: number;
 }
 
 /** PHASE C: where a media item is used. */

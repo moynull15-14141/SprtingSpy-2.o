@@ -23,6 +23,7 @@ import {
   Comment,
   EventEdition,
   FeatureFlags,
+  MediaFolder,
   MediaItem,
   MediaUsage,
   RedirectRule,
@@ -52,6 +53,7 @@ interface AdminDataContextType {
   authors: Author[];
   comments: Comment[];
   mediaItems: MediaItem[];
+  mediaFolders: MediaFolder[];
   adSlots: AdSlotConfig[];
   auditLogs: AuditLog[];
   redirectRules: RedirectRule[];
@@ -105,6 +107,13 @@ interface AdminDataContextType {
   updateMediaItem: (id: string, updates: Partial<MediaItem>) => Promise<boolean>;
   deleteMediaItem: (id: string) => Promise<boolean>;
 
+  // Media Folders
+  createMediaFolder: (name: string, parentId?: string | null) => Promise<MediaFolder | null>;
+  updateMediaFolder: (id: string, updates: { name?: string; parentId?: string | null; sortOrder?: number }) => Promise<boolean>;
+  deleteMediaFolder: (id: string) => Promise<boolean>;
+  moveMediaToFolder: (ids: string[], folderId: string | null) => Promise<boolean>;
+  refreshMediaFolders: () => Promise<void>;
+
   // Ads
   toggleAdSlot: (slotId: AdSlotId, enabled?: boolean) => void;
   updateAdSlot: (slotId: AdSlotId, updates: Partial<AdSlotConfig>) => Promise<boolean>;
@@ -137,6 +146,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [users, setUsers] = useState<User[]>([]);
   const [comments, setComments] = useState<Comment[]>([]);
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
+  const [mediaFolders, setMediaFolders] = useState<MediaFolder[]>([]);
   const [adSlots, setAdSlots] = useState<AdSlotConfig[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [mediaUsage, setMediaUsage] = useState<Record<string, MediaUsage[]>>({});
@@ -192,6 +202,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setMediaUsage(res.data.mediaUsage || {});
       setArticleTypes(res.data.articleTypes || []);
       setDisciplines(res.data.disciplines || []);
+      const foldersRes = await apiCall<{ folders: MediaFolder[] }>('/api/media/folders');
+      if (foldersRes.data) setMediaFolders(foldersRes.data.folders);
       setCmsDataLoaded(true);
     }
   };
@@ -627,6 +639,45 @@ Upload a separate copy anyway?`)) return uploadMedia(file, { ...metadata, allowD
     return false;
   };
 
+  const refreshMediaFolders = async () => {
+    const res = await apiCall<{ folders: MediaFolder[] }>('/api/media/folders');
+    if (res.data) setMediaFolders(res.data.folders);
+  };
+
+  const createMediaFolder = async (name: string, parentId?: string | null): Promise<MediaFolder | null> => {
+    const res = await apiCall<MediaFolder>('/api/media/folders', { method: 'POST', body: { name, parentId: parentId || null } });
+    if (res.data) { await refreshMediaFolders(); showNotification(`Folder "${name}" created.`, 'success'); return res.data; }
+    return null;
+  };
+
+  const updateMediaFolder = async (id: string, updates: { name?: string; parentId?: string | null; sortOrder?: number }): Promise<boolean> => {
+    const res = await apiCall<MediaFolder>(`/api/media/folders/${id}`, { method: 'PUT', body: updates });
+    if (res.data) { await refreshMediaFolders(); showNotification('Folder updated.', 'success'); return true; }
+    return false;
+  };
+
+  const deleteMediaFolder = async (id: string): Promise<boolean> => {
+    const res = await apiCall<{ success: boolean }>(`/api/media/folders/${id}`, { method: 'DELETE' });
+    if (res.data?.success) {
+      setMediaItems((prev) => prev.map((m) => m.folderId === id ? { ...m, folderId: null } : m));
+      await refreshMediaFolders();
+      showNotification('Folder deleted. Images moved to unfiled.', 'info');
+      return true;
+    }
+    return false;
+  };
+
+  const moveMediaToFolder = async (ids: string[], folderId: string | null): Promise<boolean> => {
+    const res = await apiCall<{ success: boolean; moved: number }>('/api/media/move', { method: 'PUT', body: { ids, folderId } });
+    if (res.data?.success) {
+      setMediaItems((prev) => prev.map((m) => ids.includes(m.id) ? { ...m, folderId } : m));
+      await refreshMediaFolders();
+      showNotification(`${res.data.moved} image(s) moved.`, 'success');
+      return true;
+    }
+    return false;
+  };
+
   const toggleAdSlot = (slotId: AdSlotId, enabled?: boolean) => {
     const current = adSlots.find((s) => s.id === slotId);
     if (!current) return;
@@ -659,6 +710,7 @@ Upload a separate copy anyway?`)) return uploadMedia(file, { ...metadata, allowD
         authors,
         comments,
         mediaItems,
+        mediaFolders,
         adSlots,
         auditLogs,
         redirectRules,
@@ -693,6 +745,11 @@ Upload a separate copy anyway?`)) return uploadMedia(file, { ...metadata, allowD
         addMediaItem,
         updateMediaItem,
         deleteMediaItem,
+        createMediaFolder,
+        updateMediaFolder,
+        deleteMediaFolder,
+        moveMediaToFolder,
+        refreshMediaFolders,
         toggleAdSlot,
         updateAdSlot,
         searchQuery,

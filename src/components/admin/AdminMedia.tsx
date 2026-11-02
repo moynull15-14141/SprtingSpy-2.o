@@ -3,20 +3,23 @@
  * Upload (validated + processed on the server), search/filter, metadata and
  * copyright review, stored-file details and usage history. Deleting is only
  * possible for unused images; nothing is ever deleted automatically.
+ *
+ * Folder system: images can be organized into folders. Admin and Editor can
+ * create/rename/delete folders and move images between them.
  */
 
 import React, { useMemo, useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import type { CopyrightReview, MediaCreationType, MediaItem } from '../../types';
+import type { CopyrightReview, MediaCreationType, MediaFolder, MediaItem } from '../../types';
 import { Button } from '../ui/Button';
-import { Copyright, Link2, Shapes } from 'lucide-react';
+import { Copyright, FolderPlus, FolderOpen, Link2, Shapes, ChevronRight, Pencil, Trash2, X } from 'lucide-react';
 import { IconFilterMenu } from './IconFilterMenu';
 import { CREATION_TYPES, MediaUploadForm, REVIEW_STATES, ReviewBadge, inputClass, thumbnailUrl } from './media/MediaShared';
 
 const USAGE_LABEL = { featured: 'featured image', body: 'in article body', image: 'image' } as const;
 
 export const AdminMedia: React.FC = () => {
-  const { mediaItems, mediaUsage, currentUser, addMediaItem, updateMediaItem, deleteMediaItem } = useApp();
+  const { mediaItems, mediaUsage, mediaFolders, currentUser, addMediaItem, updateMediaItem, deleteMediaItem, createMediaFolder, updateMediaFolder, deleteMediaFolder, moveMediaToFolder } = useApp();
   const canEdit = currentUser.role === 'Admin' || currentUser.role === 'Editor';
   const canDelete = currentUser.role === 'Admin';
 
@@ -26,10 +29,16 @@ export const AdminMedia: React.FC = () => {
   const [reviewFilter, setReviewFilter] = useState('');
   const [usageFilter, setUsageFilter] = useState<'' | 'used' | 'unused'>('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [activeFolder, setActiveFolder] = useState<string | null>(null); // null = all, '' = unfiled, id = folder
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [moveTarget, setMoveTarget] = useState<string | null>(null);
+  const [showMoveDialog, setShowMoveDialog] = useState(false);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return mediaItems.filter((m) => {
+      if (activeFolder === '') { if (m.folderId) return false; }
+      else if (activeFolder) { if (m.folderId !== activeFolder) return false; }
       const uses = mediaUsage[m.id]?.length || 0;
       if (q && ![m.title, m.altText, m.filename, m.credit, m.source, m.caption].some((v) => v?.toLowerCase().includes(q))) return false;
       if (typeFilter && m.creationType !== typeFilter) return false;
@@ -38,10 +47,31 @@ export const AdminMedia: React.FC = () => {
       if (usageFilter === 'unused' && uses) return false;
       return true;
     });
-  }, [mediaItems, mediaUsage, query, typeFilter, reviewFilter, usageFilter]);
+  }, [mediaItems, mediaUsage, query, typeFilter, reviewFilter, usageFilter, activeFolder]);
 
   const unusedCount = mediaItems.filter((m) => !(mediaUsage[m.id]?.length)).length;
+  const unfiledCount = mediaItems.filter((m) => !m.folderId).length;
   const selected = mediaItems.find((m) => m.id === selectedId) || null;
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const handleMove = async () => {
+    if (!selectedIds.size) return;
+    await moveMediaToFolder([...selectedIds], moveTarget);
+    setSelectedIds(new Set());
+    setShowMoveDialog(false);
+    setMoveTarget(null);
+  };
+
+  // Build folder tree (supports one level of nesting)
+  const rootFolders = mediaFolders.filter((f) => !f.parentId);
+  const childFolders = (parentId: string) => mediaFolders.filter((f) => f.parentId === parentId);
 
   return (
     <div className="space-y-6">
@@ -79,27 +109,96 @@ export const AdminMedia: React.FC = () => {
         </div>
       </div>
 
+      {/* Selection actions bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-2.5 text-xs">
+          <span className="font-semibold text-amber-800 dark:text-amber-300">{selectedIds.size} selected</span>
+          {canEdit && <Button size="sm" onClick={() => { setMoveTarget(null); setShowMoveDialog(true); }}>Move to folder</Button>}
+          <button type="button" onClick={() => setSelectedIds(new Set())} className="ml-auto text-stone-500 hover:text-stone-700 dark:text-stone-400 text-xs font-semibold">Clear selection</button>
+        </div>
+      )}
+
+      {/* Move dialog */}
+      {showMoveDialog && (
+        <div className="rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-[#121417] p-4 space-y-3 text-xs">
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold">Move {selectedIds.size} image(s) to…</h3>
+            <button type="button" onClick={() => setShowMoveDialog(false)} className="text-stone-500 hover:text-stone-700 dark:text-stone-400"><X size={16} /></button>
+          </div>
+          <div className="space-y-1 max-h-48 overflow-y-auto">
+            <button type="button" onClick={() => setMoveTarget(null)}
+              className={`w-full text-left px-3 py-1.5 rounded-lg ${moveTarget === null ? 'bg-amber-100 dark:bg-amber-900/40 font-semibold' : 'hover:bg-stone-50 dark:hover:bg-stone-800'}`}>
+              Unfiled (no folder)
+            </button>
+            {rootFolders.map((f) => (
+              <div key={f.id}>
+                <button type="button" onClick={() => setMoveTarget(f.id)}
+                  className={`w-full text-left px-3 py-1.5 rounded-lg ${moveTarget === f.id ? 'bg-amber-100 dark:bg-amber-900/40 font-semibold' : 'hover:bg-stone-50 dark:hover:bg-stone-800'}`}>
+                  <FolderOpen size={14} className="inline mr-1.5 -mt-0.5" />{f.name}
+                </button>
+                {childFolders(f.id).map((c) => (
+                  <button key={c.id} type="button" onClick={() => setMoveTarget(c.id)}
+                    className={`w-full text-left pl-8 pr-3 py-1.5 rounded-lg ${moveTarget === c.id ? 'bg-amber-100 dark:bg-amber-900/40 font-semibold' : 'hover:bg-stone-50 dark:hover:bg-stone-800'}`}>
+                    {c.name}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="outline" onClick={() => setShowMoveDialog(false)}>Cancel</Button>
+            <Button size="sm" onClick={handleMove}>Move here</Button>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className={`${selected ? 'lg:col-span-7' : 'lg:col-span-12'} grid grid-cols-2 sm:grid-cols-3 ${selected ? '' : 'lg:grid-cols-5'} gap-3 content-start`}>
+        {/* Folder sidebar */}
+        <aside className="lg:col-span-2 space-y-1 text-xs" aria-label="Media folders">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-semibold text-stone-700 dark:text-stone-300 uppercase text-[10px] tracking-wider">Folders</h3>
+            {canEdit && <NewFolderButton onCreate={createMediaFolder} />}
+          </div>
+          <button type="button" onClick={() => { setActiveFolder(null); setSelectedIds(new Set()); }}
+            className={`w-full text-left px-2.5 py-1.5 rounded-lg transition-colors ${activeFolder === null ? 'bg-amber-100 dark:bg-amber-900/40 font-semibold text-amber-900 dark:text-amber-200' : 'hover:bg-stone-50 dark:hover:bg-stone-800 text-stone-700 dark:text-stone-300'}`}>
+            All images <span className="text-stone-400 dark:text-stone-500 ml-1">{mediaItems.length}</span>
+          </button>
+          <button type="button" onClick={() => { setActiveFolder(''); setSelectedIds(new Set()); }}
+            className={`w-full text-left px-2.5 py-1.5 rounded-lg transition-colors ${activeFolder === '' ? 'bg-amber-100 dark:bg-amber-900/40 font-semibold text-amber-900 dark:text-amber-200' : 'hover:bg-stone-50 dark:hover:bg-stone-800 text-stone-700 dark:text-stone-300'}`}>
+            Unfiled <span className="text-stone-400 dark:text-stone-500 ml-1">{unfiledCount}</span>
+          </button>
+          <div className="border-t border-stone-200 dark:border-stone-700 my-2" />
+          {rootFolders.map((f) => (
+            <FolderRow key={f.id} folder={f} depth={0} activeFolder={activeFolder} onSelect={(id) => { setActiveFolder(id); setSelectedIds(new Set()); }}
+              childFolders={childFolders(f.id)} canEdit={canEdit} canDelete={canDelete}
+              onRename={updateMediaFolder} onDelete={deleteMediaFolder} onCreate={createMediaFolder} />
+          ))}
+          {!rootFolders.length && <p className="text-stone-400 dark:text-stone-500 px-2.5 py-2 italic">No folders yet.</p>}
+        </aside>
+
+        {/* Media grid */}
+        <div className={`${selected ? 'lg:col-span-5' : 'lg:col-span-10'} grid grid-cols-2 sm:grid-cols-3 ${selected ? '' : 'lg:grid-cols-5'} gap-3 content-start`}>
           {filtered.map((m) => {
             const uses = mediaUsage[m.id]?.length || 0;
+            const isSelected = selectedIds.has(m.id);
             return (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => setSelectedId(m.id)}
-                className={`text-left rounded-xl border overflow-hidden bg-white dark:bg-[#121417] transition-colors ${selectedId === m.id ? 'border-amber-500 ring-1 ring-amber-500' : 'border-stone-200 dark:border-stone-800 hover:border-amber-400'}`}
-              >
-                <img src={thumbnailUrl(m)} alt={m.altText} className="w-full aspect-video object-cover bg-stone-100 dark:bg-stone-800" loading="lazy" />
-                <div className="p-2.5 space-y-1">
-                  <div className="text-xs font-semibold text-stone-900 dark:text-stone-100 truncate">{m.title}</div>
-                  <div className="flex items-center justify-between gap-1 text-[10px] text-stone-500 dark:text-stone-400">
-                    <span>{m.width && m.height ? `${m.width}×${m.height}` : m.dimensions || '—'}</span>
-                    <span className={uses ? '' : 'text-amber-700 dark:text-amber-400 font-semibold'}>{uses ? `Used ${uses}×` : 'Unused'}</span>
+              <div key={m.id} className={`relative text-left rounded-xl border overflow-hidden bg-white dark:bg-[#121417] transition-colors ${selectedId === m.id ? 'border-amber-500 ring-1 ring-amber-500' : isSelected ? 'border-sky-500 ring-1 ring-sky-500' : 'border-stone-200 dark:border-stone-800 hover:border-amber-400'}`}>
+                {canEdit && (
+                  <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(m.id)}
+                    className="absolute top-2 left-2 z-10 w-4 h-4 accent-amber-600 cursor-pointer rounded" aria-label={`Select ${m.title}`} />
+                )}
+                <button type="button" onClick={() => setSelectedId(m.id)} className="w-full text-left">
+                  <img src={thumbnailUrl(m)} alt={m.altText} className="w-full aspect-video object-cover bg-stone-100 dark:bg-stone-800" loading="lazy" />
+                  <div className="p-2.5 space-y-1">
+                    <div className="text-xs font-semibold text-stone-900 dark:text-stone-100 truncate">{m.title}</div>
+                    <div className="flex items-center justify-between gap-1 text-[10px] text-stone-500 dark:text-stone-400">
+                      <span>{m.width && m.height ? `${m.width}×${m.height}` : m.dimensions || '—'}</span>
+                      <span className={uses ? '' : 'text-amber-700 dark:text-amber-400 font-semibold'}>{uses ? `Used ${uses}×` : 'Unused'}</span>
+                    </div>
+                    <ReviewBadge state={m.copyrightReview} />
                   </div>
-                  <ReviewBadge state={m.copyrightReview} />
-                </div>
-              </button>
+                </button>
+              </div>
             );
           })}
           {!filtered.length && <p className="col-span-full text-xs text-stone-500 py-6 dark:text-stone-400">No media matches these filters.</p>}
@@ -110,10 +209,12 @@ export const AdminMedia: React.FC = () => {
             key={selected.id}
             item={selected}
             usage={mediaUsage[selected.id] || []}
+            folders={mediaFolders}
             canEdit={canEdit}
             canDelete={canDelete}
             onClose={() => setSelectedId(null)}
             onSave={(updates) => updateMediaItem(selected.id, updates)}
+            onMove={(folderId) => moveMediaToFolder([selected.id], folderId)}
             onDelete={async () => {
               if (await deleteMediaItem(selected.id)) setSelectedId(null);
             }}
@@ -124,13 +225,92 @@ export const AdminMedia: React.FC = () => {
   );
 };
 
-function MediaDetail({ item, usage, canEdit, canDelete, onClose, onSave, onDelete }: {
+function FolderRow({ folder, depth, activeFolder, onSelect, childFolders, canEdit, canDelete, onRename, onDelete, onCreate }: {
+  folder: MediaFolder; depth: number; activeFolder: string | null;
+  onSelect: (id: string) => void;
+  childFolders: MediaFolder[];
+  canEdit: boolean; canDelete: boolean;
+  onRename: (id: string, updates: { name?: string }) => Promise<boolean>;
+  onDelete: (id: string) => Promise<boolean>;
+  onCreate: (name: string, parentId?: string | null) => Promise<MediaFolder | null>;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState(folder.name);
+  const isActive = activeFolder === folder.id;
+
+  const handleRename = async () => {
+    if (editName.trim() && editName.trim() !== folder.name) await onRename(folder.id, { name: editName.trim() });
+    setEditing(false);
+  };
+
+  return (
+    <div>
+      <div className={`group flex items-center gap-1 rounded-lg transition-colors ${isActive ? 'bg-amber-100 dark:bg-amber-900/40' : 'hover:bg-stone-50 dark:hover:bg-stone-800'}`}
+        style={{ paddingLeft: `${depth * 16 + 4}px` }}>
+        {childFolders.length > 0 && (
+          <button type="button" onClick={() => setExpanded(!expanded)} className="p-0.5 text-stone-400 dark:text-stone-500">
+            <ChevronRight size={12} className={`transition-transform ${expanded ? 'rotate-90' : ''}`} />
+          </button>
+        )}
+        {!childFolders.length && <span className="w-4" />}
+        {editing ? (
+          <input className={`${inputClass} flex-1 text-xs`} value={editName} onChange={(e) => setEditName(e.target.value)} onBlur={handleRename}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleRename(); if (e.key === 'Escape') setEditing(false); }} autoFocus />
+        ) : (
+          <button type="button" onClick={() => onSelect(folder.id)}
+            className={`flex-1 text-left py-1.5 pr-1 truncate ${isActive ? 'font-semibold text-amber-900 dark:text-amber-200' : 'text-stone-700 dark:text-stone-300'}`}>
+            <FolderOpen size={13} className="inline mr-1 -mt-0.5 text-amber-600 dark:text-amber-500" />
+            {folder.name} <span className="text-stone-400 dark:text-stone-500 ml-0.5">{folder.itemCount}</span>
+          </button>
+        )}
+        {canEdit && !editing && (
+          <span className="hidden group-hover:flex items-center gap-0.5 pr-1">
+            <button type="button" onClick={() => { setEditName(folder.name); setEditing(true); }} className="p-0.5 text-stone-400 hover:text-stone-600 dark:hover:text-stone-300" title="Rename"><Pencil size={11} /></button>
+            {canDelete && <button type="button" onClick={async () => { if (confirm(`Delete folder "${folder.name}"? Images will be moved to unfiled.`)) await onDelete(folder.id); }}
+              className="p-0.5 text-stone-400 hover:text-rose-600 dark:hover:text-rose-400" title="Delete"><Trash2 size={11} /></button>}
+          </span>
+        )}
+      </div>
+      {expanded && childFolders.map((c) => (
+        <FolderRow key={c.id} folder={c} depth={depth + 1} activeFolder={activeFolder} onSelect={onSelect}
+          childFolders={[]} canEdit={canEdit} canDelete={canDelete}
+          onRename={onRename} onDelete={onDelete} onCreate={onCreate} />
+      ))}
+    </div>
+  );
+}
+
+function NewFolderButton({ onCreate }: { onCreate: (name: string, parentId?: string | null) => Promise<MediaFolder | null> }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  if (!open) return (
+    <button type="button" onClick={() => setOpen(true)} className="text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300" title="New folder">
+      <FolderPlus size={15} />
+    </button>
+  );
+  const submit = async () => {
+    if (name.trim()) { await onCreate(name.trim()); setName(''); setOpen(false); }
+  };
+  return (
+    <div className="flex items-center gap-1">
+      <input className={`${inputClass} text-xs w-28`} placeholder="Folder name" value={name} onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') setOpen(false); }} autoFocus maxLength={100} />
+      <Button size="sm" onClick={submit}>Add</Button>
+      <button type="button" onClick={() => setOpen(false)} className="text-stone-400"><X size={14} /></button>
+    </div>
+  );
+}
+
+function MediaDetail({ item, usage, folders, canEdit, canDelete, onClose, onSave, onMove, onDelete }: {
   item: MediaItem;
   usage: { kind: string; id: string; title: string; role: keyof typeof USAGE_LABEL }[];
+  folders: MediaFolder[];
   canEdit: boolean;
   canDelete: boolean;
   onClose: () => void;
   onSave: (updates: Partial<MediaItem>) => Promise<boolean>;
+  onMove: (folderId: string | null) => Promise<boolean>;
   onDelete: () => void;
 }) {
   const [draft, setDraft] = useState({
@@ -147,6 +327,7 @@ function MediaDetail({ item, usage, canEdit, canDelete, onClose, onSave, onDelet
   });
   const set = (key: keyof typeof draft) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setDraft((d) => ({ ...d, [key]: e.target.value }));
   const fmtBytes = (n?: number | null) => (n ? (n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`) : '—');
+  const currentFolder = folders.find((f) => f.id === item.folderId);
 
   return (
     <aside className="lg:col-span-5 rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-[#121417] p-4 space-y-4 text-xs self-start" aria-label="Media details">
@@ -165,6 +346,19 @@ function MediaDetail({ item, usage, canEdit, canDelete, onClose, onSave, onDelet
         <dt className="text-stone-500 dark:text-stone-400">Uploaded</dt><dd>{new Date(item.uploadedAt).toLocaleString('en-GB')}</dd>
         <dt className="text-stone-500 dark:text-stone-400">Updated</dt><dd>{item.updatedAt ? new Date(item.updatedAt).toLocaleString('en-GB') : '—'}</dd>
       </dl>
+
+      {/* Folder */}
+      {canEdit && (
+        <div className="flex items-center gap-2">
+          <span className="text-stone-500 dark:text-stone-400">Folder:</span>
+          <select className={inputClass} value={item.folderId || ''} onChange={(e) => onMove(e.target.value || null)}>
+            <option value="">Unfiled</option>
+            {folders.map((f) => <option key={f.id} value={f.id}>{f.parentId ? '  └ ' : ''}{f.name}</option>)}
+          </select>
+          {currentFolder && <span className="text-stone-400 dark:text-stone-500">({currentFolder.name})</span>}
+        </div>
+      )}
+      {!canEdit && currentFolder && <p className="text-stone-500 dark:text-stone-400">Folder: {currentFolder.name}</p>}
 
       <section aria-label="Usage history">
         <h4 className="font-semibold mb-1">Used in ({usage.length})</h4>
