@@ -85,7 +85,7 @@ export function mentionsDates(text: string): boolean {
   return extractDates(text).length > 0 || new RegExp(`\\b\\d{1,2}(?:st|nd|rd|th)?\\s+${MONTH_RE}\\b|\\b${MONTH_RE}\\s+\\d{1,2}\\b|\\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\\b`, 'i').test(text);
 }
 
-export const TIME_RE = /\b(?:[01]?\d|2[0-3])[:.][0-5]\d\b|\b(?:1[0-2]|0?[1-9])\s?(?:am|pm)\b/i;
+export const TIME_RE = /(?<!\d:)\b(?:[01]?\d|2[0-3]):[0-5]\d\b(?!:\d)|\b(?:1[0-2]|0?[1-9])\s?(?:am|pm)\b/i;
 
 export function containsAny(text: string, terms: string[]): boolean {
   const lower = text.toLowerCase();

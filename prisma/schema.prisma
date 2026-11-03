@@ -328,7 +328,9 @@ model Article {
   content            String
   featuredImage      String
   authorId           String
+  createdAt          DateTime      @default(now())
   publishedAt        DateTime
+  firstPublishedAt   DateTime?
   updatedAt          DateTime?
   scheduledFor       DateTime?
   status             ArticleStatus @default(draft)

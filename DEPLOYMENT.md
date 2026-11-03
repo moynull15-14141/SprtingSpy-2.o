@@ -53,10 +53,19 @@ SportingSpy runs on Render as **one Web Service**: Express and Next.js in one No
 | Region | Singapore (closest to the Aiven Bengaluru database) |
 | Instance | A paid always-on instance (Starter or larger). Free instances sleep when idle, which stops scheduled publishing and analytics retention. If `next build` runs out of memory, use a larger instance. |
 | Build command | `npm ci --include=dev && npm run build` (`build` runs `prisma generate`, the TypeScript check and `next build`; it never touches the database) |
+| Pre-deploy command | `npm run db:migrate:deploy` (Render runs reviewed Prisma migrations after the build and before the new service version receives traffic) |
 | Start command | `npm run start:production` |
 | Health check path | `/api/health/ready` |
 | Node version | 22 (from `engines`; set `NODE_VERSION=22` if Render picks another) |
 | Auto-deploy | Off until staging is accepted; deploy from a reviewed commit |
+
+The repository root [`render.yaml`](./render.yaml) declares the same service settings and
+the pre-deploy migration command. Link/sync the existing Render service to this Blueprint
+before enabling automatic deploys; no secrets or database values are stored in the file.
+If the current Render plan or service is not managed by a Blueprint pre-deploy command,
+keep auto-deploy disabled and run `npm run db:migrate:deploy` as a reviewed Render one-off
+job before deploying instead. Do not move the migration into the build or start command,
+and do not treat a Git push alone as proof that the migration or deployment succeeded.
 
 `--include=dev` is required because the build and runtime use `tsx`, `typescript` and `prisma`, which are dev dependencies. Render's filesystem is temporary, so local media storage cannot be used; set `MEDIA_STORAGE_PROVIDER=r2`.
 
@@ -86,7 +95,7 @@ SportingSpy runs on Render as **one Web Service**: Express and Next.js in one No
 
 Do not set `SHADOW_DATABASE_URL`, `DEV_BYPASS_USER_ID` or `SHOW_AD_PLACEHOLDERS`.
 
-**Database:** the schema and content are already on Aiven. For later releases with new migrations, back up first, then run `npm run db:migrate:deploy` from a trusted machine (or a Render one-off job) against the Aiven URL. Never run migrations in the build or start command.
+**Database:** the schema and content are already on Aiven. For later releases with new migrations, back up first. On the Blueprint-managed Render service, the reviewed `preDeployCommand` runs `npm run db:migrate:deploy` against the configured Aiven URL before the new version starts. If the service is not Blueprint-managed, run the same command from a trusted machine or a Render one-off job before deployment. Never run migrations in the build or start command.
 
 **Media:** existing local uploads were copied to R2 under the same keys and checked byte for byte (`npm run media:copy-to-r2`; the manifest is in `backups/`). Database rows keep working without changes. When local storage is not configured, old `/media/<key>` URLs redirect (301) to `MEDIA_PUBLIC_BASE_URL`.
 

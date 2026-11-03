@@ -116,7 +116,7 @@ const USER_AUDIT_FIELDS = ['name', 'email', 'role', 'status', 'avatar'] as const
 const AUTHOR_AUDIT_FIELDS = ['slug', 'name', 'roleTitle', 'bio', 'avatar', 'twitter', 'email', 'userId'] as const;
 const COMMENT_AUDIT_FIELDS = ['articleId', 'userId', 'userName', 'content', 'status'] as const;
 const AD_AUDIT_FIELDS = ['name', 'placementDescription', 'enabled', 'provider', 'providerSlotId', 'sponsorName', 'bannerText', 'linkUrl', 'dimensions', 'creativeId', 'creativeAlt', 'creativeFit'] as const;
-const ARTICLE_AUDIT_FIELDS = ['title', 'subtitle', 'slug', 'sportSlug', 'disciplineSlug', 'eventSlug', 'editionYear', 'articleType', 'excerpt', 'content', 'featuredImage', 'featuredMediaId', 'authorId', 'status', 'scheduledFor', 'publishedAt', 'featured', 'tables', 'references', 'seo', 'faqSchemaEnabled'] as const;
+const ARTICLE_AUDIT_FIELDS = ['title', 'subtitle', 'slug', 'sportSlug', 'disciplineSlug', 'eventSlug', 'editionYear', 'articleType', 'excerpt', 'content', 'featuredImage', 'featuredMediaId', 'authorId', 'status', 'scheduledFor', 'publishedAt', 'firstPublishedAt', 'updatedAt', 'featured', 'tables', 'references', 'seo', 'faqSchemaEnabled'] as const;
 
 /** Alternative event names: one per line, trimmed, de-duplicated, at most 20. */
 function normalizeAlternativeNames(value: unknown): string {
@@ -228,7 +228,7 @@ async function publishScheduledArticles(): Promise<number> {
       result = await prisma.article.updateMany({
         where: { id: art.id, status: 'scheduled', scheduledFor: art.scheduledFor },
         // PHASE D: publishing is not a content change, so updatedAt is left alone.
-        data: { status: 'published', publishedAt: art.scheduledFor || now },
+        data: { status: 'published', publishedAt: art.scheduledFor || now, ...(art.firstPublishedAt ? {} : { firstPublishedAt: art.scheduledFor || now }) },
       });
     } finally {
       endWrite();
@@ -846,7 +846,8 @@ async function startServer() {
           featuredImage: body.featuredImage || 'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?auto=format&fit=crop&w=1200&q=80',
           authorId,
           publishedAt: body.publishedAt ? new Date(body.publishedAt) : now,
-          updatedAt: now,
+          firstPublishedAt: body.status === 'published' ? (body.publishedAt ? new Date(body.publishedAt) : now) : undefined,
+          updatedAt: null,
           scheduledFor,
           status: body.status || 'draft',
           reviewStatus: review.reviewStatus,
@@ -991,9 +992,16 @@ async function startServer() {
       // jsonb does not keep key order, so compare with sorted keys.
       const stable = (v: unknown): string => (Array.isArray(v) ? `[${v.map(stable).join(',')}]` : v && typeof v === 'object' ? `{${Object.keys(v).sort().map((k) => JSON.stringify(k) + ':' + stable((v as Record<string, unknown>)[k])).join(',')}}` : JSON.stringify(v ?? null));
       const contentChanged = CONTENT_FIELDS.some((f) => f in data && stable(data[f]) !== stable((existing as Record<string, unknown>)[f]));
-      if (contentChanged) data.updatedAt = new Date();
+      if ('updatedAt' in updates) data.updatedAt = updates.updatedAt ? new Date(updates.updatedAt) : null;
+      else if (contentChanged) data.updatedAt = new Date();
       if ('publishedAt' in updates) data.publishedAt = updates.publishedAt ? new Date(updates.publishedAt) : existing.publishedAt;
-      else if (data.status === 'published' && existing.status !== 'published') data.publishedAt = new Date(); // first publication
+      else if (data.status === 'published' && existing.status !== 'published') {
+        if (!existing.firstPublishedAt) data.publishedAt = new Date();
+      }
+      if ('firstPublishedAt' in updates) data.firstPublishedAt = updates.firstPublishedAt ? new Date(updates.firstPublishedAt) : existing.firstPublishedAt;
+      else if (data.status === 'published' && existing.status !== 'published' && !existing.firstPublishedAt) {
+        data.firstPublishedAt = data.publishedAt ?? existing.publishedAt;
+      }
       if (nextScheduledFor !== undefined) data.scheduledFor = nextScheduledFor;
       else delete data.scheduledFor;
       if ('eventSlug' in updates) data.eventSlug = updates.eventSlug ?? null;

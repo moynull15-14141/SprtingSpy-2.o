@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: sprtingspy-2-o
+    runtime: node
+    buildCommand: npm ci --include=dev && npm run build
+    preDeployCommand: npm run db:migrate:deploy
+    startCommand: npm run start:production
+    healthCheckPath: /api/health/ready
+    autoDeploy: false

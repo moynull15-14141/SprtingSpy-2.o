@@ -245,7 +245,9 @@ export interface Article extends ArticleReviewFields {
   content: string; // rich markdown / structured editorial HTML
   featuredImage: string;
   authorId: string;
+  createdAt?: string;
   publishedAt: string; // ISO date
+  firstPublishedAt?: string;
   updatedAt?: string;
   /** Last explicit editorial freshness review; does not pretend content changed. */
   reviewedAt?: string;

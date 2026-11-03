@@ -57,7 +57,7 @@ export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] 
     });
   breadcrumbItems.push({ label: article.title });
 
-  const formattedDate = new Date(article.publishedAt).toLocaleDateString('en-GB', {
+  const formattedDate = new Date(article.firstPublishedAt || article.publishedAt).toLocaleDateString('en-GB', {
     day: 'numeric',
     month: 'long',
     year: 'numeric',
@@ -84,7 +84,7 @@ export const ArticlePage: React.FC<{ data: ArticlePageData; comments: Comment[] 
     description: article.excerpt,
     mainEntityOfPage: canonicalUrl,
     url: canonicalUrl,
-    datePublished: article.publishedAt,
+    datePublished: article.firstPublishedAt || article.publishedAt,
     dateModified: article.updatedAt || article.publishedAt,
     author: author
       ? {

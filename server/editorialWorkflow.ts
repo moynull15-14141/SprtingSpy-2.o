@@ -7,7 +7,7 @@ import type { Prisma, Article } from './generated/prisma/client';
 
 export class WorkflowError extends Error { constructor(public status: number, message: string) { super(message); this.name = 'WorkflowError'; } }
 const fail = (status: number, message: string): never => { throw new WorkflowError(status, message); };
-const writeFields = new Set(['title','subtitle','slug','sportSlug','eventSlug','editionYear','articleType','excerpt','content','body','featuredImage','featuredMediaId','authorId','publishedAt','readingTimeMinutes','featured','tables','references','seo','status','scheduledFor','faqSchemaEnabled','disciplineSlug']);
+const writeFields = new Set(['title','subtitle','slug','sportSlug','eventSlug','editionYear','articleType','excerpt','content','body','featuredImage','featuredMediaId','authorId','publishedAt','firstPublishedAt','updatedAt','readingTimeMinutes','featured','tables','references','seo','status','scheduledFor','faqSchemaEnabled','disciplineSlug']);
 const protectedFields = new Set(['reviewStatus','reviewerId','reviewComment','reviewSubmittedAt','reviewDecidedAt','reviewVersion']);
 export function checkArticlePayload(body: unknown, creating = false) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, 'Article payload must be an object.');
@@ -34,7 +34,7 @@ export async function authorWriteGuard(ctx: AuthContext, body: Record<string, an
   if (existing && existing.authorId !== profile.id) fail(403, 'Authors can only manage their own articles.');
   if ('authorId' in body && body.authorId !== profile.id) fail(403, 'Your article byline must use your own Author profile.');
   const status = body.status ?? existing?.status ?? 'draft';
-  if (!['draft','preview'].includes(status) || body.scheduledFor != null || 'publishedAt' in body) fail(403, 'Authors cannot publish, schedule, approve or archive articles. Submit your draft for review.');
+  if (!['draft','preview'].includes(status) || body.scheduledFor != null || 'publishedAt' in body || 'firstPublishedAt' in body || 'updatedAt' in body) fail(403, 'Authors cannot publish, schedule, approve or archive articles. Submit your draft for review.');
   if (existing && ['published','scheduled','archived'].includes(existing.status)) fail(409, 'Ask an Admin or Editor to return this article to draft before editing.');
   if (existing?.reviewStatus === 'in_review') fail(409, 'This article is awaiting review. It can be edited after changes are requested.');
   return profile.id;

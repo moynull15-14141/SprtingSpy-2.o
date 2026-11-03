@@ -18,7 +18,7 @@ export function articleMetadata({ article, sport, author, featuredImage }: Artic
     imageAlt: featuredImage?.alt,
     openGraph: {
       type: 'article',
-      publishedTime: article.publishedAt,
+      publishedTime: article.firstPublishedAt || article.publishedAt,
       modifiedTime: article.updatedAt || article.publishedAt,
       section: sport.name,
       ...(author ? { authors: [author.name] } : {}),

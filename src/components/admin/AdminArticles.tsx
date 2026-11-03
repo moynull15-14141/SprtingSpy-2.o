@@ -175,6 +175,8 @@ export const AdminArticles: React.FC = () => {
   const [status, setStatus] = useState<'draft' | 'preview' | 'scheduled' | 'published' | 'archived'>('draft');
   // PHASE H: scheduled publication time as typed (editor's local time zone) and source references.
   const [scheduledLocal, setScheduledLocal] = useState('');
+  const [pubDateLocal, setPubDateLocal] = useState('');
+  const [modDateLocal, setModDateLocal] = useState('');
   const [references, setReferences] = useState<Reference[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -263,6 +265,8 @@ export const AdminArticles: React.FC = () => {
     setOtherSeo({});
     setStatus('draft');
     setScheduledLocal('');
+    setPubDateLocal('');
+    setModDateLocal('');
     setReferences([]);
     setFaqSchemaEnabled(false);
     setDisciplineSlug('');
@@ -360,6 +364,7 @@ export const AdminArticles: React.FC = () => {
     excerpt, body: bodyDoc, featuredMediaId, featuredImage, authorId,
     seo: { ...otherSeo, metaTitle: metaTitle || title, metaDescription: metaDescription || excerpt, ogTitle, ogDescription, ogImage },
     references: cleanReferences(),
+    publishedAt: pubDateLocal ? new Date(pubDateLocal).toISOString() : editingArticle?.publishedAt ?? null,
   });
 
   /** References with both fields filled (empty rows are ignored). */
@@ -456,6 +461,10 @@ export const AdminArticles: React.FC = () => {
       status: statusOverride,
       // PHASE H: an unambiguous UTC instant; any other status clears the schedule on the server.
       scheduledFor: statusOverride === 'scheduled' ? new Date(scheduledLocal).toISOString() : null,
+      ...(editingArticle && !isAuthor && pubDateLocal && toLocalInput(editingArticle.firstPublishedAt || editingArticle.publishedAt) !== pubDateLocal
+        ? { firstPublishedAt: new Date(pubDateLocal).toISOString() } : {}),
+      ...(editingArticle && !isAuthor && modDateLocal !== (editingArticle.updatedAt ? toLocalInput(editingArticle.updatedAt) : '')
+        ? { updatedAt: modDateLocal ? new Date(modDateLocal).toISOString() : null } : {}),
       references: refs,
       faqSchemaEnabled,
       seo: {
@@ -649,6 +658,8 @@ export const AdminArticles: React.FC = () => {
     setOtherSeo(rest);
     setStatus(art.status);
     setScheduledLocal(art.status === 'scheduled' ? toLocalInput(art.scheduledFor) : '');
+    setPubDateLocal(toLocalInput(art.firstPublishedAt || art.publishedAt));
+    setModDateLocal(art.updatedAt ? toLocalInput(art.updatedAt) : '');
     setReferences(art.references ?? []);
     setFormError(null);
   };
@@ -1291,6 +1302,27 @@ export const AdminArticles: React.FC = () => {
                 <p>Currently scheduled for <strong>{formatWhen(new Date(editingArticle.scheduledFor))}</strong>.</p>
                 <Button type="button" size="sm" variant="outline" className="mt-2 w-full" disabled={saving} onClick={() => saveAs('draft', { confirmed: true })}>Cancel schedule (keep as draft)</Button>
               </div>
+            )}
+
+            {!isAuthor && editingArticle && (
+              <details className="rounded-lg border border-stone-200 dark:border-stone-700">
+                <summary className="cursor-pointer p-3 text-[11px] font-semibold text-stone-700 dark:text-stone-200">Editorial dates</summary>
+                <div className="space-y-3 border-t border-stone-200 p-3 dark:border-stone-700">
+                  <label className="block text-[11px] text-stone-700 dark:text-stone-200">
+                    Publication date
+                    <input type="datetime-local" value={pubDateLocal} onChange={(e) => setPubDateLocal(e.target.value)}
+                      className="mt-1 w-full rounded border border-stone-300 bg-white p-2 text-xs dark:border-stone-700 dark:bg-stone-900" />
+                    <span className="text-[10px] text-stone-500 dark:text-stone-400">The date shown publicly and in search engines.</span>
+                  </label>
+                  <label className="block text-[11px] text-stone-700 dark:text-stone-200">
+                    Last modified date
+                    <input type="datetime-local" value={modDateLocal} onChange={(e) => setModDateLocal(e.target.value)}
+                      className="mt-1 w-full rounded border border-stone-300 bg-white p-2 text-xs dark:border-stone-700 dark:bg-stone-900" />
+                    <span className="text-[10px] text-stone-500 dark:text-stone-400">Leave empty to hide the Updated label. Content edits advance this automatically.</span>
+                  </label>
+                  {modDateLocal && <button type="button" className="text-[10px] text-stone-500 hover:text-amber-600 dark:text-stone-400" onClick={() => setModDateLocal('')}>Clear modification date</button>}
+                </div>
+              </details>
             )}
 
             <div className="flex flex-wrap items-center justify-between gap-2">

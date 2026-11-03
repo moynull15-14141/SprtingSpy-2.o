@@ -89,14 +89,17 @@ function toEdition(row: Prisma.EventEditionGetPayload<object>): EventEdition {
 function toArticle(row: ArticleRow): Article {
   const { body: _body, featuredMediaId: _featuredMediaId, reviewedAt: _reviewedAt,
     reviewStatus: _reviewStatus, reviewerId: _reviewerId, reviewComment: _reviewComment,
-    reviewSubmittedAt: _reviewSubmittedAt, reviewDecidedAt: _reviewDecidedAt, reviewVersion: _reviewVersion, ...rest } = row;
+    reviewSubmittedAt: _reviewSubmittedAt, reviewDecidedAt: _reviewDecidedAt, reviewVersion: _reviewVersion,
+    createdAt: _createdAt, firstPublishedAt: _firstPublishedAt, ...rest } = row;
   return {
     ...rest,
     subtitle: row.subtitle || undefined,
     eventSlug: row.eventSlug ?? undefined,
     editionYear: row.editionYear ?? undefined,
     articleType: row.articleType as Article['articleType'],
+    createdAt: row.createdAt.toISOString(),
     publishedAt: row.publishedAt.toISOString(),
+    firstPublishedAt: iso(row.firstPublishedAt) ?? row.publishedAt.toISOString(),
     updatedAt: iso(row.updatedAt),
     reviewedAt: iso(row.reviewedAt),
     scheduledFor: iso(row.scheduledFor),
