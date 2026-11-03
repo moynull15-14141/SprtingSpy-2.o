@@ -66,6 +66,7 @@ If the current Render plan or service is not managed by a Blueprint pre-deploy c
 keep auto-deploy disabled and run `npm run db:migrate:deploy` as a reviewed Render one-off
 job before deploying instead. Do not move the migration into the build or start command,
 and do not treat a Git push alone as proof that the migration or deployment succeeded.
+Render must keep the previous version serving when this pre-deploy command exits non-zero.
 
 `--include=dev` is required because the build and runtime use `tsx`, `typescript` and `prisma`, which are dev dependencies. Render's filesystem is temporary, so local media storage cannot be used; set `MEDIA_STORAGE_PROVIDER=r2`.
 
