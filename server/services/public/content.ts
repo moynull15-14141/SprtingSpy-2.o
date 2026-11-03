@@ -97,7 +97,9 @@ function toArticle(row: ArticleRow): Article {
     eventSlug: row.eventSlug ?? undefined,
     editionYear: row.editionYear ?? undefined,
     articleType: row.articleType as Article['articleType'],
-    createdAt: row.createdAt.toISOString(),
+    // Keep public rendering resilient while older/partial rows are being
+    // migrated; publishedAt is the closest safe historical creation date.
+    createdAt: row.createdAt?.toISOString() ?? row.publishedAt.toISOString(),
     publishedAt: row.publishedAt.toISOString(),
     firstPublishedAt: iso(row.firstPublishedAt) ?? row.publishedAt.toISOString(),
     updatedAt: iso(row.updatedAt),
@@ -167,7 +169,7 @@ export const editionTimingOrder = (timing: EditionTiming): Prisma.EventEditionOr
 // Everything except the (potentially large) body, tables and references.
 const summarySelect = {
   id: true, slug: true, title: true, subtitle: true, sportSlug: true, eventSlug: true, editionYear: true,
-  articleType: true, excerpt: true, featuredImage: true, authorId: true, publishedAt: true, updatedAt: true,
+  articleType: true, excerpt: true, featuredImage: true, authorId: true, createdAt: true, publishedAt: true, firstPublishedAt: true, updatedAt: true,
   scheduledFor: true, status: true, readingTimeMinutes: true, featured: true, seo: true, featuredMediaId: true,
 } satisfies Prisma.ArticleSelect;
 
