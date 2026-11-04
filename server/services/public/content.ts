@@ -21,6 +21,7 @@ import { utcToday, type EditionTiming } from '../../../src/lib/eventTiming';
 // Loaded lazily so importing this module (e.g. while Next.js collects page
 // data at build time) never opens a database connection by itself.
 const db = async () => (await import('../../db')).prisma;
+const RELATED_EVENT_LIMIT = 3;
 
 export type ArticleSummary = Omit<Article, 'content' | 'tables' | 'references'> & {
   url: string;
@@ -50,6 +51,22 @@ export function iconImageFrom(iconMedia?: { url: string; variants: unknown } | n
   const variants = Array.isArray(iconMedia.variants) ? (iconMedia.variants as MediaVariant[]) : [];
   const small = variants.filter((v) => v.format === 'webp').sort((a, b) => a.width - b.width)[0];
   return small ? mediaUrl(small.key) : iconMedia.url;
+}
+
+export function selectRelatedEventRows<T extends { id: string }>(
+  priorityRows: T[],
+  fallbackRows: T[],
+  limit: number = RELATED_EVENT_LIMIT,
+): T[] {
+  const selected: T[] = [];
+  const seen = new Set<string>();
+  for (const row of [...priorityRows, ...fallbackRows]) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    selected.push(row);
+    if (selected.length >= limit) break;
+  }
+  return selected;
 }
 
 type SportRow = Prisma.SportGetPayload<object> & { iconMedia?: { url: string; variants: unknown } | null };
@@ -536,12 +553,36 @@ export async function getEventPage(sportSlug: string, eventSlug: string) {
   if (!found) return null;
   const prisma = await db();
   const evergreen = await evergreenTypes();
+  const relatedRowsPromise = (async () => {
+    const baseWhere = { sportSlug, slug: { not: eventSlug } };
+    if (found.event.disciplineSlug === null) {
+      return prisma.sportEvent.findMany({
+        where: visibleEventWhere(baseWhere),
+        orderBy: [{ featured: 'desc' }, { name: 'asc' }, { id: 'asc' }],
+        take: RELATED_EVENT_LIMIT,
+      });
+    }
+
+    const priorityRows = await prisma.sportEvent.findMany({
+      where: visibleEventWhere({ ...baseWhere, disciplineSlug: found.event.disciplineSlug }),
+      orderBy: [{ featured: 'desc' }, { name: 'asc' }, { id: 'asc' }],
+      take: RELATED_EVENT_LIMIT,
+    });
+    if (priorityRows.length >= RELATED_EVENT_LIMIT) return priorityRows;
+
+    const fallbackRows = await prisma.sportEvent.findMany({
+      where: visibleEventWhere({ ...baseWhere, id: { notIn: priorityRows.map((row) => row.id) } }),
+      orderBy: [{ featured: 'desc' }, { name: 'asc' }, { id: 'asc' }],
+      take: RELATED_EVENT_LIMIT - priorityRows.length,
+    });
+    return selectRelatedEventRows(priorityRows, fallbackRows);
+  })();
   const [editionRows, editionTotal, articles, articleTotal, relatedRows, faqs] = await Promise.all([
     prisma.eventEdition.findMany({ where: { sportSlug, eventSlug }, orderBy: { year: 'desc' }, take: HUB_LIMITS.eventEditions }),
     prisma.eventEdition.count({ where: { sportSlug, eventSlug } }),
     listArticles({ sportSlug, eventSlug }, { take: HUB_LIMITS.editionLatest }),
     countArticles({ sportSlug, eventSlug }),
-    prisma.sportEvent.findMany({ where: visibleEventWhere({ sportSlug, slug: { not: eventSlug } }), orderBy: [{ featured: 'desc' }, { name: 'asc' }], take: 3 }),
+    relatedRowsPromise,
     // Published, editor-approved questions scoped to this Event (v2.2: no automatic FAQ).
     prisma.faqEntry.findMany({ where: { eventId: found.event.id, status: 'published' }, orderBy: faqOrder, select: faqSelect }),
   ]);
